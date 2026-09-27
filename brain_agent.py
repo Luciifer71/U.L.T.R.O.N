@@ -1,3 +1,12 @@
+"""ULTRON Brain Agent — canonical production runtime.
+
+Single active brain process. Visual state is published through the shared
+ULTRON NATS event bus, while reasoning/execution remains in the core.
+
+This revision adds a typed action lifecycle so EXECUTING represents real
+action dispatch/completion rather than an instantaneous Popen call.
+"""
+
 import asyncio
 import json
 import os
@@ -8,11 +17,16 @@ import urllib.parse
 import webbrowser
 import re   
 import difflib
+import uuid
+from dataclasses import dataclass
+from typing import Any, Callable, Literal
 
 import keyboard
 from nats.aio.client import Client as NATS
 from ollama import AsyncClient
 import psutil
+
+from visual_events import publish_visual_event
 
 from memory_db import (
     init_memory_db,
@@ -34,8 +48,41 @@ try:
 except ImportError:
     DDGS = None
 
-NATS_URL = os.getenv("NATS_URL", "nats://localhost:4222")
-MODEL_NAME = os.getenv("LLM_MODEL", "qwen2.5:7b")
+NATS_URL = os.getenv(
+    "NATS_URL",
+    "nats://127.0.0.1:4222",
+)
+
+OLLAMA_HOST = os.getenv(
+    "OLLAMA_HOST",
+    "http://127.0.0.1:11434",
+)
+
+MODEL_NAME = os.getenv(
+    "LLM_MODEL",
+    "qwen2.5:7b",
+)
+
+# =========================================================
+# ACTION EXECUTION LIFECYCLE
+# =========================================================
+
+EXECUTION_MIN_HOLD_SEC = float(
+    os.getenv("ULTRON_EXECUTION_MIN_HOLD_SEC", "0.65")
+)
+EXECUTION_ACTION_ACK_SEC = float(
+    os.getenv("ULTRON_EXECUTION_ACTION_ACK_SEC", "0.15")
+)
+
+
+@dataclass(slots=True)
+class PendingAction:
+    """A typed action with an explicit completion policy."""
+
+    name: str
+    execute: Callable[[], Any]
+    completion: Literal["dispatch", "wait"] = "dispatch"
+
 
 # --- ALL AGENTIC TOOLS DEFINITION ---
 TOOLS = [
@@ -85,23 +132,7 @@ TOOLS = [
         }
     },
 
-{
-        "type": "function",
-        "function": {
-            "name": "query_knowledge_base",
-            "description": "Search Ultron's persistent vector knowledge base for custom documents, notes, project specs, or code snippet references.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "The specific topic or factual query to search across ingested files."
-                    }
-                },
-                "required": ["query"]
-            }
-        }
-    },
+
 {
         "type": "function",
         "function": {
@@ -420,7 +451,37 @@ def resolve_script_filename(requested_name: str, base_dir: str = ".") -> str | N
         return matches[0]
 
     return None
+
+
 class UltronBrain:
+    """Core ULTRON reasoning/orchestration engine."""
+
+    def __init__(self, nc: NATS):
+        self.nc = nc
+        self.client = AsyncClient(
+            host=OLLAMA_HOST,
+        )
+        self.task_lock = asyncio.Lock()
+        self.current_task_id: str | None = None
+        self.refresh_system_prompt()
+
+    async def _publish_visual(
+        self,
+        mode: str,
+        *,
+        task_id: str | None = None,
+    ) -> None:
+        """Publish visual state without allowing the visual bus to break the brain."""
+        try:
+            await publish_visual_event(
+                self.nc,
+                mode,  # type: ignore[arg-type]
+                source="brain_agent",
+                task_id=task_id or self.current_task_id,
+            )
+        except Exception as exc:
+            print(f"[VISUAL EVENT WARNING]: Failed to publish {mode.upper()} state: {exc}")
+
     def refresh_system_prompt(self):
         facts = get_all_facts()
         facts_summary = ""
@@ -439,7 +500,76 @@ CRITICAL RULES:
 
         self.history = [{"role": "system", "content": self.system_prompt}]
 
-    async def process_intent(self, prompt: str) -> tuple[str, list]:
+    async def _run_pending_actions(
+        self,
+        actions: list[PendingAction],
+        task_id: str,
+    ) -> tuple[bool, str | None]:
+        """Run staged actions with an explicit execution lifecycle.
+
+        EXECUTING begins before the first action starts and remains active
+        until every staged action has been dispatched/verified according to
+        its completion policy. A minimum visual hold makes very fast GUI
+        actions perceptible without pretending the system is still executing
+        after the action lifecycle has actually completed.
+        """
+
+        if not actions:
+            return True, None
+
+        execution_started = asyncio.get_running_loop().time()
+        await self._publish_visual("executing", task_id=task_id)
+
+        for action in actions:
+            try:
+                print(
+                    f"[ACTION START] [task={task_id}] "
+                    f"{action.name}"
+                )
+
+                result = await asyncio.to_thread(action.execute)
+
+                if action.completion == "wait" and isinstance(result, subprocess.Popen):
+                    return_code = await asyncio.to_thread(result.wait)
+                    if return_code != 0:
+                        raise RuntimeError(
+                            f"Action '{action.name}' exited with code {return_code}."
+                        )
+                elif isinstance(result, subprocess.Popen):
+                    await asyncio.sleep(EXECUTION_ACTION_ACK_SEC)
+                    if result.poll() not in (None, 0):
+                        raise RuntimeError(
+                            f"Action '{action.name}' exited with code {result.returncode}."
+                        )
+
+                print(
+                    f"[ACTION COMPLETE] [task={task_id}] "
+                    f"{action.name}"
+                )
+
+            except Exception as exc:
+                print(
+                    f"[ACTION FAILED] [task={task_id}] "
+                    f"{action.name}: {exc}"
+                )
+                await self._publish_visual("alert", task_id=task_id)
+                return False, str(exc)
+
+        elapsed = asyncio.get_running_loop().time() - execution_started
+        remaining = EXECUTION_MIN_HOLD_SEC - elapsed
+
+        if remaining > 0:
+            await asyncio.sleep(remaining)
+
+        return True, None
+
+    async def process_intent(
+        self,
+        prompt: str,
+        task_id: str,
+    ) -> tuple[str, list]:
+        self.current_task_id = task_id
+        await self._publish_visual("thinking", task_id=task_id)
         self.history.append({"role": "user", "content": prompt})
         # Increased num_predict from 45 to 150 so token generation isn't cut off when returning multiple tools
         fast_options = {"num_predict": 150, "temperature": 0.2}
@@ -453,6 +583,7 @@ CRITICAL RULES:
             )
         except Exception as e:
             print(f"[BRAIN ERROR]: LLM inference failed: {e}")
+            await self._publish_visual("alert", task_id=task_id)
             return "An anomaly occurred within my core processing.", []
 
         # Safely extract message content/tool calls regardless of dict or object structure
@@ -494,7 +625,7 @@ CRITICAL RULES:
             ).strip()
             message["content"] = content_text
 
-        pending_actions = []
+        pending_actions: list[PendingAction] = []
 
         if tool_calls:
             self.history.append(message)
@@ -535,8 +666,12 @@ CRITICAL RULES:
                     if actual_file and os.path.exists(actual_file):
                         cmd = f"py .\\{actual_file} {extra_args}".strip()
                         pending_actions.append(
-            lambda c=cmd: subprocess.Popen(c, shell=True)
-        )
+                            PendingAction(
+                                name=f"run_python_script:{actual_file}",
+                                execute=lambda c=cmd: subprocess.Popen(c, shell=True),
+                                completion="wait",
+                            )
+                        )
                         res = f"Executing script '{actual_file}'."
                     else:
                         res = f"Script '{raw_path}' could not be resolved to any file in project directory."
@@ -551,7 +686,10 @@ CRITICAL RULES:
                     target_key = key_map.get(action)
                     if target_key:
                         pending_actions.append(
-                            lambda k=target_key: keyboard.send(k)
+                            PendingAction(
+                                name=f"control_media:{action}",
+                                execute=lambda k=target_key: keyboard.send(k),
+                            )
                         )
                         res = f"Media action '{action}' staged."
                     else:
@@ -561,7 +699,10 @@ CRITICAL RULES:
                     app_name = str(args.get("app_name", "")).lower().strip()
                     command = APP_MAP.get(app_name, app_name)
                     pending_actions.append(
-                        lambda cmd=command: subprocess.Popen(cmd, shell=True)
+                        PendingAction(
+                            name=f"open_application:{app_name}",
+                            execute=lambda cmd=command: subprocess.Popen(cmd, shell=True),
+                        )
                     )
                     res = f"Application '{app_name}' staged for launch."
 
@@ -588,8 +729,11 @@ CRITICAL RULES:
                     # Queue the launcher action as many times as requested
                     for _ in range(count):
                         pending_actions.append(
-                            lambda u=url: subprocess.Popen(
-                                f"start {u}", shell=True
+                            PendingAction(
+                                name=f"open_website:{url}",
+                                execute=lambda u=url: subprocess.Popen(
+                                    f"start {u}", shell=True
+                                ),
                             )
                         )
 
@@ -599,22 +743,37 @@ CRITICAL RULES:
                     protocol = args.get("protocol")
                     if protocol == "dev_mode":
                         pending_actions.append(
-                            lambda: subprocess.Popen("code", shell=True)
+                            PendingAction(
+                                name="activate_protocol:dev_mode:ide",
+                                execute=lambda: subprocess.Popen("code", shell=True),
+                            )
                         )
                         pending_actions.append(
-                            lambda: subprocess.Popen("start wt", shell=True)
+                            PendingAction(
+                                name="activate_protocol:dev_mode:terminal",
+                                execute=lambda: subprocess.Popen("start wt", shell=True),
+                            )
                         )
                         pending_actions.append(
-                            lambda: webbrowser.open("https://github.com")
+                            PendingAction(
+                                name="activate_protocol:dev_mode:github",
+                                execute=lambda: webbrowser.open("https://github.com"),
+                            )
                         )
                         res = "Dev protocol initiated. IDE, terminal, and repository staged."
                     elif protocol == "stealth_mode":
                         pending_actions.append(
-                            lambda: keyboard.send("volume mute")
+                            PendingAction(
+                                name="activate_protocol:stealth_mode:mute",
+                                execute=lambda: keyboard.send("volume mute"),
+                            )
                         )
                         pending_actions.append(
-                            lambda: subprocess.Popen(
-                                "taskkill /F /IM chrome.exe", shell=True
+                            PendingAction(
+                                name="activate_protocol:stealth_mode:chrome",
+                                execute=lambda: subprocess.Popen(
+                                    "taskkill /F /IM chrome.exe", shell=True
+                                ),
                             )
                         )
                         res = "Stealth protocol active. Audio muted and browser instances terminated."
@@ -630,7 +789,10 @@ CRITICAL RULES:
                     )
                     cmd = f"taskkill /F /IM {proc}.exe"
                     pending_actions.append(
-                        lambda c=cmd: subprocess.Popen(c, shell=True)
+                        PendingAction(
+                            name=f"terminate_process:{proc}",
+                            execute=lambda c=cmd: subprocess.Popen(c, shell=True),
+                        )
                     )
                     res = (
                         f"Termination signal dispatched for process '{proc}'."
@@ -654,17 +816,23 @@ CRITICAL RULES:
                     cmd_type = args.get("command")
                     if cmd_type == "lock":
                         pending_actions.append(
-                            lambda: subprocess.Popen(
-                                "rundll32.exe user32.dll,LockWorkStation",
-                                shell=True,
+                            PendingAction(
+                                name="system_power_control:lock",
+                                execute=lambda: subprocess.Popen(
+                                    "rundll32.exe user32.dll,LockWorkStation",
+                                    shell=True,
+                                ),
                             )
                         )
                         res = "Workstation locked."
                     elif cmd_type == "sleep":
                         pending_actions.append(
-                            lambda: subprocess.Popen(
-                                "rundll32.exe powrprof.dll,SetSuspendState 0,1,0",
-                                shell=True,
+                            PendingAction(
+                                name="system_power_control:sleep",
+                                execute=lambda: subprocess.Popen(
+                                    "rundll32.exe powrprof.dll,SetSuspendState 0,1,0",
+                                    shell=True,
+                                ),
                             )
                         )
                         res = "System entering sleep mode."
@@ -694,7 +862,13 @@ CRITICAL RULES:
                                     except Exception:
                                         pass
 
-                    pending_actions.append(sanitize)
+                    pending_actions.append(
+                        PendingAction(
+                            name="organize_folder:downloads",
+                            execute=sanitize,
+                            completion="wait",
+                        )
+                    )
                     res = "Downloads directory sanitization scheduled."
 
                 elif func_name == "live_web_search":
@@ -702,21 +876,6 @@ CRITICAL RULES:
                         res = "Search module unavailable. Install using 'pip install duckduckgo_search'."
                     else:
                         query = str(args.get("query", ""))
-                        try:
-                            with DDGS() as ddgs:
-                                search_results = [
-                                    r["body"]
-                                    for r in ddgs.text(query, max_results=2)
-                                ]
-                            res = f"Live Search Results: {' '.join(search_results)}"
-                        except Exception as e:
-                            res = f"Web search encountered an error: {e}"
-
-                elif func_name == "live_web_search":
-                    query = str(args.get("query", ""))
-                    if DDGS is None:
-                        res = "Search module unavailable. Install using 'pip install duckduckgo_search'."
-                    else:
                         try:
                             with DDGS() as ddgs:
                                 search_results = [
@@ -757,6 +916,9 @@ CRITICAL RULES:
                 print(f"[TOOL RESULT]: {res}")
                 self.history.append({"role": "tool", "content": res})
 
+            # Return to reasoning state while synthesizing tool results.
+            await self._publish_visual("thinking", task_id=task_id)
+
             # Pass 2: Fast synthesis after tool execution
             try:
                 final_response = await self.client.chat(
@@ -767,7 +929,8 @@ CRITICAL RULES:
                 final_text = final_response["message"]["content"]
             except Exception as e:
                 print(f"[BRAIN ERROR]: Synthesis pass failed: {e}")
-                final_text = "Action executed successfully."
+                await self._publish_visual("alert", task_id=task_id)
+                final_text = "Action execution completed, but synthesis encountered an error."
         else:
             final_text = message.get("content", "Command acknowledged.")
 
@@ -780,61 +943,197 @@ CRITICAL RULES:
 
 async def main():
     nc = NATS()
+
     try:
-        await nc.connect(NATS_URL)
+        await nc.connect(
+            servers=[NATS_URL],
+            name="ultron-brain",
+            max_reconnect_attempts=-1,
+            reconnect_time_wait=2,
+        )
     except Exception as e:
         print(f"[NATS CONNECTION ERROR]: {e}")
         return
 
-    brain = UltronBrain()
-    print(f"[ULTRON BRAIN]: Synchronized Professional Engine ({MODEL_NAME}).")
+    try:
+        init_memory_db()
+    except Exception as e:
+        print(f"[MEMORY DB ERROR]: {e}")
+        await nc.drain()
+        await nc.close()
+        return
+
+    brain = UltronBrain(nc)
+
+    print(
+        f"[ULTRON BRAIN]: Synchronized Professional Engine ({MODEL_NAME})."
+    )
 
     async def intent_handler(msg):
-        try:
-            data = json.loads(msg.data.decode())
-            prompt = data.get("prompt", "")
-            if not prompt:
-                return
+        async with brain.task_lock:
+            task_id = str(uuid.uuid4())
 
-            print(f"\n[ULTRON INTENT RECEIVED]: '{prompt}'")
-            reply_text, pending_actions = await brain.process_intent(prompt)
-            print(f"[ULTRON BRAIN RESPONSE]: '{reply_text}'")
+            try:
+                data = json.loads(msg.data.decode())
+                prompt = str(data.get("prompt", "")).strip()
 
-            # 1. Execute physical application/browser actions NOW
-            for action in pending_actions:
+                if not prompt:
+                    return
+
+                print(
+                    f"\n[ULTRON INTENT RECEIVED] "
+                    f"[task={task_id}]: '{prompt}'"
+                )
+
+                reply_text, pending_actions = await brain.process_intent(
+                    prompt,
+                    task_id,
+                )
+
+                print(
+                    f"[ULTRON BRAIN RESPONSE] "
+                    f"[task={task_id}]: '{reply_text}'"
+                )
+
+                # -------------------------------------------------
+                # PHYSICAL ACTION EXECUTION
+                # -------------------------------------------------
+                action_ok, action_error = await brain._run_pending_actions(
+                    pending_actions,
+                    task_id,
+                )
+
+                if not action_ok:
+                    reply_text = (
+                        "I could not complete the requested action. "
+                        "The execution layer reported an error."
+                    )
+
+                # -------------------------------------------------
+                # SPEECH RESPONSE
+                # -------------------------------------------------
+                payload = json.dumps(
+                    {
+                        "text": reply_text,
+                        "speech": reply_text,
+                        "taskId": task_id,
+                        "execution": {
+                            "success": action_ok,
+                            "error": action_error,
+                        },
+                    },
+                    separators=(",", ":"),
+                ).encode()
+
+                await nc.publish(
+                    "ultron.voice",
+                    payload,
+                )
+
+                await nc.flush()
+
+                # -------------------------------------------------
+                # TASK COMPLETE
+                # -------------------------------------------------
+                await brain._publish_visual(
+                    "idle" if action_ok else "alert",
+                    task_id=task_id,
+                )
+
+            except Exception as e:
+
+                print(
+                    f"[INTENT HANDLING ERROR] "
+                    f"[task={task_id}]: {e}"
+                )
+
+                await brain._publish_visual(
+                    "alert",
+                    task_id=task_id,
+                )
+
                 try:
-                    action()
-                except Exception as e:
-                    print(f"[ACTION EXECUTION ERROR]: {e}")
+                    error_payload = json.dumps(
+                        {
+                            "text": (
+                                "An internal error occurred "
+                                "while processing your request."
+                            ),
+                            "speech": (
+                                "An internal error occurred "
+                                "while processing your request."
+                            ),
+                            "taskId": task_id,
+                        },
+                        separators=(",", ":"),
+                    ).encode()
 
-            # 2. Immediately publish speech payload in lockstep
-            payload = json.dumps(
-                {"text": reply_text, "speech": reply_text}
-            ).encode()
-            await nc.publish("ultron.voice", payload)
-            await nc.flush()
+                    await nc.publish(
+                        "ultron.voice",
+                        error_payload,
+                    )
 
-        except Exception as e:
-            print(f"[INTENT HANDLING ERROR]: {e}")
+                    await nc.flush()
 
-    await nc.subscribe("ultron.intent", cb=intent_handler)
+                except Exception as voice_error:
+
+                    print(
+                        f"[VOICE ERROR] "
+                        f"[task={task_id}]: {voice_error}"
+                    )
+
+                # Give ALERT a short visual window before returning
+                # to the neutral entity state.
+                await asyncio.sleep(0.25)
+
+                await brain._publish_visual(
+                    "idle",
+                    task_id=task_id,
+                )
+
+    await nc.subscribe(
+        "ultron.intent",
+        cb=intent_handler,
+    )
+
+    print(
+        "[ULTRON BRAIN]: Intent bus online. "
+        "Autonomous visual state synchronization active."
+    )
 
     try:
+
         while True:
             await asyncio.sleep(3600)
+
     except asyncio.CancelledError:
         pass
+
     finally:
-        print("[ULTRON BRAIN]: Shutting down NATS connection gracefully...")
+
+        print(
+            "[ULTRON BRAIN]: "
+            "Shutting down NATS connection gracefully..."
+        )
+
         try:
             await nc.drain()
+        except Exception:
+            pass
+
+        try:
             await nc.close()
         except Exception:
             pass
 
 
 if __name__ == "__main__":
+
     try:
         asyncio.run(main())
+
     except KeyboardInterrupt:
-        print("\n[ULTRON] Brain agent offline.")
+
+        print(
+            "\n[ULTRON] Brain agent offline."
+        )

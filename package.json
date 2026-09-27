@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "@nats-io/nats-core": "^3.4.0",
+    "@react-three/drei": "^10.7.8",
+    "@react-three/fiber": "^9.8.0",
+    "three": "^0.186.0"
+  }
+}

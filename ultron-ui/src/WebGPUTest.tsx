@@ -21,6 +21,8 @@ import TSLSingularityCore
 import SimulationRuntime
   from './simulation/SimulationRuntime'
 
+import { UltronEventBridge } from './bridge/UltronEventBridge'
+
 import {
   Canvas,
 } from '@react-three/fiber'
@@ -79,7 +81,8 @@ export default function WebGPUTest() {
           return renderer
         }}
       >
-
+        <UltronEventBridge />
+        
         <SimulationRuntime />
 
         <TSLSingularityCore />

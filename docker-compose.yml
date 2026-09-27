@@ -1,11 +1,22 @@
 services:
   nats:
-    image: nats:2.10-alpine
+    image: nats:2.10.29-alpine3.22
+
     container_name: nats
+
     restart: unless-stopped
+
     ports:
-      - "4222:4222"
-      - "8222:8222"
-    command: "-js -sd /data --http_port 8222"
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
+      - "127.0.0.1:9222:9222"
+
+    command:
+      - "-c"
+      - "/etc/nats/nats-server.conf"
+
     volumes:
       - ./nats_data:/data
+      - ./nats-server.conf:/etc/nats/nats-server.conf:ro
+
+    stop_grace_period: 30s
