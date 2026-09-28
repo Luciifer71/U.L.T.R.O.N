@@ -67,9 +67,6 @@ MODEL_NAME = os.getenv(
 # ACTION EXECUTION LIFECYCLE
 # =========================================================
 
-EXECUTION_MIN_HOLD_SEC = float(
-    os.getenv("ULTRON_EXECUTION_MIN_HOLD_SEC", "0.65")
-)
 EXECUTION_ACTION_ACK_SEC = float(
     os.getenv("ULTRON_EXECUTION_ACTION_ACK_SEC", "0.15")
 )
@@ -516,8 +513,7 @@ CRITICAL RULES:
 
         if not actions:
             return True, None
-
-        execution_started = asyncio.get_running_loop().time()
+        
         await self._publish_visual("executing", task_id=task_id)
 
         for action in actions:
@@ -554,12 +550,6 @@ CRITICAL RULES:
                 )
                 await self._publish_visual("alert", task_id=task_id)
                 return False, str(exc)
-
-        elapsed = asyncio.get_running_loop().time() - execution_started
-        remaining = EXECUTION_MIN_HOLD_SEC - elapsed
-
-        if remaining > 0:
-            await asyncio.sleep(remaining)
 
         return True, None
 
