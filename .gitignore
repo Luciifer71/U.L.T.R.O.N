@@ -1,4 +1,11 @@
-# Byte-compiled / optimized / DLL files
+@"
+# Python environments
+venv/
+.venv/
+env/
+ENV/
+
+# Python caches
 __pycache__/
 *.py[cod]
 *$py.class
@@ -9,7 +16,7 @@ __pycache__/
 secrets.json
 !.env.example
 
-# Local Runtime Databases & Vector Stores
+# Local runtime databases & vector stores
 chroma_db/
 ultron_memory.db
 nats_data/
@@ -20,11 +27,16 @@ nats_data/
 *.avi
 *.log
 
-# Virtual environments
-venv/
-env/
-ENV/
+# Node / frontend dependencies
+node_modules/
+
+# Local archive / snapshots
+archive/
+
+# Local manual test scripts
+test_long_action.py
 
 # IDE settings
 .vscode/
 .idea/
+"@ | Set-Content .gitignore
