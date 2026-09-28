@@ -23,7 +23,7 @@ from typing import Any, Callable, Literal
 
 import keyboard
 from nats.aio.client import Client as NATS
-from ollama import AsyncClient
+from ollama_runtime import OllamaRuntime, OllamaRuntimeConfig
 import psutil
 
 from visual_events import publish_visual_event
@@ -67,8 +67,12 @@ MODEL_NAME = os.getenv(
 # ACTION EXECUTION LIFECYCLE
 # =========================================================
 
+EXECUTION_MIN_HOLD_SEC = float(
+    os.getenv("ULTRON_EXECUTION_MIN_HOLD_SEC", "1.20")
+)
+
 EXECUTION_ACTION_ACK_SEC = float(
-    os.getenv("ULTRON_EXECUTION_ACTION_ACK_SEC", "0.15")
+    os.getenv("ULTRON_EXECUTION_ACTION_ACK_SEC", "0.20")
 )
 
 
@@ -455,8 +459,11 @@ class UltronBrain:
 
     def __init__(self, nc: NATS):
         self.nc = nc
-        self.client = AsyncClient(
-            host=OLLAMA_HOST,
+        self.ollama = OllamaRuntime(
+            OllamaRuntimeConfig(
+                host=OLLAMA_HOST,
+                model=MODEL_NAME,
+            )
         )
         self.task_lock = asyncio.Lock()
         self.current_task_id: str | None = None
@@ -565,7 +572,7 @@ CRITICAL RULES:
         fast_options = {"num_predict": 150, "temperature": 0.2}
 
         try:
-            response = await self.client.chat(
+            response = await self.ollama.chat(
                 model=MODEL_NAME,
                 messages=self.history,
                 tools=TOOLS,
@@ -911,7 +918,7 @@ CRITICAL RULES:
 
             # Pass 2: Fast synthesis after tool execution
             try:
-                final_response = await self.client.chat(
+                final_response = await self.ollama.chat(
                     model=MODEL_NAME,
                     messages=self.history,
                     options=fast_options,
@@ -954,6 +961,10 @@ async def main():
         return
 
     brain = UltronBrain(nc)
+
+    # Ollama is a required dependency for intent processing.
+    # Do not accept intents until the endpoint and configured model are healthy.
+    await brain.ollama.wait_until_ready()
 
     print(
         f"[ULTRON BRAIN]: Synchronized Professional Engine ({MODEL_NAME})."
