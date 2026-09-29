@@ -313,7 +313,18 @@ export function updateEntitySimulation(
 export function setUltronMode(
   mode: UltronMode,
 ): void {
+
+  const previousMode = state.mode
+
+  if (previousMode === mode) {
+    return
+  }
+
   state.mode = mode
+
+  console.info(
+    `[ULTRON STATE] ${previousMode} → ${mode}`,
+  )
 }
 
 /* =========================================================
