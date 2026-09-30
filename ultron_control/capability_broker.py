@@ -10,9 +10,11 @@ from .application_discovery import ApplicationDiscovery
 from .audit import AuditLogger
 from .execution import ExecutionEngine
 from .filesystem import FilesystemCapability
-from .models import AuditRecord, CapabilityResult
+from .models import AuditRecord, CapabilityResult, PolicyDenied
 from .policy import CapabilityPolicy
 from .process_control import ProcessCapability
+from .resource_discovery import ResourceDiscovery
+from .resource_execution import ResourceExecutionCapability
 from .terminal import TerminalCapability
 from .verification import VerificationCapability
 
@@ -34,7 +36,11 @@ class CapabilityBroker:
         self.policy = policy or CapabilityPolicy()
         self.audit = audit or AuditLogger()
         self.execution = ExecutionEngine()
+
         self.apps = ApplicationDiscovery()
+        self.resources = ResourceDiscovery(applications=self.apps)
+        self.resource_execution = ResourceExecutionCapability()
+
         self.filesystem = FilesystemCapability()
         self.processes = ProcessCapability()
         self.terminal = TerminalCapability()
@@ -47,6 +53,309 @@ class CapabilityBroker:
             if task_id and task_id.strip()
             else str(uuid.uuid4())
         )
+
+    async def open_resource(
+        self,
+        target: str,
+        *,
+        task_id: str | None = None,
+        verify: bool = True,
+    ) -> CapabilityResult:
+        """Resolve and open any supported Windows resource."""
+
+        task_id = self._task_id(task_id)
+        started_ms = int(time.time() * 1000)
+
+        decision = self.policy.decide("resource.open")
+
+        if not decision.allowed:
+            return CapabilityResult(
+                False,
+                "resource.open",
+                decision.reason,
+                requires_confirmation=decision.requires_confirmation,
+                error=decision.reason,
+            )
+
+        try:
+            resource_result = await self.execution.call(
+                "resource.resolve",
+                lambda: self.resources.resolve(target),
+            )
+
+            if not resource_result.success:
+                error = (
+                    resource_result.error
+                    or resource_result.message
+                )
+
+                self._audit(
+                    task_id=task_id,
+                    capability="resource.open",
+                    operation="resolve_resource",
+                    target=target,
+                    success=False,
+                    started_ms=started_ms,
+                    error=error,
+                )
+
+                return CapabilityResult(
+                    False,
+                    "resource.open",
+                    f"Could not resolve '{target}'.",
+                    error=error,
+                )
+
+            resource = resource_result.data.get("result")
+
+            if resource is None:
+                raise RuntimeError(
+                    "Resource resolver returned no resolution object."
+                )
+
+            # Applications use the dedicated hardened application
+            # launch and verification pipeline.
+            if resource.kind == "application":
+                if resource.application is None:
+                    raise RuntimeError(
+                        "Application resource has no application metadata."
+                    )
+
+                return await self.open_application(
+                    resource.application.requested_name,
+                    task_id=task_id,
+                    verify=verify,
+                )
+
+            # Files, folders, drives, URLs and URI schemes use
+            # the Windows Shell execution layer.
+            open_result = await self.execution.call(
+                "resource.open",
+                lambda: self.resource_execution.open(resource),
+            )
+
+            if not open_result.success:
+                error = (
+                    open_result.error
+                    or open_result.message
+                )
+
+                self._audit(
+                    task_id=task_id,
+                    capability="resource.open",
+                    operation="open_resource",
+                    target=target,
+                    success=False,
+                    started_ms=started_ms,
+                    error=error,
+                    metadata={
+                        "kind": resource.kind,
+                        "source": resource.source,
+                    },
+                )
+
+                return CapabilityResult(
+                    False,
+                    "resource.open",
+                    f"Could not open '{target}'.",
+                    error=error,
+                )
+
+            shell_result = open_result.data.get("result")
+
+            if shell_result is None:
+                raise RuntimeError(
+                    "Resource execution returned no launch result."
+                )
+
+            state = getattr(
+                shell_result,
+                "state",
+                "dispatched",
+            )
+
+            verification = getattr(
+                shell_result,
+                "verification",
+                "not_observable",
+            )
+
+            verification_reason = getattr(
+                shell_result,
+                "verification_reason",
+                None,
+            )
+
+            pid = getattr(
+                shell_result,
+                "pid",
+                None,
+            )
+
+            process_created = bool(
+                getattr(
+                    shell_result,
+                    "process_created",
+                    False,
+                )
+            )
+
+            dispatched = bool(
+                getattr(
+                    shell_result,
+                    "dispatched",
+                    True,
+                )
+            )
+
+            metadata = {
+                "requested": resource.requested,
+                "kind": resource.kind,
+                "target": getattr(
+                    shell_result,
+                    "target",
+                    resource.target,
+                ),
+                "state": state,
+                "dispatched": dispatched,
+                "processCreated": process_created,
+                "pid": pid,
+                "verification": verification,
+                "verificationReason": verification_reason,
+                "source": resource.source,
+            }
+
+            self._audit(
+                task_id=task_id,
+                capability="resource.open",
+                operation="open_resource",
+                target=target,
+                success=True,
+                started_ms=started_ms,
+                metadata=metadata,
+            )
+
+            if state == "verified":
+                message = (
+                    f"Opened and verified {resource.kind}: "
+                    f"{resource.target}"
+                )
+            elif state == "launched":
+                message = (
+                    f"Resource dispatched and a process was created: "
+                    f"{resource.target}. "
+                    "Final target handling was not verified."
+                )
+            else:
+                message = (
+                    f"Resource dispatched to Windows Shell: "
+                    f"{resource.target}. "
+                    "Final target handling was not verified."
+                )
+
+            return CapabilityResult(
+                True,
+                "resource.open",
+                message,
+                data=metadata,
+            )
+
+        except Exception as exc:
+            self._audit(
+                task_id=task_id,
+                capability="resource.open",
+                operation="open_resource",
+                target=target,
+                success=False,
+                started_ms=started_ms,
+                error=str(exc),
+            )
+
+            return CapabilityResult(
+                False,
+                "resource.open",
+                f"Could not open '{target}'.",
+                error=str(exc),
+            )
+
+        except Exception as exc:
+            self._audit(
+                task_id=task_id,
+                capability="resource.open",
+                operation="open_resource",
+                target=target,
+                success=False,
+                started_ms=started_ms,
+                error=str(exc),
+            )
+
+            return CapabilityResult(
+                False,
+                "resource.open",
+                f"Could not open '{target}'.",
+                error=str(exc),
+            )
+
+            shell_result = open_result.data.get("result")
+
+            if shell_result is None:
+                raise RuntimeError(
+                    "Resource execution returned no launch result."
+                )
+
+            pid = getattr(shell_result, "pid", None)
+
+            metadata = {
+                "requested": resource.requested,
+                "kind": resource.kind,
+                "target": getattr(
+                    shell_result,
+                    "target",
+                    resource.target,
+                ),
+                "success": getattr(
+                    shell_result,
+                    "success",
+                    True,
+                ),
+                "pid": pid,
+                "source": resource.source,
+            }
+
+            self._audit(
+                task_id=task_id,
+                capability="resource.open",
+                operation="open_resource",
+                target=target,
+                success=True,
+                started_ms=started_ms,
+                metadata=metadata,
+            )
+
+            return CapabilityResult(
+                True,
+                "resource.open",
+                f"Opened {resource.kind}: {resource.target}",
+                data=metadata,
+            )
+
+        except Exception as exc:
+            self._audit(
+                task_id=task_id,
+                capability="resource.open",
+                operation="open_resource",
+                target=target,
+                success=False,
+                started_ms=started_ms,
+                error=str(exc),
+            )
+
+            return CapabilityResult(
+                False,
+                "resource.open",
+                f"Could not open '{target}'.",
+                error=str(exc),
+            )
 
     def _audit(
         self,
@@ -103,6 +412,7 @@ class CapabilityBroker:
             # ---------------------------------------------------------
             # 1. Resolve application
             # ---------------------------------------------------------
+
             discovery_result = await self.execution.call(
                 "application.resolve",
                 lambda: self.apps.resolve(app_name),
@@ -140,10 +450,12 @@ class CapabilityBroker:
 
             # ---------------------------------------------------------
             # 2. Launch application
+            # ---------------------------------------------------------
             #
             # AUMID-backed applications use native Windows activation.
             # Executable-backed applications use shell=False Popen.
             # ---------------------------------------------------------
+
             launch_result = await self.execution.call(
                 "application.launch",
                 lambda: self.processes.launch_application(resolved),
@@ -190,8 +502,6 @@ class CapabilityBroker:
                     "Application launcher returned no launch result."
                 )
 
-            # LaunchResult is returned by
-            # ProcessCapability.launch_application().
             pid = getattr(raw_launch, "pid", None)
 
             launch_method = getattr(
@@ -210,6 +520,7 @@ class CapabilityBroker:
             # ---------------------------------------------------------
             # 3. Verify physical launch
             # ---------------------------------------------------------
+
             verification: dict[str, object] | None = None
 
             if verify:
@@ -217,10 +528,7 @@ class CapabilityBroker:
                 # opening a new Explorer window may reuse an existing
                 # explorer.exe process.
                 if resolved.executable:
-                    if (
-                        resolved.executable.lower()
-                        == "explorer.exe"
-                    ):
+                    if resolved.executable.lower() == "explorer.exe":
                         verification_result = (
                             await self.execution.call(
                                 "application.verify-executable",
@@ -232,7 +540,6 @@ class CapabilityBroker:
                                 ),
                             )
                         )
-
                     else:
                         # For normal desktop applications, verify the exact
                         # PID returned by the launch operation and confirm
@@ -289,6 +596,7 @@ class CapabilityBroker:
             # ---------------------------------------------------------
             # 4. Verification failure
             # ---------------------------------------------------------
+
             if not verified:
                 error = (
                     "Application launch completed, but "
@@ -337,6 +645,7 @@ class CapabilityBroker:
             # ---------------------------------------------------------
             # 5. Success
             # ---------------------------------------------------------
+
             self._audit(
                 task_id=task_id,
                 capability="application.open",
@@ -451,9 +760,7 @@ class CapabilityBroker:
                 else "Directory listed."
             ),
             data={
-                "path": str(
-                    self.filesystem.resolve(path)
-                ),
+                "path": str(self.filesystem.resolve(path)),
                 "entries": entries,
             },
         )
@@ -595,9 +902,7 @@ class CapabilityBroker:
 
         task_id = self._task_id(task_id)
 
-        decision = self.policy.decide(
-            "filesystem.write"
-        )
+        decision = self.policy.decide("filesystem.write")
 
         if not decision.allowed:
             return CapabilityResult(

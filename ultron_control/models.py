@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
 
 class CapabilityError(RuntimeError):
@@ -13,7 +13,13 @@ class CapabilityError(RuntimeError):
 class PolicyDenied(CapabilityError):
     """Raised when an operation requires approval or is blocked."""
 
-    def __init__(self, message: str, *, capability: str, reason: str) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        capability: str,
+        reason: str,
+    ) -> None:
         super().__init__(message)
         self.capability = capability
         self.reason = reason
@@ -38,6 +44,38 @@ class ResolvedApplication:
     source: str
     executable: str | None = None
     app_id: str | None = None
+
+
+ResourceKind = Literal[
+    "application",
+    "file",
+    "directory",
+    "drive",
+    "url",
+    "uri",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedResource:
+    """A resolved computer resource that ULTRON can act upon."""
+
+    requested: str
+    kind: ResourceKind
+    target: str
+
+    # Filesystem resources.
+    path: str | None = None
+
+    # URL / URI resources.
+    uri: str | None = None
+
+    # Application resources.
+    application: ResolvedApplication | None = None
+
+    # Resolution metadata.
+    source: str = ""
+    exists: bool = False
 
 
 @dataclass(frozen=True, slots=True)
