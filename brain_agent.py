@@ -35,6 +35,7 @@ import webbrowser
 import re 
 
 import difflib
+import inspect
 
 import uuid
 
@@ -56,6 +57,7 @@ import psutil
 
 from visual_events import publish_visual_event
 
+from ultron_control.capability_broker import CapabilityBroker
 
 
 from memory_db import (
@@ -934,6 +936,11 @@ class UltronBrain:
 
         self.task_lock = asyncio.Lock()
 
+        # Centralized Windows capability control plane.
+        # Physical system actions should flow through the broker rather than
+        # directly through shell commands wherever a broker capability exists.
+        self.capabilities = CapabilityBroker()
+
         self.current_task_id: str | None = None
 
         self.refresh_system_prompt()
@@ -1041,9 +1048,26 @@ CRITICAL RULES:
                     f"{action.name}"
                 )
 
-                result = await asyncio.to_thread(
-                    action.execute
-                )
+                if inspect.iscoroutinefunction(action.execute):
+                    result = await action.execute()
+                else:
+                    result = await asyncio.to_thread(
+                        action.execute
+                    )
+
+                # Async capability methods return CapabilityResult rather than
+                # subprocess.Popen. Treat an explicit capability failure as an
+                # execution failure so the terminal visual state becomes ALERT.
+                if (
+                    hasattr(result, "success")
+                    and getattr(result, "success") is False
+                ):
+                    capability_error = (
+                        getattr(result, "error", None)
+                        or getattr(result, "message", None)
+                        or "Capability execution failed."
+                    )
+                    raise RuntimeError(str(capability_error))
 
                 if (
                     action.completion == "wait"
@@ -1381,23 +1405,54 @@ CRITICAL RULES:
 
                 elif func_name == "open_application":
 
-                    app_name = str(args.get("app_name", "")).lower().strip()
+                    app_name = str(args.get("app_name", "")).strip()
 
-                    command = APP_MAP.get(app_name, app_name)
+                    if not app_name:
 
-                    pending_actions.append(
+                        res = "No application name was provided."
 
-                        PendingAction(
+                    else:
 
-                            name=f"open_application:{app_name}",
+                        async def open_app(target_app: str = app_name) -> Any:
 
-                            execute=lambda cmd=command: subprocess.Popen(cmd, shell=True),
+                            # The Brain tool accepts applications, system settings,
+                            # folders, and other local resources. Resolve the target
+                            # through the universal resource capability so stable
+                            # Windows URI aliases such as Settings are handled
+                            # before generic AppX/MSIX discovery.
+                            return await self.capabilities.open_resource(
+
+                                target_app,
+
+                                task_id=task_id,
+
+                                verify=True,
+
+                            )
+
+
+
+                        pending_actions.append(
+
+                            PendingAction(
+
+                                name=f"open_application:{app_name}",
+
+                                execute=open_app,
+
+                                completion="dispatch",
+
+                            )
 
                         )
 
-                    )
+                        res = (
 
-                    res = f"Application '{app_name}' staged for launch."
+                            f"Application '{app_name}' "
+
+                            "staged through the capability broker."
+
+                        )
 
 
 

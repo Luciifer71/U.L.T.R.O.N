@@ -62,6 +62,14 @@ class ResourceDiscovery:
         }
     )
 
+    # Human-readable Windows system entry points that have a stable URI
+    # contract but may collide with multiple AppX/MSIX package names.
+    _SYSTEM_URI_ALIASES = {
+        "settings": "ms-settings:",
+        "system settings": "ms-settings:",
+        "windows settings": "ms-settings:",
+    }
+
     _KNOWN_FOLDER_ALIASES = {
         "desktop": "Desktop",
         "documents": "Documents",
@@ -105,6 +113,20 @@ class ResourceDiscovery:
             )
 
         # --------------------------------------------------------------
+        # 0. Stable Windows system URI aliases
+        #
+        # These semantic names must be resolved before generic AppX/MSIX
+        # discovery because multiple Windows packages can expose names
+        # that normalize to the same human request.
+        # --------------------------------------------------------------
+        system_uri = self._resolve_system_uri_alias(
+            original
+        )
+
+        if system_uri:
+            return system_uri
+
+        # --------------------------------------------------------------
         # 1. Explicit URL / URI
         # --------------------------------------------------------------
         uri_resource = self._resolve_uri(
@@ -115,7 +137,23 @@ class ResourceDiscovery:
             return uri_resource
 
         # --------------------------------------------------------------
-        # 2. Existing filesystem path
+        # 2. Windows drive
+        #
+        # This must be checked before generic filesystem resolution so a
+        # root such as C:\ is classified specifically as a drive rather
+        # than being collapsed into a generic directory. Full paths such as
+        # C:\Windows still fall through to filesystem resolution because
+        # they do not match the drive-only syntax.
+        # --------------------------------------------------------------
+        drive_resource = self._resolve_drive(
+            original
+        )
+
+        if drive_resource:
+            return drive_resource
+
+        # --------------------------------------------------------------
+        # 3. Existing filesystem path
         #
         # This happens before application resolution so something like:
         #
@@ -131,16 +169,6 @@ class ResourceDiscovery:
 
         if filesystem_resource:
             return filesystem_resource
-
-        # --------------------------------------------------------------
-        # 3. Windows drive
-        # --------------------------------------------------------------
-        drive_resource = self._resolve_drive(
-            original
-        )
-
-        if drive_resource:
-            return drive_resource
 
         # --------------------------------------------------------------
         # 4. Known user-folder aliases
@@ -178,6 +206,34 @@ class ResourceDiscovery:
             raise ResourceNotFound(
                 f"Resource '{original}' could not be resolved."
             ) from exc
+
+    # ------------------------------------------------------------------
+    # Stable Windows system URI aliases
+    # ------------------------------------------------------------------
+
+    def _resolve_system_uri_alias(
+        self,
+        value: str,
+    ) -> ResolvedResource | None:
+        normalized = self._normalize_text(
+            value
+        )
+
+        uri = self._SYSTEM_URI_ALIASES.get(
+            normalized
+        )
+
+        if not uri:
+            return None
+
+        return ResolvedResource(
+            requested=value,
+            kind="uri",
+            target=uri,
+            uri=uri,
+            source="windows-system-uri",
+            exists=True,
+        )
 
     # ------------------------------------------------------------------
     # URI / URL resolution
