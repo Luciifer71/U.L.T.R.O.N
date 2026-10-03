@@ -10,7 +10,7 @@ from .application_discovery import ApplicationDiscovery
 from .audit import AuditLogger
 from .execution import ExecutionEngine
 from .filesystem import FilesystemCapability
-from .models import AuditRecord, CapabilityResult, PolicyDenied
+from .models import AuditRecord, CapabilityResult
 from .policy import CapabilityPolicy
 from .process_control import ProcessCapability
 from .resource_discovery import ResourceDiscovery
@@ -258,24 +258,6 @@ class CapabilityBroker:
                 "resource.open",
                 message,
                 data=metadata,
-            )
-
-        except Exception as exc:
-            self._audit(
-                task_id=task_id,
-                capability="resource.open",
-                operation="open_resource",
-                target=target,
-                success=False,
-                started_ms=started_ms,
-                error=str(exc),
-            )
-
-            return CapabilityResult(
-                False,
-                "resource.open",
-                f"Could not open '{target}'.",
-                error=str(exc),
             )
 
         except Exception as exc:

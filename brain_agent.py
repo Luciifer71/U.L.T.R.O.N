@@ -58,6 +58,13 @@ import psutil
 from visual_events import publish_visual_event
 
 from ultron_control.capability_broker import CapabilityBroker
+from ultron_control.intent_guard import (
+    build_replay_plan,
+    extract_replay_plan,
+    is_replay_request,
+    looks_incomplete_request,
+    normalize_tool_calls,
+)
 
 
 from memory_db import (
@@ -242,7 +249,7 @@ TOOLS = [
 
             "name": "query_knowledge_base",
 
-            "description": "Searches static project documentation, local text files, and system manuals ingested in ChromaDB. DO NOT use this for personal user facts or preferences.",
+            "description": "Searches static project documentation and local manuals ingested in ChromaDB. Never use this for internet/web searches or for searching inside a website.",
 
             "parameters": {
 
@@ -392,11 +399,11 @@ TOOLS = [
 
             "description": (
 
-                "Open local Windows applications, system settings, or local"
+                "Open installed Windows applications, system utilities, or local"
 
-                " folders (e.g., calculator, vscode, task manager, settings,"
+                " folders. Use this for browser applications such as Chrome, Edge,"
 
-                " downloads, ultron folder)."
+                " Opera, Firefox, and Brave."
 
             ),
 
@@ -436,7 +443,15 @@ TOOLS = [
 
             "name": "open_website",
 
-            "description": "Opens a specific website or performs a web search. Supports opening multiple tabs if explicitly requested.",
+            "description": (
+
+                "Navigate to a web destination. For a site-specific search, provide"
+
+                " BOTH target and query in the SAME call whenever supported."
+
+                " Use this for websites, not installed browser applications."
+
+            ),
 
             "parameters": {
 
@@ -452,11 +467,19 @@ TOOLS = [
 
                     },
 
+                    "query": {
+
+                        "type": "string",
+
+                        "description": "Optional search query to execute on the target website."
+
+                    },
+
                     "count": {
 
                         "type": "integer",
 
-                        "description": "The number of times/tabs to open the website (e.g., 2, 3, 5, 10). Defaults to 1 unless specified by user."
+                        "description": "Number of tabs/navigation requests. Defaults to 1; maximum 15."
 
                     }
 
@@ -710,7 +733,11 @@ TOOLS = [
 
             "description": (
 
-                "Fetch real-time information, news, or live data from the web."
+                "Fetch real-time information, news, or live data from the internet."
+
+                " Do not use this for searching inside a named website when"
+
+                " open_website target+query expresses the request."
 
             ),
 
@@ -943,6 +970,10 @@ class UltronBrain:
 
         self.current_task_id: str | None = None
 
+        # Bounded, explicit replay state. Only replay-safe operations are stored.
+        self.last_replay_plan: list[dict[str, Any]] | None = None
+        self.execution_ledger: dict[str, list[dict[str, Any]]] = {}
+
         self.refresh_system_prompt()
 
 
@@ -996,10 +1027,7 @@ class UltronBrain:
 
 
         self.system_prompt = (
-
             f"""You are Ultron, an advanced AI assistant. Keep all spoken responses concise and direct.{facts_summary}
-
-
 
 CRITICAL RULES:
 
@@ -1007,11 +1035,18 @@ CRITICAL RULES:
 
 2. MEMORY RECALL: For personal user facts/preferences, look at STORED USER FACTS above or execute `recall_facts`. Do NOT use `query_knowledge_base` for personal user facts.
 
-3. ZERO HALLUCINATION: If a tool or memory search returns no matching information, explicitly state that you do not have that stored in memory. NEVER make up or guess user preferences, games, or movies."""
+3. ZERO HALLUCINATION: If a tool or memory search returns no matching information, explicitly state that you do not have that stored in memory. NEVER make up or guess user preferences, games, or movies.
 
+4. APPLICATIONS VS WEBSITES: `open_application` is for installed Windows applications such as Chrome, Edge, VS Code, Notion, Steam, File Explorer, and Task Manager. Do NOT treat a browser application name as a website.
+
+5. WEBSITE SEARCH: To search inside a website, use ONE `open_website` call with both `target` and `query` whenever supported. Example: target=`youtube`, query=`quantum computers`. Do NOT use `query_knowledge_base` or `live_web_search` for an on-site search requested by the user.
+
+6. INCOMPLETE REQUESTS: Never invent missing targets, application names, search destinations, or arguments. Ask the user for the missing information.
+
+7. EXECUTION TRUTH: Tool calls are only a plan. Never claim a physical action happened merely because a tool call was produced. The execution layer is authoritative.
+
+8. REPEAT REQUESTS: When the user asks to repeat or redo a previous task, use the stored replay plan supplied by the execution system. Never invent a previous task from conversational wording alone."""
         )
-
-
 
         self.history = [{"role": "system", "content": self.system_prompt}]
 
@@ -1022,26 +1057,29 @@ CRITICAL RULES:
         actions: list[PendingAction],
         task_id: str,
     ) -> tuple[bool, str | None]:
-        """Execute all staged actions and collect failures.
-
-        EXECUTING remains active for the real duration of the action batch,
-        with a minimum visual dwell. One failed action does not prevent the
-        remaining independent actions from being attempted.
-        """
+        """Execute staged actions and persist authoritative execution evidence."""
 
         if not actions:
+            self.execution_ledger[task_id] = []
             return True, None
 
         execution_started = asyncio.get_running_loop().time()
-
-        await self._publish_visual(
-            "executing",
-            task_id=task_id,
-        )
+        await self._publish_visual("executing", task_id=task_id)
 
         errors: list[str] = []
+        outcomes: list[dict[str, Any]] = []
 
         for action in actions:
+            outcome: dict[str, Any] = {
+                "name": action.name,
+                "success": False,
+                "message": "",
+                "error": None,
+                "state": None,
+                "verification": None,
+                "verificationReason": None,
+            }
+
             try:
                 print(
                     f"[ACTION START] [task={task_id}] "
@@ -1051,48 +1089,75 @@ CRITICAL RULES:
                 if inspect.iscoroutinefunction(action.execute):
                     result = await action.execute()
                 else:
-                    result = await asyncio.to_thread(
-                        action.execute
-                    )
+                    result = await asyncio.to_thread(action.execute)
 
-                # Async capability methods return CapabilityResult rather than
-                # subprocess.Popen. Treat an explicit capability failure as an
-                # execution failure so the terminal visual state becomes ALERT.
-                if (
-                    hasattr(result, "success")
-                    and getattr(result, "success") is False
-                ):
-                    capability_error = (
+                if hasattr(result, "success"):
+                    result_data = getattr(result, "data", None)
+                    capability_failed = getattr(result, "success") is False
+
+                    if (
+                        not capability_failed
+                        and isinstance(result_data, dict)
+                        and result_data.get("success") is False
+                    ):
+                        capability_failed = True
+
+                    outcome["success"] = not capability_failed
+                    outcome["message"] = str(
+                        getattr(result, "message", "") or ""
+                    )
+                    outcome["error"] = (
                         getattr(result, "error", None)
-                        or getattr(result, "message", None)
-                        or "Capability execution failed."
-                    )
-                    raise RuntimeError(str(capability_error))
-
-                if (
-                    action.completion == "wait"
-                    and isinstance(result, subprocess.Popen)
-                ):
-                    return_code = await asyncio.to_thread(
-                        result.wait
+                        or (
+                            result_data.get("error")
+                            if isinstance(result_data, dict)
+                            else None
+                        )
                     )
 
-                    if return_code != 0:
+                    if isinstance(result_data, dict):
+                        for key in (
+                            "state",
+                            "verification",
+                            "verificationReason",
+                            "pid",
+                            "target",
+                            "resolved",
+                            "launchMethod",
+                            "source",
+                        ):
+                            if key in result_data:
+                                outcome[key] = result_data[key]
+
+                    if capability_failed:
                         raise RuntimeError(
-                            f"Action '{action.name}' "
-                            f"exited with code {return_code}."
+                            str(
+                                outcome["error"]
+                                or outcome["message"]
+                                or "Capability execution failed."
+                            )
                         )
 
                 elif isinstance(result, subprocess.Popen):
-                    await asyncio.sleep(
-                        EXECUTION_ACTION_ACK_SEC
-                    )
+                    if action.completion == "wait":
+                        return_code = await asyncio.to_thread(result.wait)
+                        if return_code != 0:
+                            raise RuntimeError(
+                                f"Action '{action.name}' exited with code {return_code}."
+                            )
+                    else:
+                        await asyncio.sleep(EXECUTION_ACTION_ACK_SEC)
+                        if result.poll() not in (None, 0):
+                            raise RuntimeError(
+                                f"Action '{action.name}' exited with code {result.returncode}."
+                            )
 
-                    if result.poll() not in (None, 0):
-                        raise RuntimeError(
-                            f"Action '{action.name}' "
-                            f"exited with code {result.returncode}."
-                        )
+                    outcome["success"] = True
+                    outcome["message"] = "Process action completed."
+
+                else:
+                    outcome["success"] = True
+                    outcome["message"] = "Action completed."
 
                 print(
                     f"[ACTION COMPLETE] [task={task_id}] "
@@ -1100,10 +1165,14 @@ CRITICAL RULES:
                 )
 
             except Exception as exc:
-                error_text = (
-                    f"{action.name}: {exc}"
+                outcome["success"] = False
+                outcome["error"] = str(exc)
+                outcome["message"] = (
+                    outcome["message"]
+                    or "Action execution failed."
                 )
 
+                error_text = f"{action.name}: {exc}"
                 errors.append(error_text)
 
                 print(
@@ -1111,816 +1180,1093 @@ CRITICAL RULES:
                     f"{error_text}"
                 )
 
-                # Continue executing the remaining independent actions.
-                # Terminal visual state is handled by main().
+            outcomes.append(outcome)
 
-        # ---------------------------------------------------------
-        # GUARANTEE MINIMUM EXECUTION VISUAL DWELL
-        # ---------------------------------------------------------
+        self.execution_ledger[task_id] = outcomes
+
+        while len(self.execution_ledger) > 100:
+            oldest_task = next(iter(self.execution_ledger))
+            self.execution_ledger.pop(oldest_task, None)
 
         elapsed = (
             asyncio.get_running_loop().time()
             - execution_started
         )
-
-        remaining = (
-            EXECUTION_MIN_HOLD_SEC
-            - elapsed
-        )
-
+        remaining = EXECUTION_MIN_HOLD_SEC - elapsed
         if remaining > 0:
-            await asyncio.sleep(
-                remaining
-            )
+            await asyncio.sleep(remaining)
 
         if errors:
             return False, " | ".join(errors)
 
         return True, None
 
+    def _compose_execution_response(self, task_id: str) -> str:
+        """Create a truthful action response from the execution ledger only."""
+
+        outcomes = self.execution_ledger.get(task_id, [])
+        if not outcomes:
+            return "No physical actions were executed."
+
+        verified: list[str] = []
+        dispatched: list[str] = []
+        failed: list[str] = []
+
+        for outcome in outcomes:
+            name = str(outcome.get("name") or "action")
+            verification = outcome.get("verification")
+            state = outcome.get("state")
+            error = str(outcome.get("error") or "").strip()
+
+            if not outcome.get("success"):
+                label = self._friendly_action_name(name)
+                failed.append(f"{label} ({error})" if error else label)
+                continue
+
+            if (
+                state == "dispatched"
+                or verification == "not_observable"
+            ):
+                dispatched.append(
+                    self._friendly_action_name(name)
+                )
+            elif (
+                state == "verified"
+                or (
+                    isinstance(verification, dict)
+                    and verification.get("running") is True
+                )
+            ):
+                verified.append(
+                    self._friendly_action_name(name)
+                )
+            else:
+                dispatched.append(
+                    self._friendly_action_name(name)
+                )
+
+        parts: list[str] = []
+
+        if verified:
+            parts.append(
+                "Opened and verified: "
+                + ", ".join(verified)
+                + "."
+            )
+
+        if dispatched:
+            parts.append(
+                "Dispatched: "
+                + ", ".join(dispatched)
+                + "."
+            )
+
+        if failed:
+            parts.append(
+                "Could not complete: "
+                + ", ".join(failed)
+                + "."
+            )
+
+        return " ".join(parts)
+
+    @staticmethod
+    def _friendly_action_name(action_name: str) -> str:
+        if action_name.startswith("open_application:"):
+            return action_name.split(":", 1)[1]
+
+        if action_name.startswith("open_website:"):
+            target = action_name.split(":", 1)[1]
+            try:
+                parsed = urllib.parse.urlparse(target)
+                host = (
+                    parsed.netloc
+                    or ""
+                ).lower().removeprefix("www.")
+
+                if host == "youtube.com":
+                    if "search_query" in urllib.parse.parse_qs(
+                        parsed.query
+                    ):
+                        return "YouTube search"
+                    return "YouTube navigation"
+
+                if host:
+                    return f"web navigation to {host}"
+
+            except Exception:
+                pass
+
+            return "website navigation"
+
+        if action_name.startswith("control_media:"):
+            return (
+                action_name
+                .split(":", 1)[1]
+                .replace("_", " ")
+            )
+
+        if action_name.startswith("run_python_script:"):
+            return action_name.split(":", 1)[1]
+
+        return action_name
+
+
 
     async def process_intent(
-
         self,
-
         prompt: str,
-
         task_id: str,
-
     ) -> tuple[str, list]:
-
         self.current_task_id = task_id
-
         await self._publish_visual("thinking", task_id=task_id)
 
-        self.history.append({"role": "user", "content": prompt})
+        self.history.append(
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        )
 
-        # Increased num_predict from 45 to 150 so token generation isn't cut off when returning multiple tools
-
-        fast_options = {"num_predict": 150, "temperature": 0.2}
-
-
-
-        try:
-
-            response = await self.ollama.chat(
-
-                model=MODEL_NAME,
-
-                messages=self.history,
-
-                tools=TOOLS,
-
-                options=fast_options,
-
+        if looks_incomplete_request(prompt):
+            return (
+                "I need one more detail before I execute that. "
+                "Which app, file, folder, or target did you mean?",
+                [],
             )
 
-        except Exception as e:
+        replay_request = is_replay_request(prompt)
+        replay_calls = extract_replay_plan(
+            prompt,
+            self.last_replay_plan,
+        )
 
-            print(f"[BRAIN ERROR]: LLM inference failed: {e}")
+        if replay_request and not replay_calls:
+            return (
+                "I do not have a safe previous task to repeat yet. "
+                "Please give me the task again once.",
+                [],
+            )
 
-            await self._publish_visual("alert", task_id=task_id)
-
-            return "An anomaly occurred within my core processing.", []
-
-
-
-        # Safely extract message content/tool calls regardless of dict or object structure
-
-        if hasattr(response, "message"):
-
-            msg_obj = response.message
-
+        if replay_calls:
             message = {
-
-                "role": getattr(msg_obj, "role", "assistant"),
-
-                "content": getattr(msg_obj, "content", "") or "",
-
-                "tool_calls": getattr(msg_obj, "tool_calls", []) or [],
-
+                "role": "assistant",
+                "content": "",
+                "tool_calls": replay_calls,
+            }
+            tool_calls = list(replay_calls)
+            content_text = ""
+        else:
+            fast_options = {
+                "num_predict": 256,
+                "temperature": 0.2,
             }
 
-        else:
+            try:
+                response = await self.ollama.chat(
+                    model=MODEL_NAME,
+                    messages=self.history,
+                    tools=TOOLS,
+                    options=fast_options,
+                )
+            except Exception as e:
+                print(
+                    "[BRAIN ERROR]: LLM inference failed: "
+                    f"{type(e).__name__}: {e!r}"
+                )
+                await self._publish_visual(
+                    "alert",
+                    task_id=task_id,
+                )
+                return (
+                    "An anomaly occurred within my core processing.",
+                    [],
+                )
 
-            message = response.get("message", {})
+            if hasattr(response, "message"):
+                msg_obj = response.message
+                message = {
+                    "role": getattr(
+                        msg_obj,
+                        "role",
+                        "assistant",
+                    ),
+                    "content": getattr(
+                        msg_obj,
+                        "content",
+                        "",
+                    )
+                    or "",
+                    "tool_calls": getattr(
+                        msg_obj,
+                        "tool_calls",
+                        [],
+                    )
+                    or [],
+                }
+            else:
+                message = response.get(
+                    "message",
+                    {},
+                )
 
+            content_text = message.get(
+                "content",
+                "",
+            ) or ""
 
-
-        content_text = message.get("content", "") or ""
-
-        tool_calls = list(message.get("tool_calls", []) or [])
-
-
-
-        # FALLBACK: Catch raw <tool_call> tags in Qwen's text output and convert to tool calls
-
-        if "<tool_call>" in content_text:
-
-            matches = re.findall(
-
-                r"<tool_call>\s*(.*?)\s*</tool_call>", content_text, re.DOTALL
-
+            tool_calls = list(
+                message.get(
+                    "tool_calls",
+                    [],
+                )
+                or []
             )
 
-            for m in matches:
+        if "<tool_call>" in content_text:
+            matches = re.findall(
+                r"<tool_call>\s*(.*?)\s*</tool_call>",
+                content_text,
+                re.DOTALL,
+            )
 
+            for match in matches:
                 try:
-
-                    parsed = json.loads(m.strip())
-
+                    parsed = json.loads(
+                        match.strip()
+                    )
                     tool_calls.append(
-
                         {
-
                             "function": {
-
                                 "name": parsed.get("name"),
-
-                                "arguments": parsed.get("arguments", {}),
-
+                                "arguments": parsed.get(
+                                    "arguments",
+                                    {},
+                                ),
                             }
-
                         }
-
+                    )
+                except Exception as exc:
+                    print(
+                        f"[TOOL PARSE ERROR]: "
+                        f"{type(exc).__name__}: {exc!r}"
                     )
 
-                except Exception as e:
-
-                    print(f"[TOOL PARSE ERROR]: {e}")
-
-
-
-            # Strip raw XML tags out so they don't get printed to the user
-
             content_text = re.sub(
-
-                r"<tool_call>.*?</tool_call>", "", content_text, flags=re.DOTALL
-
+                r"<tool_call>.*?</tool_call>",
+                "",
+                content_text,
+                flags=re.DOTALL,
             ).strip()
 
             message["content"] = content_text
 
+        if tool_calls:
+            normalized_calls, clarification = normalize_tool_calls(
+                prompt,
+                tool_calls,
+            )
 
+            if clarification:
+                return clarification, []
+
+            tool_calls = normalized_calls
+            message["tool_calls"] = tool_calls
+
+            replay_plan = build_replay_plan(tool_calls)
+            if replay_plan:
+                self.last_replay_plan = replay_plan
 
         pending_actions: list[PendingAction] = []
 
-
-
         if tool_calls:
-
             self.history.append(message)
 
             for tool in tool_calls:
-
-                # Handle both dict and object structures safely
-
                 if isinstance(tool, dict):
-
-                    func_name = tool.get("function", {}).get("name")
-
-                    args = tool.get("function", {}).get("arguments", {})
-
+                    function = tool.get(
+                        "function",
+                        {},
+                    ) or {}
+                    func_name = function.get("name")
+                    args = function.get(
+                        "arguments",
+                        {},
+                    )
                 else:
-
-                    func_name = getattr(getattr(tool, "function", None), "name", None)
-
-                    args = getattr(getattr(tool, "function", None), "arguments", {})
-
-
-
-                # Safe argument parsing if returned as stringified JSON
-
-                if isinstance(args, str):
-
-                    try:
-
-                        args = json.loads(args)
-
-                    except Exception:
-
-                        args = {}
-
-
-
-                print(f"[BRAIN EXECUTING TOOL]: {func_name}({args})")
-
-
-
-                # --- HANDLER BRANCHES FOR ALL TOOLS ---
-
-                if func_name == "get_system_telemetry":
-
-                    cpu = psutil.cpu_percent(interval=0.1)
-
-                    ram = psutil.virtual_memory().percent
-
-                    battery = psutil.sensors_battery()
-
-                    bat_str = f"{battery.percent}%" if battery else "AC Power"
-
-                    res = (
-
-                        f"System Metrics: CPU at {cpu}%, RAM at {ram}%, Power Source:"
-
-                        f" {bat_str}."
-
+                    function = getattr(
+                        tool,
+                        "function",
+                        None,
+                    )
+                    func_name = getattr(
+                        function,
+                        "name",
+                        None,
+                    )
+                    args = getattr(
+                        function,
+                        "arguments",
+                        {},
                     )
 
+                if isinstance(args, str):
+                    try:
+                        args = json.loads(args)
+                    except Exception:
+                        args = {}
 
+                args = dict(args or {})
+
+                print(
+                    f"[BRAIN EXECUTING TOOL]: "
+                    f"{func_name}({args})"
+                )
+
+                if func_name == "get_system_telemetry":
+                    cpu = psutil.cpu_percent(interval=0.1)
+                    ram = psutil.virtual_memory().percent
+                    battery = psutil.sensors_battery()
+                    bat_str = (
+                        f"{battery.percent}%"
+                        if battery
+                        else "AC Power"
+                    )
+                    res = (
+                        f"System Metrics: CPU at {cpu}%, "
+                        f"RAM at {ram}%, Power Source: {bat_str}."
+                    )
 
                 elif func_name == "run_python_script":
+                    raw_path = str(
+                        args.get(
+                            "script_path",
+                            "",
+                        )
+                    ).strip()
+                    extra_args = str(
+                        args.get(
+                            "args",
+                            "",
+                        )
+                    ).strip()
 
-                    raw_path = str(args.get("script_path", "")).strip()
+                    actual_file = resolve_script_filename(
+                        raw_path
+                    )
 
-                    extra_args = str(args.get("args", "")).strip()
-
-# Resolve spoken or misheard filenames (e.g., 'voice listener' or 'audio lesson') to actual files on disk
-
-                    actual_file = resolve_script_filename(raw_path)
-
-                    if actual_file and os.path.exists(actual_file):
-
-                        cmd = f"py .\\\\{actual_file} {extra_args}".strip()
+                    if actual_file and os.path.exists(
+                        actual_file
+                    ):
+                        cmd = (
+                            f"py .\\\\{actual_file} "
+                            f"{extra_args}"
+                        ).strip()
 
                         pending_actions.append(
-
                             PendingAction(
-
-                                name=f"run_python_script:{actual_file}",
-
-                                execute=lambda c=cmd: subprocess.Popen(c, shell=True),
-
+                                name=(
+                                    "run_python_script:"
+                                    f"{actual_file}"
+                                ),
+                                execute=lambda c=cmd: subprocess.Popen(
+                                    c,
+                                    shell=True,
+                                ),
                                 completion="wait",
-
                             )
-
-                        )
-
-                        res = f"Executing script '{actual_file}'."
-
-                    else:
-
-                        res = f"Script '{raw_path}' could not be resolved to any file in project directory."
-
-                elif func_name == "control_media":
-
-                    action = args.get("action")
-
-                    key_map = {
-
-                        "volume_up": "volume up",
-
-                        "volume_down": "volume down",
-
-                        "mute": "volume mute",
-
-                        "play_pause": "play/pause media",
-
-                    }
-
-                    target_key = key_map.get(action)
-
-                    if target_key:
-
-                        pending_actions.append(
-
-                            PendingAction(
-
-                                name=f"control_media:{action}",
-
-                                execute=lambda k=target_key: keyboard.send(k),
-
-                            )
-
-                        )
-
-                        res = f"Media action '{action}' staged."
-
-                    else:
-
-                        res = f"Unknown action '{action}'."
-
-
-
-                elif func_name == "open_application":
-
-                    app_name = str(args.get("app_name", "")).strip()
-
-                    if not app_name:
-
-                        res = "No application name was provided."
-
-                    else:
-
-                        async def open_app(target_app: str = app_name) -> Any:
-
-                            # The Brain tool accepts applications, system settings,
-                            # folders, and other local resources. Resolve the target
-                            # through the universal resource capability so stable
-                            # Windows URI aliases such as Settings are handled
-                            # before generic AppX/MSIX discovery.
-                            return await self.capabilities.open_resource(
-
-                                target_app,
-
-                                task_id=task_id,
-
-                                verify=True,
-
-                            )
-
-
-
-                        pending_actions.append(
-
-                            PendingAction(
-
-                                name=f"open_application:{app_name}",
-
-                                execute=open_app,
-
-                                completion="dispatch",
-
-                            )
-
                         )
 
                         res = (
-
-                            f"Application '{app_name}' "
-
-                            "staged through the capability broker."
-
+                            f"Executing script '{actual_file}'."
                         )
-
-
-
-                elif func_name == "open_website":
-
-                    target = str(args.get("target", "")).lower().strip()
-
-
-
-                    # Parse count integer safely (defaulting to 1, capped at 15 to prevent accidental system freezes)
-
-                    try:
-
-                        count = int(args.get("count", 1))
-
-                        count = max(1, min(count, 15))
-
-                    except (ValueError, TypeError):
-
-                        count = 1
-
-
-
-                    if target in SITE_MAP:
-
-                        url = SITE_MAP[target]
-
-                    elif target.startswith(("http://", "https://")):
-
-                        url = target
-
-                    elif "." in target and " " not in target:
-
-                        url = f"https://{target}"
 
                     else:
-
-                        encoded_query = urllib.parse.quote(target)
-
-                        url = f"https://www.google.com/search?q={encoded_query}"
-
-
-
-                    # Queue the launcher action as many times as requested
-
-                    for _ in range(count):
-
-                        pending_actions.append(
-
-                            PendingAction(
-
-                                name=f"open_website:{url}",
-
-                                execute=lambda u=url: subprocess.Popen(
-
-                                    f"start {u}", shell=True
-
-                                ),
-
-                            )
-
+                        res = (
+                            f"Script '{raw_path}' could not be resolved "
+                            "to any file in project directory."
                         )
 
+                elif func_name == "control_media":
+                    action = args.get("action")
 
+                    key_map = {
+                        "volume_up": "volume up",
+                        "volume_down": "volume down",
+                        "mute": "volume mute",
+                        "play_pause": "play/pause media",
+                    }
 
-                    res = f"Website destination '{url}' staged ({count} time(s))."
+                    target_key = key_map.get(
+                        action
+                    )
 
+                    if target_key:
+                        pending_actions.append(
+                            PendingAction(
+                                name=(
+                                    "control_media:"
+                                    f"{action}"
+                                ),
+                                execute=lambda k=target_key: keyboard.send(k),
+                            )
+                        )
+                        res = (
+                            f"Media action '{action}' staged."
+                        )
+                    else:
+                        res = (
+                            f"Unknown action '{action}'."
+                        )
 
+                elif func_name == "open_application":
+                    app_name = str(
+                        args.get(
+                            "app_name",
+                            "",
+                        )
+                    ).strip()
+
+                    if not app_name:
+                        res = "No application name was provided."
+                    else:
+                        async def open_app(
+                            target_app: str = app_name,
+                        ) -> Any:
+                            return await self.capabilities.open_resource(
+                                target_app,
+                                task_id=task_id,
+                                verify=True,
+                            )
+
+                        pending_actions.append(
+                            PendingAction(
+                                name=(
+                                    "open_application:"
+                                    f"{app_name}"
+                                ),
+                                execute=open_app,
+                                completion="dispatch",
+                            )
+                        )
+
+                        res = (
+                            f"Application '{app_name}' "
+                            "staged through the capability broker."
+                        )
+
+                elif func_name == "open_website":
+                    raw_target = str(
+                        args.get(
+                            "target",
+                            "",
+                        )
+                    ).strip()
+                    target = raw_target.lower()
+                    search_query = str(
+                        args.get(
+                            "query",
+                            "",
+                        )
+                    ).strip()
+
+                    try:
+                        count = int(
+                            args.get(
+                                "count",
+                                1,
+                            )
+                        )
+                        count = max(
+                            1,
+                            min(count, 15),
+                        )
+                    except (
+                        ValueError,
+                        TypeError,
+                    ):
+                        count = 1
+
+                    if not raw_target:
+                        res = (
+                            "No website target was provided."
+                        )
+                    else:
+                        site_search_templates = {
+                            "youtube": (
+                                "https://www.youtube.com/"
+                                "results?search_query={}"
+                            ),
+                            "google": (
+                                "https://www.google.com/"
+                                "search?q={}"
+                            ),
+                            "github": (
+                                "https://github.com/"
+                                "search?q={}"
+                            ),
+                            "reddit": (
+                                "https://www.reddit.com/"
+                                "search/?q={}"
+                            ),
+                            "bing": (
+                                "https://www.bing.com/"
+                                "search?q={}"
+                            ),
+                            "duckduckgo": (
+                                "https://duckduckgo.com/"
+                                "?q={}"
+                            ),
+                        }
+
+                        normalized_domain = (
+                            target
+                            .replace(
+                                "https://",
+                                "",
+                            )
+                            .replace(
+                                "http://",
+                                "",
+                            )
+                            .removeprefix(
+                                "www."
+                            )
+                            .rstrip("/")
+                        )
+
+                        site_key = (
+                            normalized_domain
+                            if normalized_domain
+                            in site_search_templates
+                            else target
+                        )
+
+                        template = site_search_templates.get(
+                            site_key
+                        )
+
+                        if search_query and template:
+                            url = template.format(
+                                urllib.parse.quote_plus(
+                                    search_query
+                                )
+                            )
+                        elif (
+                            search_query
+                            and "."
+                            in raw_target
+                            and " "
+                            not in raw_target
+                        ):
+                            url = (
+                                "https://www.google.com/"
+                                "search?q="
+                                + urllib.parse.quote_plus(
+                                    f"site:{normalized_domain} "
+                                    f"{search_query}"
+                                )
+                            )
+                        elif target in SITE_MAP:
+                            url = SITE_MAP[target]
+                        elif target.startswith(
+                            (
+                                "http://",
+                                "https://",
+                            )
+                        ):
+                            url = raw_target
+                        elif (
+                            "."
+                            in raw_target
+                            and " "
+                            not in raw_target
+                        ):
+                            url = (
+                                f"https://{raw_target}"
+                            )
+                        else:
+                            encoded_query = urllib.parse.quote(
+                                raw_target,
+                                safe="",
+                            )
+                            url = (
+                                "https://www.google.com/"
+                                "search?q="
+                                f"{encoded_query}"
+                            )
+
+                        for _ in range(count):
+                            async def open_web(
+                                target_url: str = url,
+                            ) -> Any:
+                                return await self.capabilities.open_resource(
+                                    target_url,
+                                    task_id=task_id,
+                                    verify=False,
+                                )
+
+                            pending_actions.append(
+                                PendingAction(
+                                    name=(
+                                        "open_website:"
+                                        f"{url}"
+                                    ),
+                                    execute=open_web,
+                                    completion="dispatch",
+                                )
+                            )
+
+                        if search_query:
+                            res = (
+                                f"Website search navigation to "
+                                f"'{url}' staged ({count} time(s))."
+                            )
+                        else:
+                            res = (
+                                f"Website destination '{url}' staged "
+                                f"({count} time(s))."
+                            )
 
                 elif func_name == "activate_protocol":
-
                     protocol = args.get("protocol")
 
                     if protocol == "dev_mode":
-
                         pending_actions.append(
-
                             PendingAction(
-
                                 name="activate_protocol:dev_mode:ide",
-
-                                execute=lambda: subprocess.Popen("code", shell=True),
-
+                                execute=lambda: subprocess.Popen(
+                                    "code",
+                                    shell=True,
+                                ),
                             )
-
                         )
 
                         pending_actions.append(
-
                             PendingAction(
-
                                 name="activate_protocol:dev_mode:terminal",
-
-                                execute=lambda: subprocess.Popen("start wt", shell=True),
-
+                                execute=lambda: subprocess.Popen(
+                                    "start wt",
+                                    shell=True,
+                                ),
                             )
-
                         )
 
                         pending_actions.append(
-
                             PendingAction(
-
                                 name="activate_protocol:dev_mode:github",
-
-                                execute=lambda: webbrowser.open("https://github.com"),
-
+                                execute=lambda: webbrowser.open(
+                                    "https://github.com"
+                                ),
                             )
-
                         )
 
-                        res = "Dev protocol initiated. IDE, terminal, and repository staged."
+                        res = (
+                            "Dev protocol initiated. IDE, terminal, "
+                            "and repository staged."
+                        )
 
                     elif protocol == "stealth_mode":
-
                         pending_actions.append(
-
                             PendingAction(
-
                                 name="activate_protocol:stealth_mode:mute",
-
-                                execute=lambda: keyboard.send("volume mute"),
-
+                                execute=lambda: keyboard.send(
+                                    "volume mute"
+                                ),
                             )
-
                         )
 
                         pending_actions.append(
-
                             PendingAction(
-
                                 name="activate_protocol:stealth_mode:chrome",
-
                                 execute=lambda: subprocess.Popen(
-
-                                    "taskkill /F /IM chrome.exe", shell=True
-
+                                    "taskkill /F /IM chrome.exe",
+                                    shell=True,
                                 ),
-
                             )
-
                         )
 
-                        res = "Stealth protocol active. Audio muted and browser instances terminated."
+                        res = (
+                            "Stealth protocol active. Audio muted and "
+                            "browser instances terminated."
+                        )
 
                     else:
-
-                        res = f"Protocol '{protocol}' acknowledged."
-
-
-
-                elif func_name == "terminate_process":
-
-                    proc = (
-
-                        str(args.get("process_name", ""))
-
-                        .lower()
-
-                        .replace(".exe", "")
-
-                        .strip()
-
-                    )
-
-                    cmd = f"taskkill /F /IM {proc}.exe"
-
-                    pending_actions.append(
-
-                        PendingAction(
-
-                            name=f"terminate_process:{proc}",
-
-                            execute=lambda c=cmd: subprocess.Popen(c, shell=True),
-
+                        res = (
+                            f"Protocol '{protocol}' acknowledged."
                         )
 
+                elif func_name == "terminate_process":
+                    proc = (
+                        str(
+                            args.get(
+                                "process_name",
+                                "",
+                            )
+                        )
+                        .lower()
+                        .replace(
+                            ".exe",
+                            "",
+                        )
+                        .strip()
+                    )
+
+                    cmd = (
+                        f"taskkill /F /IM {proc}.exe"
+                    )
+
+                    pending_actions.append(
+                        PendingAction(
+                            name=(
+                                "terminate_process:"
+                                f"{proc}"
+                            ),
+                            execute=lambda c=cmd: subprocess.Popen(
+                                c,
+                                shell=True,
+                            ),
+                        )
                     )
 
                     res = (
-
-                        f"Termination signal dispatched for process '{proc}'."
-
+                        f"Termination signal dispatched for "
+                        f"process '{proc}'."
                     )
 
-
-
                 elif func_name == "manage_clipboard":
-
                     if pyperclip is None:
-
-                        res = "Clipboard module unavailable. Install using 'pip install pyperclip'."
-
+                        res = (
+                            "Clipboard module unavailable. Install using "
+                            "'pip install pyperclip'."
+                        )
                     else:
-
                         action = args.get("action")
 
                         if action == "read":
-
                             clip_text = pyperclip.paste()
-
-                            res = f"Clipboard contents captured: '{clip_text[:120]}...'"
+                            res = (
+                                "Clipboard contents captured: "
+                                f"'{clip_text[:120]}...'"
+                            )
 
                         elif action == "write":
-
-                            pyperclip.copy(args.get("content", ""))
-
-                            res = "New text successfully written to system clipboard."
+                            pyperclip.copy(
+                                args.get(
+                                    "content",
+                                    "",
+                                )
+                            )
+                            res = (
+                                "New text successfully written to "
+                                "system clipboard."
+                            )
 
                         else:
-
                             res = "Invalid clipboard action."
 
-
-
                 elif func_name == "system_power_control":
-
                     cmd_type = args.get("command")
 
                     if cmd_type == "lock":
-
                         pending_actions.append(
-
                             PendingAction(
-
                                 name="system_power_control:lock",
-
                                 execute=lambda: subprocess.Popen(
-
                                     "rundll32.exe user32.dll,LockWorkStation",
-
                                     shell=True,
-
                                 ),
-
                             )
-
                         )
-
-                        res = "Workstation locked."
+                        res = "Workstation lock staged."
 
                     elif cmd_type == "sleep":
-
                         pending_actions.append(
-
                             PendingAction(
-
                                 name="system_power_control:sleep",
-
                                 execute=lambda: subprocess.Popen(
-
                                     "rundll32.exe powrprof.dll,SetSuspendState 0,1,0",
-
                                     shell=True,
-
                                 ),
-
                             )
-
                         )
-
-                        res = "System entering sleep mode."
+                        res = "System sleep staged."
 
                     else:
-
-                        res = f"Power action '{cmd_type}' staged."
-
-
+                        res = (
+                            f"Power action '{cmd_type}' "
+                            "is not implemented."
+                        )
 
                 elif func_name == "organize_folder":
+                    target_dir = str(
+                        args.get(
+                            "target_folder",
+                            "",
+                        )
+                    ).strip()
 
-
-
-                    def sanitize():
-
-                        target_dir = os.path.expanduser("~/Downloads")
-
-                        categories = {
-
-                            "Images": [".png", ".jpg", ".jpeg", ".svg"],
-
-                            "Documents": [".pdf", ".docx", ".txt", ".csv"],
-
-                            "Software": [".exe", ".msi"],
-
-                        }
-
-                        for file in os.listdir(target_dir):
-
-                            ext = os.path.splitext(file)[1].lower()
-
-                            for cat, exts in categories.items():
-
-                                if ext in exts:
-
-                                    cat_folder = os.path.join(target_dir, cat)
-
-                                    os.makedirs(cat_folder, exist_ok=True)
-
-                                    try:
-
-                                        shutil.move(
-
-                                            os.path.join(target_dir, file),
-
-                                            os.path.join(cat_folder, file),
-
-                                        )
-
-                                    except Exception:
-
-                                        pass
-
-
-
-                    pending_actions.append(
-
-                        PendingAction(
-
-                            name="organize_folder:downloads",
-
-                            execute=sanitize,
-
-                            completion="wait",
-
+                    if target_dir:
+                        resolved_dir = os.path.expanduser(
+                            target_dir
+                        )
+                    else:
+                        resolved_dir = os.path.expanduser(
+                            "~/Downloads"
                         )
 
+                    def sanitize(
+                        folder: str = resolved_dir,
+                    ) -> Any:
+                        categories = {
+                            "Images": [
+                                ".png",
+                                ".jpg",
+                                ".jpeg",
+                                ".svg",
+                            ],
+                            "Documents": [
+                                ".pdf",
+                                ".docx",
+                                ".txt",
+                                ".csv",
+                            ],
+                            "Software": [
+                                ".exe",
+                                ".msi",
+                            ],
+                        }
+
+                        for file in os.listdir(folder):
+                            ext = os.path.splitext(
+                                file
+                            )[1].lower()
+
+                            for cat, exts in categories.items():
+                                if ext in exts:
+                                    cat_folder = os.path.join(
+                                        folder,
+                                        cat,
+                                    )
+
+                                    os.makedirs(
+                                        cat_folder,
+                                        exist_ok=True,
+                                    )
+
+                                    try:
+                                        shutil.move(
+                                            os.path.join(
+                                                folder,
+                                                file,
+                                            ),
+                                            os.path.join(
+                                                cat_folder,
+                                                file,
+                                            ),
+                                        )
+                                    except Exception:
+                                        pass
+
+                    pending_actions.append(
+                        PendingAction(
+                            name=(
+                                "organize_folder:"
+                                f"{resolved_dir}"
+                            ),
+                            execute=sanitize,
+                            completion="wait",
+                        )
                     )
 
-                    res = "Downloads directory sanitization scheduled."
-
-
+                    res = (
+                        f"Folder organization for "
+                        f"'{resolved_dir}' staged."
+                    )
 
                 elif func_name == "live_web_search":
-
                     if DDGS is None:
-
-                        res = "Search module unavailable. Install using 'pip install duckduckgo_search'."
-
+                        res = (
+                            "Search module unavailable. Install using "
+                            "'pip install duckduckgo_search'."
+                        )
                     else:
-
-                        query = str(args.get("query", ""))
+                        query = str(
+                            args.get(
+                                "query",
+                                "",
+                            )
+                        ).strip()
 
                         try:
-
                             with DDGS() as ddgs:
-
                                 search_results = [
-
                                     r["body"]
-
-                                    for r in ddgs.text(query, max_results=2)
-
+                                    for r in ddgs.text(
+                                        query,
+                                        max_results=2,
+                                    )
                                 ]
 
-                            res = f"Live Search Results: {' '.join(search_results)}"
-
+                            res = (
+                                "Live Search Results: "
+                                + " ".join(
+                                    search_results
+                                )
+                            )
                         except Exception as e:
-
-                            res = f"Web search encountered an error: {e}"
-
-
+                            res = (
+                                f"Web search encountered an error: "
+                                f"{e}"
+                            )
 
                 elif func_name == "query_knowledge_base":
-
-                    query_text = str(args.get("query", ""))
+                    query_text = str(
+                        args.get(
+                            "query",
+                            "",
+                        )
+                    ).strip()
 
                     try:
-
                         import chromadb
-
                         from ollama import Client as SyncOllamaClient
 
+                        chroma_client = (
+                            chromadb.PersistentClient(
+                                path="./chroma_db"
+                            )
+                        )
 
-
-                        chroma_client = chromadb.PersistentClient(path="./chroma_db")
-
-                        collection = chroma_client.get_or_create_collection(name="ultron_knowledge")
+                        collection = (
+                            chroma_client.get_or_create_collection(
+                                name="ultron_knowledge"
+                            )
+                        )
 
                         ollama_sync = SyncOllamaClient()
 
+                        emb_res = ollama_sync.embed(
+                            model="nomic-embed-text",
+                            input=query_text,
+                        )
 
+                        query_emb = emb_res[
+                            "embeddings"
+                        ][0]
 
-                        # Vectorize query
+                        results = collection.query(
+                            query_embeddings=[
+                                query_emb
+                            ],
+                            n_results=3,
+                        )
 
-                        emb_res = ollama_sync.embed(model="nomic-embed-text", input=query_text)
-
-                        query_emb = emb_res["embeddings"][0]
-
-
-
-                        # Search vector DB
-
-                        results = collection.query(query_embeddings=[query_emb], n_results=3)
-
-                        matched_docs = results.get("documents", [[]])[0]
-
-
+                        matched_docs = results.get(
+                            "documents",
+                            [[]],
+                        )[0]
 
                         if matched_docs:
-
-                            res = "Knowledge Base Content:\n" + "\n---\n".join(matched_docs)
-
+                            res = (
+                                "Knowledge Base Content:\n"
+                                + "\n---\n".join(
+                                    matched_docs
+                                )
+                            )
                         else:
-
-                            res = "No matching documents found in knowledge base."
+                            res = (
+                                "No matching documents found "
+                                "in knowledge base."
+                            )
 
                     except Exception as e:
-
-                        res = f"Knowledge base search error: {e}"
+                        res = (
+                            f"Knowledge base search error: "
+                            f"{e}"
+                        )
 
                 else:
-
                     res = "Tool unavailable."
 
-
-
-                print(f"[TOOL RESULT]: {res}")
-
-                self.history.append({"role": "tool", "content": res})
-
-
-
-            # Return to reasoning state while synthesizing tool results.
-
-            await self._publish_visual("thinking", task_id=task_id)
-
-
-
-            # Pass 2: Fast synthesis after tool execution
-
-            try:
-
-                final_response = await self.ollama.chat(
-
-                    model=MODEL_NAME,
-
-                    messages=self.history,
-
-                    options=fast_options,
-
+                print(
+                    f"[TOOL RESULT]: {res}"
                 )
 
-                final_text = final_response["message"]["content"]
+                self.history.append(
+                    {
+                        "role": "tool",
+                        "content": res,
+                    }
+                )
+
+        # For physical actions the final response is deliberately deferred
+        # to the authoritative execution ledger in main().
+        if not pending_actions:
+            try:
+                final_response = await self.ollama.chat(
+                    model=MODEL_NAME,
+                    messages=self.history,
+                    options={
+                        "num_predict": 160,
+                        "temperature": 0.2,
+                    },
+                )
+
+                if hasattr(
+                    final_response,
+                    "message",
+                ):
+                    final_text = (
+                        getattr(
+                            final_response.message,
+                            "content",
+                            "",
+                        )
+                        or ""
+                    )
+                else:
+                    final_text = (
+                        final_response.get(
+                            "message",
+                            {},
+                        ).get(
+                            "content",
+                            "",
+                        )
+                    )
 
             except Exception as e:
+                print(
+                    "[BRAIN ERROR]: Synthesis pass failed: "
+                    f"{type(e).__name__}: {e!r}"
+                )
 
-                print(f"[BRAIN ERROR]: Synthesis pass failed: {e}")
-
-                await self._publish_visual("alert", task_id=task_id)
-
-                final_text = "Action execution completed, but synthesis encountered an error."
-
+                final_text = (
+                    content_text
+                    or "The requested information was processed."
+                )
         else:
+            final_text = (
+                content_text
+                or "The requested actions have been staged for execution."
+            )
 
-            final_text = message.get("content", "Command acknowledged.")
-
-
-
-        self.history.append({"role": "assistant", "content": final_text})
+        self.history.append(
+            {
+                "role": "assistant",
+                "content": final_text,
+            }
+        )
 
         if len(self.history) > 11:
-
-            self.history = [self.history[0]] + self.history[-10:]
-
-
+            self.history = (
+                [self.history[0]]
+                + self.history[-10:]
+            )
 
         return final_text, pending_actions
+
 
 
 
@@ -2020,12 +2366,18 @@ async def main():
                     task_id,
                 )
 
-                if not action_ok:
-                    reply_text = (
-                        "I could not complete all of the requested actions. "
-                        "The execution layer reported: "
-                        f"{action_error}"
+                if pending_actions:
+                    # The execution ledger, not the model's planning text, is
+                    # authoritative for physical action claims.
+                    reply_text = brain._compose_execution_response(
+                        task_id
                     )
+
+                    if not action_ok and action_error:
+                        print(
+                            f"[EXECUTION SUMMARY ERROR] "
+                            f"[task={task_id}]: {action_error}"
+                        )
 
                 print(
                     f"[ULTRON BRAIN RESPONSE] "
