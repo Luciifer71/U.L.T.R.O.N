@@ -32,7 +32,7 @@ import urllib.parse
 
 import webbrowser
 
-import re 
+import re
 
 import difflib
 import inspect
@@ -923,15 +923,37 @@ def resolve_script_filename(requested_name: str, base_dir: str = ".") -> str | N
 
 
 
-    # 4. Fuzzy match fallback for STT mishearings ("audio lesson" -> "audio_listen.py")
-
-    matches = difflib.get_close_matches(snake_case, existing_files, n=1, cutoff=0.4)
+    # 4. Controlled fuzzy fallback for STT mishearings.
+    #
+    # A low fuzzy threshold can turn a missing executable request into an
+    # unrelated Python file (for example, "launch_game.py" previously
+    # resolving to "ollama_runtime.py"). Keep fuzzy matching only when the
+    # match is strong and clearly better than the runner-up.
+    matches = difflib.get_close_matches(
+        snake_case,
+        existing_files,
+        n=2,
+        cutoff=0.72,
+    )
 
     if matches:
+        best_ratio = difflib.SequenceMatcher(
+            None,
+            snake_case,
+            matches[0],
+        ).ratio()
 
-        return matches[0]
+        if len(matches) == 1:
+            return matches[0]
 
+        second_ratio = difflib.SequenceMatcher(
+            None,
+            snake_case,
+            matches[1],
+        ).ratio()
 
+        if best_ratio - second_ratio >= 0.10:
+            return matches[0]
 
     return None
 

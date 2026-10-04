@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import asyncio
 
-from brain_agent import PendingAction, UltronBrain
+from brain_agent import (
+    PendingAction,
+    UltronBrain,
+    resolve_script_filename,
+)
 
 
 class FakeCapabilityResult:
@@ -126,3 +130,42 @@ def test_pending_action_ledger_records_capability_result() -> None:
         )
 
     asyncio.run(run())
+
+
+def test_missing_script_is_not_fuzzy_matched(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "brain_agent.os.listdir",
+        lambda _: [
+            "ollama_runtime.py",
+            "brain_agent.py",
+        ],
+    )
+
+    assert resolve_script_filename(
+        "launch_game.py",
+        str(tmp_path),
+    ) is None
+
+
+def test_normalized_existing_script_still_resolves(tmp_path) -> None:
+    (tmp_path / "voice_listener.py").write_text("", encoding="utf-8")
+
+    assert resolve_script_filename(
+        "voice listener",
+        str(tmp_path),
+    ) == "voice_listener.py"
+
+
+def test_strong_fuzzy_script_match_is_still_allowed(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "brain_agent.os.listdir",
+        lambda _: [
+            "audio_listen.py",
+            "action_daemon.py",
+        ],
+    )
+
+    assert resolve_script_filename(
+        "audio lesson.py",
+        str(tmp_path),
+    ) == "audio_listen.py"
