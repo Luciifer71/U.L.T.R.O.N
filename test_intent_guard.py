@@ -214,3 +214,20 @@ def test_missing_required_argument_is_rejected() -> None:
 
     assert normalized == []
     assert clarification == "Which application should I open?"
+
+
+
+def test_conversational_ack_is_not_an_action_request() -> None:
+    from ultron_control.intent_guard import is_conversational_only
+
+    assert is_conversational_only("Thank you")
+    assert is_conversational_only("Okay, good job")
+    assert not is_conversational_only("Okay, open Chrome")
+
+
+def test_task_status_request_is_detected() -> None:
+    from ultron_control.intent_guard import is_task_status_request
+
+    assert is_task_status_request("What's the status on the above task that I gave you?")
+    assert is_task_status_request("How is the previous task performing?")
+    assert not is_task_status_request("Open Forza Horizon 6.")

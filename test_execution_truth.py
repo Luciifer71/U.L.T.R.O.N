@@ -91,7 +91,7 @@ def test_execution_response_reports_partial_failure() -> None:
     assert "Could not complete: Missing App (Application not found.)." in response
 
 
-def test_pending_action_ledger_records_capability_result() -> None:
+def test_pending_action_ledger_records_capability_result(monkeypatch) -> None:
     async def run():
         brain = bare_brain()
 
@@ -99,6 +99,7 @@ def test_pending_action_ledger_records_capability_result() -> None:
             return None
 
         brain._publish_visual = publish_visual
+        monkeypatch.setattr("brain_agent.update_task", lambda *args, **kwargs: None)
 
         async def action():
             return FakeCapabilityResult(

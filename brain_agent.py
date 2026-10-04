@@ -61,7 +61,9 @@ from ultron_control.capability_broker import CapabilityBroker
 from ultron_control.intent_guard import (
     build_replay_plan,
     extract_replay_plan,
+    is_conversational_only,
     is_replay_request,
+    is_task_status_request,
     looks_incomplete_request,
     normalize_tool_calls,
 )
@@ -80,6 +82,12 @@ from memory_db import (
     log_chat,
 
     get_recent_chat_history,
+
+    create_task,
+
+    update_task,
+
+    get_latest_task,
 
 )
 
@@ -1070,7 +1078,33 @@ CRITICAL RULES:
 8. REPEAT REQUESTS: When the user asks to repeat or redo a previous task, use the stored replay plan supplied by the execution system. Never invent a previous task from conversational wording alone."""
         )
 
-        self.history = [{"role": "system", "content": self.system_prompt}]
+        recent_history = get_recent_chat_history(limit=10)
+        self.history = [
+            {"role": "system", "content": self.system_prompt},
+            *recent_history,
+        ]
+
+
+
+    def _compose_latest_task_status(self) -> str:
+        """Return status from durable task memory, never from model inference."""
+        task = get_latest_task()
+
+        if not task:
+            return "I do not have a previous task recorded yet."
+
+        status = str(task.get("status") or "unknown").replace("_", " ").lower()
+        prompt = str(task.get("prompt") or "").strip()
+        result = str(task.get("result_text") or "").strip()
+        error = str(task.get("error_text") or "").strip()
+
+        response = f"Task status: {status}. Last task: {prompt}"
+        if result:
+            response += f" Result: {result}"
+        if error and error not in result:
+            response += f" Error: {error}"
+
+        return response
 
 
 
@@ -1086,6 +1120,11 @@ CRITICAL RULES:
             return True, None
 
         execution_started = asyncio.get_running_loop().time()
+        update_task(
+            task_id,
+            "executing",
+            event_message="Physical action execution started.",
+        )
         await self._publish_visual("executing", task_id=task_id)
 
         errors: list[str] = []
@@ -2374,19 +2413,39 @@ async def main():
                     f"[task={task_id}]: '{prompt}'"
                 )
 
-                reply_text, pending_actions = await brain.process_intent(
-                    prompt,
-                    task_id,
-                )
+                log_chat("user", prompt)
 
-                # -------------------------------------------------
-                # PHYSICAL ACTION EXECUTION
-                # -------------------------------------------------
+                # Status and courtesy messages must never be handed to the LLM
+                # as fresh physical-action decisions. These are deterministic
+                # conversational paths.
+                if is_task_status_request(prompt):
+                    await brain._publish_visual("thinking", task_id=task_id)
+                    reply_text = brain._compose_latest_task_status()
+                    pending_actions = []
+                    action_ok = True
+                    action_error = None
+                elif is_conversational_only(prompt):
+                    await brain._publish_visual("thinking", task_id=task_id)
+                    reply_text = "Understood. I'm ready for your next command."
+                    pending_actions = []
+                    action_ok = True
+                    action_error = None
+                else:
+                    create_task(task_id, prompt, status="thinking")
 
-                action_ok, action_error = await brain._run_pending_actions(
-                    pending_actions,
-                    task_id,
-                )
+                    reply_text, pending_actions = await brain.process_intent(
+                        prompt,
+                        task_id,
+                    )
+
+                    # -------------------------------------------------
+                    # PHYSICAL ACTION EXECUTION
+                    # -------------------------------------------------
+
+                    action_ok, action_error = await brain._run_pending_actions(
+                        pending_actions,
+                        task_id,
+                    )
 
                 if pending_actions:
                     # The execution ledger, not the model's planning text, is
@@ -2405,6 +2464,23 @@ async def main():
                     f"[ULTRON BRAIN RESPONSE] "
                     f"[task={task_id}]: '{reply_text}'"
                 )
+
+                log_chat("assistant", reply_text)
+
+                if not is_task_status_request(prompt) and not is_conversational_only(prompt):
+                    final_status = "completed" if action_ok else "failed"
+                    update_task(
+                        task_id,
+                        final_status,
+                        result_text=reply_text,
+                        error_text=action_error,
+                        execution=brain.execution_ledger.get(task_id),
+                        event_message=(
+                            "Task completed successfully."
+                            if action_ok
+                            else "Task completed with execution failures."
+                        ),
+                    )
 
                 # -------------------------------------------------
                 # SPEECH RESPONSE
@@ -2459,6 +2535,18 @@ async def main():
                     f"[INTENT HANDLING ERROR] "
                     f"[task={task_id}]: {e}"
                 )
+
+                try:
+                    update_task(
+                        task_id,
+                        "failed",
+                        error_text=str(e),
+                        event_message="Task handling raised an unexpected error.",
+                    )
+                except Exception as memory_error:
+                    print(
+                        f"[TASK MEMORY ERROR] [task={task_id}]: {memory_error}"
+                    )
 
                 await brain._publish_visual(
                     "alert",

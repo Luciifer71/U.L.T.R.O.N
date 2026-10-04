@@ -176,6 +176,47 @@ def looks_incomplete_request(prompt: str) -> bool:
     return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
 
 
+def is_conversational_only(prompt: str) -> bool:
+    """Return True for short acknowledgements that must never trigger tools."""
+
+    text = re.sub(r"[^a-z0-9']+", " ", _normalize_text(prompt)).strip()
+    acknowledgements = {
+        "thank you",
+        "thanks",
+        "thanks a lot",
+        "thank you so much",
+        "okay",
+        "ok",
+        "okay good",
+        "okay good job",
+        "okay great",
+        "good job",
+        "nice",
+        "great",
+        "perfect",
+        "cool",
+        "got it",
+        "that's good",
+        "that is good",
+    }
+    return text in acknowledgements
+
+
+def is_task_status_request(prompt: str) -> bool:
+    """Detect requests asking for the status of an existing task."""
+
+    text = _normalize_text(prompt)
+    patterns = (
+        r"\bwhat(?:'s| is) the status (?:on|of) (?:the )?(?:above|previous|last|that|this) task\b",
+        r"\bhow is (?:the )?(?:above|previous|last|that|this) task (?:doing|performing)\b",
+        r"\bis (?:the )?(?:above|previous|last|that|this) task (?:done|complete|completed)\b",
+        r"\bdid (?:the )?(?:above|previous|last|that|this) task (?:finish|complete)\b",
+        r"\bwhat happened to (?:the )?(?:above|previous|last|that|this) task\b",
+        r"\bwhat(?:'s| is) the status of my (?:latest|last|previous) task\b",
+    )
+    return any(re.search(pattern, text) for pattern in patterns)
+
+
 def infer_site_from_prompt(prompt: str) -> str | None:
     """Infer a known website from phrases such as 'search X on YouTube'."""
 
