@@ -1,25 +1,5 @@
 import os
 import random
-import site
-import sys
-
-# Auto-inject CUDA library directories into Windows DLL path
-for site_path in site.getsitepackages():
-    cublas_dir = os.path.join(site_path, "nvidia", "cublas", "lib")
-    cudnn_dir = os.path.join(site_path, "nvidia", "cudnn", "lib")
-
-    if os.path.exists(cublas_dir):
-        try:
-            os.add_dll_directory(cublas_dir)
-        except Exception:
-            pass
-
-    if os.path.exists(cudnn_dir):
-        try:
-            os.add_dll_directory(cudnn_dir)
-        except Exception:
-            pass
-
 
 import asyncio
 from collections import deque
@@ -30,7 +10,7 @@ import re
 import time
 from typing import Optional, Tuple
 
-from faster_whisper import WhisperModel
+from speech_runtime import SpeechConfig, load_whisper_model, transcription_options
 import numpy as np
 from nats.aio.client import Client as NATS
 import sounddevice as sd
@@ -42,7 +22,10 @@ from visual_events import publish_visual_event
 # DEPLOYMENT CONFIGURATION
 # =========================================================
 
-NATS_URL = "nats://127.0.0.1:4222"
+NATS_URL = os.getenv("NATS_URL", "nats://127.0.0.1:4222")
+MIC_DEVICE = os.getenv("AUDIO_INPUT_DEVICE") or None
+if MIC_DEVICE is not None and MIC_DEVICE.isdecimal():
+    MIC_DEVICE = int(MIC_DEVICE)
 SAMPLE_RATE = 16000
 CHANNELS = 1
 AUDIO_BLOCK_SIZE = 1024
@@ -91,11 +74,6 @@ HALLUCINATION_PATTERNS = [
 ]
 
 
-SYSTEM_PROMPT_VOCAB = (
-    "Ultron, Hey Ultron, system command, open application, "
-    "system diagnostics, task manager, terminal, lock workstation, "
-    "run process, browser, calculator, cmd."
-)
 
 
 logging.basicConfig(
@@ -133,64 +111,9 @@ class AcousticGate:
 
 class WhisperEngine:
 
-    def __init__(self, model_size: str = "small.en"):
-        self.model = None
-        self.device = "cuda"
-
-        self._load_model(model_size)
-
-    def _load_model(self, model_size: str):
-
-        try:
-            logging.info(
-                f"[WHISPER]: Initializing GPU engine ({model_size})..."
-            )
-
-            test_model = WhisperModel(
-                model_size,
-                device="cuda",
-                compute_type="float16",
-            )
-
-            # Warmup GPU execution pipeline
-            dummy_audio = np.zeros(
-                16000,
-                dtype=np.float32,
-            )
-
-            list(
-                test_model.transcribe(
-                    dummy_audio,
-                    beam_size=1,
-                    vad_filter=False,
-                )[0]
-            )
-
-            self.model = test_model
-
-            logging.info(
-                "[WHISPER]: GPU Acceleration Verified. "
-                "High Precision Active."
-            )
-
-        except Exception as e:
-
-            logging.warning(
-                "[WHISPER]: CUDA initialization unavailable "
-                f"({e}). Switching to CPU (INT8 fallback)..."
-            )
-
-            self.device = "cpu"
-
-            self.model = WhisperModel(
-                "base.en",
-                device="cpu",
-                compute_type="int8",
-            )
-
-            logging.info(
-                "[WHISPER]: CPU Engine active."
-            )
+    def __init__(self, config: Optional[SpeechConfig] = None):
+        self.config = config or SpeechConfig.from_env()
+        self.model, self.device, self.runtime_report = load_whisper_model(self.config)
 
     def transcribe(
         self,
@@ -204,19 +127,7 @@ class WhisperEngine:
 
             segments, _ = self.model.transcribe(
                 audio_data,
-                beam_size=5,
-                language="en",
-                vad_filter=True,
-                vad_parameters=dict(
-                    min_speech_duration_ms=300,
-                    threshold=0.45,
-                    min_silence_duration_ms=1000,
-                ),
-                no_speech_threshold=0.6,
-                log_prob_threshold=-1.0,
-                compression_ratio_threshold=2.4,
-                condition_on_previous_text=False,
-                initial_prompt=SYSTEM_PROMPT_VOCAB,
+                **transcription_options(self.config),
             )
 
             full_text = " ".join(
@@ -295,8 +206,12 @@ class ResilientAudioStream:
 
         try:
 
+            sd.check_input_settings(
+                device=MIC_DEVICE, samplerate=SAMPLE_RATE,
+                channels=CHANNELS, dtype="float32",
+            )
             device_info = sd.query_devices(
-                kind="input"
+                device=MIC_DEVICE, kind="input"
             )
 
             device_name = device_info.get(
@@ -310,6 +225,7 @@ class ResilientAudioStream:
             )
 
             self.stream = sd.InputStream(
+                device=MIC_DEVICE,
                 samplerate=SAMPLE_RATE,
                 channels=CHANNELS,
                 dtype="float32",
@@ -329,6 +245,10 @@ class ResilientAudioStream:
             logging.error(
                 f"[AUDIO HARDWARE ERROR]: {e}"
             )
+            if self.stream is not None:
+                self.stream.close()
+                self.stream = None
+            raise RuntimeError("Microphone startup failed; run speech_diagnostics.py --list-mics") from e
 
 
 # =========================================================
@@ -349,7 +269,7 @@ async def calibrate_ambient_noise(
 
     for _ in range(samples):
 
-        block = await audio_queue.get()
+        block = await asyncio.wait_for(audio_queue.get(), timeout=5.0)
 
         rms = float(
             np.sqrt(
@@ -489,9 +409,12 @@ async def main():
 
     acoustic_gate = AcousticGate()
 
-    whisper_engine = WhisperEngine(
-        model_size="small.en"
-    )
+    try:
+        # CUDA probing/model loading must not block the NATS event loop.
+        whisper_engine = await asyncio.to_thread(WhisperEngine)
+    except Exception:
+        await nc.close()
+        raise
 
     loop = asyncio.get_running_loop()
 
@@ -558,13 +481,16 @@ async def main():
         loop,
     )
 
-    stream_manager.start()
-
-    silence_threshold = (
-        await calibrate_ambient_noise(
-            audio_queue
-        )
-    )
+    try:
+        stream_manager.start()
+        silence_threshold = await calibrate_ambient_noise(audio_queue)
+    except Exception:
+        if stream_manager.stream is not None:
+            stream_manager.stream.stop()
+            stream_manager.stream.close()
+        thread_pool.shutdown(wait=False, cancel_futures=True)
+        await nc.close()
+        raise
 
 
     # =====================================================

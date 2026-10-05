@@ -15,7 +15,7 @@ import psutil
 import pygame
 from nats.aio.client import Client as NATS
 
-NATS_URL = "nats://localhost:4222"
+NATS_URL = os.getenv("NATS_URL", "nats://127.0.0.1:4222")
 SUBJECT = "ultron.>"
 
 # Voice configuration tuned for Ultron's dark, imposing tone

@@ -190,7 +190,11 @@ Current implementation supports a wake-word/session interaction model around:
 Hey Ultron
 ```
 
-The speech engine is designed to use GPU acceleration when the local CUDA runtime is available and falls back to CPU otherwise.
+The speech engine validates CUDA with an isolated inference probe. Set
+`WHISPER_DEVICE=cuda` to require GPU inference, or `auto` to allow an explicitly
+logged CPU fallback that preserves the selected model. See
+[speech runtime setup and acceptance](docs/voice-runtime.md) for Windows CUDA
+dependencies, microphone diagnostics, model evaluation and release checks.
 
 ---
 

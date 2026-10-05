@@ -1,0 +1,9 @@
+# Install into the same x64 Windows virtual environment as voice_listener.py.
+# Requires a compatible NVIDIA driver; does not install/change that driver.
+faster-whisper==1.2.1
+ctranslate2==4.8.2
+nvidia-cublas-cu12==12.6.4.1; sys_platform == "win32" and platform_machine == "AMD64"
+nvidia-cudnn-cu12==9.10.2.21; sys_platform == "win32" and platform_machine == "AMD64"
+sounddevice>=0.4.6
+numpy>=1.24.0
+nats-py>=2.8.0
