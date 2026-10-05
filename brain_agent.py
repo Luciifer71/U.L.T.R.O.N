@@ -60,13 +60,16 @@ from visual_events import publish_visual_event
 from ultron_control.capability_broker import CapabilityBroker
 from ultron_control.intent_guard import (
     build_replay_plan,
+    contains_physical_action_request,
     extract_replay_plan,
     is_conversational_only,
     is_replay_request,
     is_task_status_request,
     looks_incomplete_request,
     normalize_tool_calls,
+    contains_execution_claim,
 )
+
 
 
 from memory_db import (
@@ -1409,6 +1412,11 @@ CRITICAL RULES:
                 [],
             )
 
+        # A validated executable request becomes a durable task here.
+        # Incomplete, status, acknowledgement, and invalid replay requests
+        # never reach this point.
+        create_task(task_id, prompt, status="thinking")
+
         if replay_calls:
             message = {
                 "role": "assistant",
@@ -1422,7 +1430,6 @@ CRITICAL RULES:
                 "num_predict": 256,
                 "temperature": 0.2,
             }
-
             try:
                 response = await self.ollama.chat(
                     model=MODEL_NAME,
@@ -2424,15 +2431,15 @@ async def main():
                     pending_actions = []
                     action_ok = True
                     action_error = None
+
                 elif is_conversational_only(prompt):
                     await brain._publish_visual("thinking", task_id=task_id)
                     reply_text = "Understood. I'm ready for your next command."
                     pending_actions = []
                     action_ok = True
                     action_error = None
-                else:
-                    create_task(task_id, prompt, status="thinking")
 
+                else:
                     reply_text, pending_actions = await brain.process_intent(
                         prompt,
                         task_id,
@@ -2459,6 +2466,27 @@ async def main():
                             f"[EXECUTION SUMMARY ERROR] "
                             f"[task={task_id}]: {action_error}"
                         )
+
+                                # Never allow an LLM-generated response to claim physical
+                # execution when the execution layer has no evidence.
+                execution_evidence = brain.execution_ledger.get(task_id) or []
+
+                if (
+                    not execution_evidence
+                    and contains_physical_action_request(prompt)
+                    and contains_execution_claim(reply_text)
+                    and not is_task_status_request(prompt)
+                ):
+                    print(
+                        f"[EXECUTION TRUTH GUARD] "
+                        f"[task={task_id}]: blocked unsupported execution claim."
+                    )
+                    reply_text = (
+                        "I did not execute that action because no validated "
+                        "execution plan was produced."
+                    )
+                    action_ok = False
+                    action_error = "No validated execution evidence."
 
                 print(
                     f"[ULTRON BRAIN RESPONSE] "

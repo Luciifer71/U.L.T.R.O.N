@@ -167,47 +167,107 @@ def looks_incomplete_request(prompt: str) -> bool:
         return True
 
     patterns = (
-        r"\bapp(?:lication)?\s+(?:named|called)\s*(?:\.\.\.|…)?$",
-        r"\b(?:file|folder|program|site|website)\s+(?:named|called)\s*(?:\.\.\.|…)?$",
-        r"\b(?:search|look|look up)\s+(?:for\s*)?(?:\.\.\.|…)?$",
-        r"\b(?:and|then|with|for|named|called)\s+(?:\.\.\.|…)?$",
+        # Missing argument after a named/called target.
+        r"\bapp(?:lication)?\s+(?:named|called)\s*(?:\.\.\.)?$",
+        r"\b(?:file|folder|program|site|website)\s+(?:named|called)\s*(?:\.\.\.)?$",
+
+        # Search/look-up requests with no query.
+        r"\b(?:search|look|look up)\s+(?:for\s*)?(?:\.\.\.)?$",
+
+        # Trailing conjunction/preposition that clearly expects more input.
+        r"\b(?:and|then|with|for|named|called)\s*(?:\.\.\.)?$",
+        r"\b(?:and|then|with)\s*[?.!]*$",
+
+        # Bare computer-action requests with no target.
+        r"^(?:open|launch|start|close|run)(?:\s+up)?\s*[?.!]*$",
+        r"^(?:can|could|would)\s+you\s+(?:please\s+)?"
+        r"(?:open|launch|start|close|run)(?:\s+up)?\s*[?.!]*$",
+
+        # Conditional fragments ending after an action clause.
+        r"^(?:when|while|before|after)\b.*"
+        r"\b(?:open|launch|start|close|run)\b[^,;]*[?.!]*$",
     )
 
     return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
 
-
 def is_conversational_only(prompt: str) -> bool:
-    """Return True for short acknowledgements that must never trigger tools."""
+    """Return True when the input contains only acknowledgement/courtesy language."""
 
     text = re.sub(r"[^a-z0-9']+", " ", _normalize_text(prompt)).strip()
-    acknowledgements = {
-        "thank you",
-        "thanks",
-        "thanks a lot",
-        "thank you so much",
-        "okay",
+
+    if not text:
+        return False
+
+    tokens = text.split()
+
+    acknowledgement_tokens = {
         "ok",
-        "okay good",
-        "okay good job",
-        "okay great",
-        "good job",
+        "okay",
+        "thanks",
+        "thank",
+        "you",
+        "so",
+        "much",
+        "very",
+        "a",
+        "lot",
+        "good",
+        "great",
+        "job",
+        "nice",
+        "perfect",
+        "cool",
+        "got",
+        "it",
+        "that's",
+        "that",
+        "is",
+        "really",
+        "awesome",
+        "understood",
+        "i",
+        "understand",
+    }
+
+    acknowledgement_anchors = {
+        "ok",
+        "okay",
+        "thanks",
+        "thank",
+        "got",
         "nice",
         "great",
         "perfect",
         "cool",
-        "got it",
-        "that's good",
-        "that is good",
+        "understood",
+        "awesome",
     }
-    return text in acknowledgements
 
+    # Every word must belong to the acknowledgement vocabulary.
+    # Any command/action word such as "open", "launch", "search", etc.
+    # therefore automatically prevents conversational classification.
+    if not all(token in acknowledgement_tokens for token in tokens):
+        return False
+
+    if not any(token in acknowledgement_anchors for token in tokens):
+        return False
+
+    # Preserve common multi-word acknowledgement structures.
+    if "thank" in tokens and "you" not in tokens:
+        return False
+
+    if "got" in tokens and "it" not in tokens:
+        return False
+
+    return True
 
 def is_task_status_request(prompt: str) -> bool:
     """Detect requests asking for the status of an existing task."""
 
     text = _normalize_text(prompt)
     patterns = (
-        r"\bwhat(?:'s| is) the status (?:on|of) (?:the )?(?:above|previous|last|that|this) task\b",
+        r"\b(?:can you|could you|would you)\s+(?:please\s+)?(?:tell|give)\s+me\s+(?:the\s+)?status\s+(?:on|of)\s+(?:the\s+)?(?:above|previous|last|that|this)\s+task\b",
+        r"\b(?:what(?:'s| is)|tell me)\s+(?:the\s+)?status\s+(?:on|of)\s+(?:the\s+)?(?:above|previous|last|that|this)\s+task\b",
         r"\bhow is (?:the )?(?:above|previous|last|that|this) task (?:doing|performing)\b",
         r"\bis (?:the )?(?:above|previous|last|that|this) task (?:done|complete|completed)\b",
         r"\bdid (?:the )?(?:above|previous|last|that|this) task (?:finish|complete)\b",
@@ -269,7 +329,68 @@ def build_site_search_url(site: str, query: str) -> str | None:
 
     return template.format(query=quote_plus(str(query).strip()))
 
+def contains_physical_action_request(prompt: str) -> bool:
+    """Detect whether the user explicitly requested a computer/OS action."""
 
+    normalized = _normalize_text(prompt)
+
+    action_patterns = (
+        r"\bopen\b",
+        r"\blaunch\b",
+        r"\bstart\b",
+        r"\bclose\b",
+        r"\bterminate\b",
+        r"\bkill\b",
+        r"\bexecute\b",
+        r"\brun\b",
+        r"\bsearch\b",
+        r"\blook up\b",
+        r"\btype\b",
+        r"\bclick\b",
+        r"\bpress\b",
+        r"\bdownload\b",
+        r"\bupload\b",
+        r"\binstall\b",
+        r"\buninstall\b",
+        r"\bcreate\b",
+        r"\bdelete\b",
+        r"\bmove\b",
+        r"\bcopy\b",
+        r"\bpaste\b",
+        r"\brename\b",
+    )
+
+    return any(
+        re.search(pattern, normalized, flags=re.IGNORECASE)
+        for pattern in action_patterns
+    )
+
+def contains_execution_claim(text: str) -> bool:
+    """Detect language that claims a physical action actually occurred."""
+
+    normalized = _normalize_text(text)
+
+    patterns = (
+        r"\bopened\b",
+        r"\bopen(?:ed)? successfully\b",
+        r"\bis now open\b",
+        r"\bis open\b",
+        r"\bhas been opened\b",
+        r"\bwas opened\b",
+        r"\bdispatched\b",
+        r"\bexecuted\b",
+        r"\bstarted\b",
+        r"\blaunched\b",
+        r"\bterminated\b",
+        r"\bclosed\b",
+        r"\bcompleted\b",
+        r"\btask completed\b",
+    )
+
+    return any(
+        re.search(pattern, normalized, flags=re.IGNORECASE)
+        for pattern in patterns
+    )
 def _normalize_open_website_args(
     *,
     prompt: str,

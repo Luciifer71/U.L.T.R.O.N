@@ -4,12 +4,48 @@ import pytest
 
 from ultron_control.intent_guard import (
     build_replay_plan,
+    contains_execution_claim,
     extract_replay_plan,
     infer_query_from_prompt,
     looks_incomplete_request,
     normalize_tool_calls,
 )
+def test_incomplete_bare_open_requests():
+    assert looks_incomplete_request("Open?")
+    assert looks_incomplete_request("Open up?")
+    assert looks_incomplete_request("Can you open?")
+    assert looks_incomplete_request("Can you open up?")
 
+
+def test_incomplete_conditional_open_requests():
+    assert looks_incomplete_request("When you open task manager.")
+    assert looks_incomplete_request("When you open task manager for this.")
+
+
+def test_valid_open_requests_are_not_incomplete():
+    assert not looks_incomplete_request("Open Task Manager.")
+    assert not looks_incomplete_request("Open Chrome.")
+    assert not looks_incomplete_request("Launch Calculator.")
+
+def test_plain_trailing_conjunction_is_incomplete() -> None:
+    assert looks_incomplete_request("Can you open calculator and?")
+    assert looks_incomplete_request("Open Chrome and")
+    assert not looks_incomplete_request("Open YouTube and search quantum computers.")
+
+def test_conversational_ack_variants_are_not_actions() -> None:
+    from ultron_control.intent_guard import is_conversational_only
+
+    assert is_conversational_only("Thank you")
+    assert is_conversational_only("Okay, thank you.")
+    assert is_conversational_only("Thanks so much.")
+    assert is_conversational_only("Okay, good job.")
+    assert is_conversational_only("Great, got it.")
+    assert is_conversational_only("Perfect.")
+
+    assert not is_conversational_only("Okay, open Chrome.")
+    assert not is_conversational_only("Thanks, now open YouTube.")
+    assert not is_conversational_only("Great, launch Calculator.")
+    assert not is_conversational_only("Okay, search for quantum computers.")
 
 def call(name: str, arguments: dict) -> dict:
     return {"function": {"name": name, "arguments": arguments}}
@@ -34,6 +70,21 @@ def test_site_search_is_atomic() -> None:
     assert normalized[0]["function"]["arguments"]["target"] == "youtube"
     assert normalized[0]["function"]["arguments"]["query"] == "quantum computers"
 
+def test_execution_claim_detection() -> None:
+    from ultron_control.intent_guard import contains_execution_claim
+
+    assert contains_execution_claim("Opened and verified: Calculator.")
+    assert contains_execution_claim("Dispatched: Open application Task Manager.")
+    assert contains_execution_claim("Task completed successfully.")
+
+    assert not contains_execution_claim("I cannot safely execute that yet.")
+    assert not contains_execution_claim("Which application should I open?")
+
+def test_contains_execution_claim_detects_open_state():
+    assert contains_execution_claim("Task Manager is now open.")
+    assert contains_execution_claim("Chrome is open.")
+    assert contains_execution_claim("The application has been opened.")
+    assert not contains_execution_claim("I will open Task Manager.")
 
 def test_query_only_web_call_merges_with_previous_site() -> None:
     normalized, clarification = normalize_tool_calls(
