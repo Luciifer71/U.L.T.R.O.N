@@ -51,6 +51,18 @@ def call(name: str, arguments: dict) -> dict:
     return {"function": {"name": name, "arguments": arguments}}
 
 
+@pytest.mark.parametrize("prompt", ["Yes.", "Yes please!", "Yeah", "Yep", "Sure", "No", "No thanks", "Do you hear me?", "Can you hear me?", "Are you listening?"])
+def test_bare_acknowledgements_and_connection_checks_are_conversational(prompt):
+    from ultron_control.intent_guard import is_conversational_only
+    assert is_conversational_only(prompt)
+
+
+@pytest.mark.parametrize("prompt", ["Yes, open calculator.", "Sure, open File Explorer.", "Can you hear me and open calculator?", "Yes, repeat that task."])
+def test_acknowledgement_with_explicit_request_keeps_action_path(prompt):
+    from ultron_control.intent_guard import is_conversational_only
+    assert not is_conversational_only(prompt)
+
+
 def test_site_search_is_atomic() -> None:
     normalized, clarification = normalize_tool_calls(
         "Open YouTube and search quantum computers on it.",
@@ -282,3 +294,9 @@ def test_task_status_request_is_detected() -> None:
     assert is_task_status_request("What's the status on the above task that I gave you?")
     assert is_task_status_request("How is the previous task performing?")
     assert not is_task_status_request("Open Forza Horizon 6.")
+
+
+def test_no_actions_started_is_not_a_success_claim():
+    assert not contains_execution_claim('Please clarify the application name. No actions were started.')
+    assert contains_execution_claim('No actions were started. I opened Calculator.')
+    assert contains_execution_claim('Calculator started successfully.')

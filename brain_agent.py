@@ -58,6 +58,7 @@ import psutil
 from visual_events import publish_visual_event
 
 from ultron_control.capability_broker import CapabilityBroker
+from ultron_control.request_planning import explicit_launch_plan, PlanClarification, validate_application_targets
 from ultron_control.intent_guard import (
     build_replay_plan,
     contains_physical_action_request,
@@ -1383,6 +1384,7 @@ CRITICAL RULES:
         task_id: str,
     ) -> tuple[str, list]:
         self.current_task_id = task_id
+        self.last_plan_error = None
         await self._publish_visual("thinking", task_id=task_id)
 
         self.history.append(
@@ -1398,6 +1400,12 @@ CRITICAL RULES:
                 "Which app, file, folder, or target did you mean?",
                 [],
             )
+
+        try:
+            explicit_calls = explicit_launch_plan(prompt)
+        except PlanClarification as exc:
+            self.last_plan_error = str(exc)
+            return str(exc), []
 
         replay_request = is_replay_request(prompt)
         replay_calls = extract_replay_plan(
@@ -1417,13 +1425,14 @@ CRITICAL RULES:
         # never reach this point.
         create_task(task_id, prompt, status="thinking")
 
-        if replay_calls:
+        selected_calls = replay_calls or explicit_calls
+        if selected_calls:
             message = {
                 "role": "assistant",
                 "content": "",
-                "tool_calls": replay_calls,
+                "tool_calls": selected_calls,
             }
-            tool_calls = list(replay_calls)
+            tool_calls = list(selected_calls)
             content_text = ""
         else:
             fast_options = {
@@ -1491,6 +1500,47 @@ CRITICAL RULES:
                 or []
             )
 
+        # A prose answer cannot execute a physical request. Retry planning once,
+        # retaining context and the same validation/execution path.
+        if (
+            not tool_calls
+            and "<tool_call>" not in content_text
+            and contains_physical_action_request(prompt)
+        ):
+            print(f"[PLAN RETRY] [task={task_id}]: model returned no tool calls.")
+            retry_messages = [
+                *self.history,
+                {
+                    "role": "user",
+                    "content": (
+                        "For my latest request, return the necessary tool calls "
+                        "using the provided tools. Nothing has executed yet. "
+                        "Do not claim success or invent missing targets. If the "
+                        "request is ambiguous or unsupported, ask for clarification."
+                    ),
+                },
+            ]
+            try:
+                retry = await self.ollama.chat(
+                    model=MODEL_NAME, messages=retry_messages, tools=TOOLS,
+                    options={"num_predict": 256, "temperature": 0},
+                )
+                retry_msg = getattr(retry, "message", None)
+                if retry_msg is None:
+                    retry_msg = retry.get("message", {})
+                if isinstance(retry_msg, dict):
+                    message = dict(retry_msg)
+                else:
+                    message = {
+                        "role": getattr(retry_msg, "role", "assistant"),
+                        "content": getattr(retry_msg, "content", "") or "",
+                        "tool_calls": getattr(retry_msg, "tool_calls", []) or [],
+                    }
+                content_text = message.get("content", "") or ""
+                tool_calls = list(message.get("tool_calls", []) or [])
+            except Exception as exc:
+                print(f"[PLAN RETRY ERROR]: {type(exc).__name__}: {exc!r}")
+
         if "<tool_call>" in content_text:
             matches = re.findall(
                 r"<tool_call>\s*(.*?)\s*</tool_call>",
@@ -1536,14 +1586,33 @@ CRITICAL RULES:
             )
 
             if clarification:
+                self.last_plan_error = clarification
                 return clarification, []
 
             tool_calls = normalized_calls
+            if not replay_calls:
+                grounding_error = validate_application_targets(prompt, tool_calls)
+                if grounding_error:
+                    self.last_plan_error = grounding_error
+                    print(f"[PLAN REJECTED] [task={task_id}]: {grounding_error}")
+                    return grounding_error, []
             message["tool_calls"] = tool_calls
 
             replay_plan = build_replay_plan(tool_calls)
             if replay_plan:
                 self.last_replay_plan = replay_plan
+
+        if not tool_calls and contains_physical_action_request(prompt):
+            self.last_plan_error = "No validated execution plan was produced."
+            # Do not ask a tools-disabled synthesis pass to invent an outcome.
+            reply = (
+                content_text if content_text and not contains_execution_claim(content_text)
+                else "I could not produce a validated execution plan. Please restate the action and its target."
+            )
+            self.history.append({"role": "assistant", "content": reply})
+            if len(self.history) > 11:
+                self.history = [self.history[0], *self.history[-10:]]
+            return reply, []
 
         pending_actions: list[PendingAction] = []
 
@@ -2434,7 +2503,13 @@ async def main():
 
                 elif is_conversational_only(prompt):
                     await brain._publish_visual("thinking", task_id=task_id)
-                    reply_text = "Understood. I'm ready for your next command."
+                    conversational_text = re.sub(r"[^a-z0-9']+", " ", prompt.lower()).strip()
+                    if conversational_text in {"do you hear me", "can you hear me", "are you listening"}:
+                        reply_text = "Yes, I received your message. I'm listening."
+                    elif conversational_text in {"yes", "yes please", "yeah", "yep", "sure"}:
+                        reply_text = "Understood. Please state the action you want me to perform."
+                    else:
+                        reply_text = "Understood. I'm ready for your next command."
                     pending_actions = []
                     action_ok = True
                     action_error = None
@@ -2453,6 +2528,9 @@ async def main():
                         pending_actions,
                         task_id,
                     )
+                    if brain.last_plan_error:
+                        action_ok = False
+                        action_error = brain.last_plan_error
 
                 if pending_actions:
                     # The execution ledger, not the model's planning text, is
