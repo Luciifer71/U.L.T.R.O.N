@@ -1,0 +1,158 @@
+# Comparing ULTRON's local language models
+
+This is a model-selection experiment, not a model upgrade or production-readiness
+certificate. The working brain remains `qwen2.5:7b`. No existing runtime module,
+`.env`, memory database, speech setting or tool execution rule is changed.
+
+## What the benchmark does
+
+`model_benchmark.py` uses Python's standard library to contact local Ollama. It
+extracts the **current** literal tool definitions and system prompt from
+`brain_agent.py` with Python's AST reader. It never imports the brain, loads user
+memory, connects to NATS, or executes a proposed tool. An unsupported prompt/schema
+construction fails instead of evaluating arbitrary Python.
+
+Fourteen synthetic cases cover application lists, YouTube search, direct/polite
+script commands, editor requests, literal extensions, negation, quoted commands,
+hypotheticals, missing targets, conversation, stale context and unknown lookup.
+
+The model contract score compares expected tool names and arguments. It ignores
+case and redundant whitespace, and allows independent tool order changes. It
+preserves punctuation, extensions, extra calls and duplicates. Known acceptable
+variants are listed explicitly in `evals/model_cases.json`.
+
+**A contract match is not proof of a correct answer.** For cases requiring no
+calls, it establishes only that there was a nonempty answer and no calls. Read
+those responses for appropriate clarification, factual quality and false claims.
+The unsupported `.py5` case accepts faithful target preservation or clarification;
+it does not endorse executing that file type. Execution policy remains separate.
+
+This bypasses ULTRON's deterministic request parser and runtime guards to expose
+model differences. It does not reproduce the full live pipeline. For example,
+the known `Okay, can you run...` parser defect is still tracked separately.
+Do not promote a model based only on this small development set; add held-out
+cases and live tests before changing the default.
+
+## Laptop target and candidates
+
+User-reported hardware: i9-14900HX, RTX 4060 Laptop 8 GB VRAM, 16 GB DDR5 RAM,
+1 TB Gen 4 SSD. Free disk space and sustained SSD speed are not yet measured.
+
+- Baseline: `qwen2.5:7b`.
+- First candidate: `qwen3.5:4b`.
+- Comparison candidate: `qwen3:8b`.
+
+Use explicit tags. The report records installed model digests because tags can
+change. Download size is not running VRAM usage. These models can be compared
+through Ollama without installing AirLLM or changing the project dependencies.
+
+## Windows: first comparison
+
+1. Stop the brain, action daemon and listener with Ctrl+C. Keep Ollama running.
+   Do not launch `start-ultron.cmd` during this initial model-only comparison.
+2. In PowerShell at `C:\Users\Krish\Ultron-core`, download the candidates:
+
+```powershell
+ollama pull qwen3.5:4b
+ollama pull qwen3:8b
+```
+
+The baseline must also be installed (`ollama list`). Model downloads can consume
+several GB each. If Ollama reports an unsupported architecture, update Ollama
+through its normal installer and retry; do not downgrade project packages.
+
+3. Run `ollama ps`. For each listed model, run `ollama stop NAME`, replacing NAME
+   with its exact listed tag. A stopped brain may have left its model loaded.
+   The benchmark refuses to begin while any Ollama model is loaded, rather than
+   silently stopping another application’s model.
+4. Run this one command (venv activation is optional):
+
+```powershell
+.\.venv\Scripts\python.exe .\model_benchmark.py
+```
+
+Defaults: all three models, 14 cases each, three repetitions, 4096 context tokens,
+256 maximum generated tokens, temperature 0, seed 42, and thinking disabled for
+models advertising thinking support. The baseline receives no unsupported
+`think` option. Context limits and thinking settings affect results; the report
+records them. Seed/temperature settings do not guarantee bit-identical answers.
+
+Each model gets a separately timed warmup. It stays loaded for its cases and is
+then explicitly unloaded before the next model. Do not run other Ollama clients
+concurrently: the benchmark is not a server-wide lock.
+
+For a short initial check or baseline-only run:
+
+```powershell
+.\.venv\Scripts\python.exe .\model_benchmark.py --models qwen2.5:7b --repeats 1
+```
+
+Missing models cause preflight failure; the tool never downloads models itself.
+Ctrl+C records a partial report and attempts unloading. A timeout stops the run
+rather than queuing more requests. The HTTP timeout is a socket timeout, not a
+guaranteed server-side cancellation deadline. Check `ollama ps` after interruption
+or an error; `ollama stop NAME` may still be needed.
+
+## Reports and interpretation
+
+Reports are stored in ignored `runtime/benchmarks/` with unique UTC filenames.
+Existing output files are never intentionally overwritten. An explicit path can
+be passed with `--output`; use a different filename for each run.
+
+Reports include:
+
+- Ollama version, model digests/details, brain-source and fixture hashes.
+- Warmup wall time and server-reported model-load time.
+- Per-request wall time, tool proposals, answer text, and contract result.
+- Server-reported generation throughput; this excludes prompt evaluation and
+  load time and is not equivalent to voice response latency.
+- Median and nearest-rank p95 request wall time over the small synthetic set.
+- An Ollama residency snapshot after the cases. `size_vram` is **model residency**,
+  not whole-GPU memory use or peak VRAM. Other applications/Whisper are additional.
+
+Exit 0 means all requested measurements finished, even if a model failed many
+cases. Exit 2 means preflight or measurement failed. Exit 130 means interruption.
+Never interpret a successful process exit as a model passing the quality gate.
+
+Inspect negative-case responses manually. Compare task correctness before speed.
+A larger/newer model is not automatically better at ULTRON's tool contract.
+
+## Concurrent speech follow-up (not part of the first run)
+
+After the brain-only comparison, repeat with the voice listener loaded on CUDA
+but the **brain stopped**, and label that run:
+
+```powershell
+.\.venv\Scripts\python.exe .\model_benchmark.py --label whisper-loaded
+```
+
+The label documents the workload; it does not start or verify Whisper. NATS must
+be available for the listener. Confirm its CUDA log and watch GPU memory in Task
+Manager or `nvidia-smi`. An idle listener establishes resident-memory competition;
+it does not measure simultaneous transcription. A separate controlled audio
+replay is needed for that, along with microphone accuracy and end-to-end latency.
+Do not compare these runs as if their workloads were identical.
+
+## Promotion and rollback
+
+No automatic promotion is implemented. Review the results, test real tool API
+compatibility, preserve negative cases, and validate the speech workload before
+changing `LLM_MODEL` in local `.env`. The live runtime does not currently apply all
+benchmark options (notably thinking/context); match those settings explicitly in
+a reviewed follow-up change before claiming benchmark/live equivalence.
+
+Preserve the old model and record prior settings. Rollback means restoring
+`LLM_MODEL=qwen2.5:7b` and restarting the components. Do not delete model weights,
+replace `brain_agent.py` wholesale, or disable execution guards to get a higher
+benchmark score.
+
+## Automated checks and Git
+
+`verify_ultron.py` discovers `test_model_benchmark.py` automatically. The portable
+CI matrix runs its mocked/offline tests without model downloads or GPU access.
+These test parsing, scoring, failures and non-execution, not model quality.
+
+Keep benchmark implementation and CI/documentation as reviewable commits. Do not
+commit local reports, `.env`, audio, resource indexes or machine-specific data.
+
+Sources: https://docs.ollama.com/api/chat and https://docs.ollama.com/api/ps

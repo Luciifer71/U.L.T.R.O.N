@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install pytest psutil
-      - run: python -m pytest -q test_resource_catalog.py test_resource_cli.py test_exact_app_discovery.py test_request_planning.py test_intent_guard.py
+      - run: python -m pytest -q test_resource_catalog.py test_resource_cli.py test_exact_app_discovery.py test_request_planning.py test_intent_guard.py test_model_benchmark.py
   brain:
     runs-on: windows-latest
     steps:
