@@ -34,7 +34,6 @@ import webbrowser
 
 import re
 
-import difflib
 import inspect
 
 import uuid
@@ -58,7 +57,10 @@ import psutil
 from visual_events import publish_visual_event
 
 from ultron_control.capability_broker import CapabilityBroker
-from ultron_control.request_planning import explicit_launch_plan, PlanClarification, validate_application_targets
+from ultron_control.request_planning import explicit_launch_plan, explicit_resource_plan, PlanClarification, validate_application_targets
+from ultron_resources.config import create_service as create_resource_service
+from ultron_resources.catalog import ResourceError, AmbiguousResource, AccessDenied
+from ultron_resources.native_apps import ExactApplicationDiscovery
 from ultron_control.intent_guard import (
     build_replay_plan,
     contains_physical_action_request,
@@ -328,8 +330,9 @@ TOOLS = [
                     },
 
                     "args": {
-
-                        "type": "string",
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": 64,
 
                         "description": (
 
@@ -935,42 +938,26 @@ def resolve_script_filename(requested_name: str, base_dir: str = ".") -> str | N
 
 
 
-    # 4. Controlled fuzzy fallback for STT mishearings.
-    #
-    # A low fuzzy threshold can turn a missing executable request into an
-    # unrelated Python file (for example, "launch_game.py" previously
-    # resolving to "ollama_runtime.py"). Keep fuzzy matching only when the
-    # match is strong and clearly better than the runner-up.
-    matches = difflib.get_close_matches(
-        snake_case,
-        existing_files,
-        n=2,
-        cutoff=0.72,
-    )
-
-    if matches:
-        best_ratio = difflib.SequenceMatcher(
-            None,
-            snake_case,
-            matches[0],
-        ).ratio()
-
-        if len(matches) == 1:
-            return matches[0]
-
-        second_ratio = difflib.SequenceMatcher(
-            None,
-            snake_case,
-            matches[1],
-        ).ratio()
-
-        if best_ratio - second_ratio >= 0.10:
-            return matches[0]
-
+    # Spelling substitutions are never executable authorization. The runtime
+    # now uses ResourceCatalog instead; keep this legacy helper exact only.
     return None
 
 
 
+
+
+TOOLS.extend([
+    {"type": "function", "function": {
+        "name": "find_resources", "description": "Search the local resource metadata catalog for files, folders, executables, or scripts. Returns candidates only; never executes. Use the user's literal target name and explicit folder/drive scope. Indexing is performed separately with resource_cli.py.",
+        "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "root": {"type": "string"}}, "required": ["query"]}}},
+    {"type": "function", "function": {
+        "name": "operate_resource", "description": "Perform an explicitly requested local resource operation under normal account permissions. Exact paths or unique exact catalog names only. open uses file association; an editor can be Notepad on Windows or TextEdit on macOS. launch starts an .exe/.app. run_script uses a matching interpreter. Preserve the user's target wording; never invent a path, change the name, or use this for shell commands. Ambiguous/missing resources require clarification.",
+        "parameters": {"type": "object", "properties": {
+            "operation": {"type": "string", "enum": ["open", "launch", "read", "run_script"]},
+            "target": {"type": "string"}, "root": {"type": "string"}, "editor": {"type": "string"},
+            "arguments": {"type": "array", "items": {"type": "string"}, "maxItems": 64}},
+            "required": ["operation", "target"]}}},
+])
 
 
 class UltronBrain:
@@ -1001,6 +988,9 @@ class UltronBrain:
         # Physical system actions should flow through the broker rather than
         # directly through shell commands wherever a broker capability exists.
         self.capabilities = CapabilityBroker()
+        self.capabilities.apps = ExactApplicationDiscovery()
+        self.capabilities.resources.applications = self.capabilities.apps
+        self.resource_service = None
 
         self.current_task_id: str | None = None
 
@@ -1079,7 +1069,9 @@ CRITICAL RULES:
 
 7. EXECUTION TRUTH: Tool calls are only a plan. Never claim a physical action happened merely because a tool call was produced. The execution layer is authoritative.
 
-8. REPEAT REQUESTS: When the user asks to repeat or redo a previous task, use the stored replay plan supplied by the execution system. Never invent a previous task from conversational wording alone."""
+8. REPEAT REQUESTS: When the user asks to repeat or redo a previous task, use the stored replay plan supplied by the execution system. Never invent a previous task from conversational wording alone.
+
+9. LOCAL RESOURCES: Use operate_resource for explicitly requested files, folders, games, or scripts. Preserve the user's literal target name; exact paths or unique exact catalog names are resolved by the service. Use launch for native executables, run_script for scripts, open for documents/folders or a requested editor, and read for UTF-8 text. find_resources searches metadata only. Do not invent paths, executable names, arguments, permissions, security restrictions, or success. Report the actual tool error and ask for a folder/path when a target is missing or ambiguous. Scripts execute as the current user; resource scope is not a script sandbox."""
         )
 
         recent_history = get_recent_chat_history(limit=10)
@@ -1089,6 +1081,11 @@ CRITICAL RULES:
         ]
 
 
+
+    def _get_resource_service(self):
+        if getattr(self, "resource_service", None) is None:
+            self.resource_service = create_resource_service()
+        return self.resource_service
 
     def _compose_latest_task_status(self) -> str:
         """Return status from durable task memory, never from model inference."""
@@ -1190,6 +1187,10 @@ CRITICAL RULES:
                             "resolved",
                             "launchMethod",
                             "source",
+                            "exitCode",
+                            "stdout",
+                            "stderr",
+                            "outputTruncated",
                         ):
                             if key in result_data:
                                 outcome[key] = result_data[key]
@@ -1276,6 +1277,7 @@ CRITICAL RULES:
         verified: list[str] = []
         dispatched: list[str] = []
         failed: list[str] = []
+        completed: list[str] = []
 
         for outcome in outcomes:
             name = str(outcome.get("name") or "action")
@@ -1288,7 +1290,9 @@ CRITICAL RULES:
                 failed.append(f"{label} ({error})" if error else label)
                 continue
 
-            if (
+            if state == "completed" and outcome.get("exitCode") == 0:
+                completed.append(self._friendly_action_name(name))
+            elif (
                 state == "dispatched"
                 or verification == "not_observable"
             ):
@@ -1311,6 +1315,9 @@ CRITICAL RULES:
                 )
 
         parts: list[str] = []
+
+        if completed:
+            parts.append("Completed: " + ", ".join(completed) + ".")
 
         if verified:
             parts.append(
@@ -1337,6 +1344,8 @@ CRITICAL RULES:
 
     @staticmethod
     def _friendly_action_name(action_name: str) -> str:
+        if action_name.startswith("operate_resource:"):
+            return action_name.split(":", 2)[-1]
         if action_name.startswith("open_application:"):
             return action_name.split(":", 1)[1]
 
@@ -1402,7 +1411,7 @@ CRITICAL RULES:
             )
 
         try:
-            explicit_calls = explicit_launch_plan(prompt)
+            explicit_calls = explicit_resource_plan(prompt) or explicit_launch_plan(prompt)
         except PlanClarification as exc:
             self.last_plan_error = str(exc)
             return str(exc), []
@@ -1605,10 +1614,7 @@ CRITICAL RULES:
         if not tool_calls and contains_physical_action_request(prompt):
             self.last_plan_error = "No validated execution plan was produced."
             # Do not ask a tools-disabled synthesis pass to invent an outcome.
-            reply = (
-                content_text if content_text and not contains_execution_claim(content_text)
-                else "I could not produce a validated execution plan. Please restate the action and its target."
-            )
+            reply = "I could not produce a validated execution plan. Please restate the action and its target."
             self.history.append({"role": "assistant", "content": reply})
             if len(self.history) > 11:
                 self.history = [self.history[0], *self.history[-10:]]
@@ -1660,7 +1666,32 @@ CRITICAL RULES:
                     f"{func_name}({args})"
                 )
 
-                if func_name == "get_system_telemetry":
+                if func_name == "find_resources":
+                    service = await asyncio.to_thread(self._get_resource_service)
+                    matches = await asyncio.to_thread(service.catalog.search, str(args.get("query", "")), root=args.get("root"))
+                    res = json.dumps({"candidates": [item.to_dict() for item in matches], "executed": False}, ensure_ascii=False)
+
+                elif func_name == "operate_resource":
+                    operation = str(args.get("operation", ""))
+                    target = str(args.get("target", ""))
+                    options = {"root": args.get("root")}
+                    if operation == "open":
+                        options["editor"] = args.get("editor")
+                    elif operation in {"launch", "run_script"}:
+                        options["arguments"] = args.get("arguments", [])
+                    if operation == "read":
+                        service = await asyncio.to_thread(self._get_resource_service)
+                        res = await asyncio.to_thread(service.read_text, target, root=args.get("root"), max_bytes=20_000)
+                    else:
+                        async def execute_resource(op=operation, name=target, kwargs=options):
+                            service = await asyncio.to_thread(self._get_resource_service)
+                            return await asyncio.to_thread(getattr(service, op), name, **kwargs)
+                        pending_actions.append(PendingAction(
+                            name=f"operate_resource:{operation}:{target}", execute=execute_resource,
+                        ))
+                        res = f"Resource operation '{operation}' staged for '{target}'."
+
+                elif func_name == "get_system_telemetry":
                     cpu = psutil.cpu_percent(interval=0.1)
                     ram = psutil.virtual_memory().percent
                     battery = psutil.sensors_battery()
@@ -1675,54 +1706,14 @@ CRITICAL RULES:
                     )
 
                 elif func_name == "run_python_script":
-                    raw_path = str(
-                        args.get(
-                            "script_path",
-                            "",
-                        )
-                    ).strip()
-                    extra_args = str(
-                        args.get(
-                            "args",
-                            "",
-                        )
-                    ).strip()
-
-                    actual_file = resolve_script_filename(
-                        raw_path
-                    )
-
-                    if actual_file and os.path.exists(
-                        actual_file
-                    ):
-                        cmd = (
-                            f"py .\\\\{actual_file} "
-                            f"{extra_args}"
-                        ).strip()
-
-                        pending_actions.append(
-                            PendingAction(
-                                name=(
-                                    "run_python_script:"
-                                    f"{actual_file}"
-                                ),
-                                execute=lambda c=cmd: subprocess.Popen(
-                                    c,
-                                    shell=True,
-                                ),
-                                completion="wait",
-                            )
-                        )
-
-                        res = (
-                            f"Executing script '{actual_file}'."
-                        )
-
-                    else:
-                        res = (
-                            f"Script '{raw_path}' could not be resolved "
-                            "to any file in project directory."
-                        )
+                    raw_path = str(args.get('script_path', '')).strip()
+                    async def run_python_resource(target=raw_path, arguments=args.get('args') or []):
+                        service = await asyncio.to_thread(self._get_resource_service)
+                        return await asyncio.to_thread(service.run_script, target, arguments=arguments)
+                    pending_actions.append(PendingAction(
+                        name=f'operate_resource:run_script:{raw_path}', execute=run_python_resource,
+                    ))
+                    res = f"Python script '{raw_path}' staged through the resource service."
 
                 elif func_name == "control_media":
                     action = args.get("action")
@@ -1770,6 +1761,15 @@ CRITICAL RULES:
                         async def open_app(
                             target_app: str = app_name,
                         ) -> Any:
+                            service = await asyncio.to_thread(self._get_resource_service)
+                            try:
+                                resource = await asyncio.to_thread(service.catalog.resolve, target_app, suffixes={'.exe', '.app'})
+                            except (AmbiguousResource, AccessDenied):
+                                raise
+                            except ResourceError:
+                                resource = None
+                            if resource is not None and os.path.splitext(resource.path)[1].casefold() in {'.exe', '.app'}:
+                                return await asyncio.to_thread(service.launch, resource.path)
                             return await self.capabilities.open_resource(
                                 target_app,
                                 task_id=task_id,

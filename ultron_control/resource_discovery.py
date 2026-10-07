@@ -68,6 +68,8 @@ class ResourceDiscovery:
         "settings": "ms-settings:",
         "system settings": "ms-settings:",
         "windows settings": "ms-settings:",
+        "microsoft store": "ms-windows-store:",
+        "store": "ms-windows-store:",
     }
 
     _KNOWN_FOLDER_ALIASES = {
@@ -204,7 +206,7 @@ class ResourceDiscovery:
 
         except Exception as exc:
             raise ResourceNotFound(
-                f"Resource '{original}' could not be resolved."
+                f"Resource '{original}' could not be resolved: {exc}"
             ) from exc
 
     # ------------------------------------------------------------------

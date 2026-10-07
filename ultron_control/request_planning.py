@@ -7,6 +7,7 @@ the grammar require clarification instead of silently dropping a target.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 
 APPLICATION_ALIASES = {
@@ -27,7 +28,8 @@ SEARCH_SITES = {"youtube", "google", "bing", "github", "reddit", "duckduckgo"}
 
 
 def _words(text: str) -> str:
-    return re.sub(r"[^\w]+", " ", text.casefold()).strip()
+    text = unicodedata.normalize('NFC', text).casefold()
+    return ' '.join(''.join(char if unicodedata.category(char)[0] in {'L', 'N', 'M'} else ' ' for char in text).split())
 
 
 def _mentions_target(text: str, target: str) -> bool:
@@ -80,6 +82,17 @@ def validate_application_targets(prompt: str, calls: list[dict]) -> str | None:
     planned = set()
     for call in calls:
         function = call.get("function", {})
+        if function.get('name') in {'operate_resource', 'run_python_script'}:
+            error = validate_resource_target(prompt, function)
+            if error:
+                return error
+            arguments = function.get('arguments', {})
+            if arguments.get('operation') in {'open', 'launch'}:
+                target = str(arguments.get('target', '')).casefold().strip()
+                planned.add(APPLICATION_ALIASES.get(target, target).casefold())
+                editor = str(arguments.get('editor') or '').casefold()
+                if editor:
+                    planned.add(APPLICATION_ALIASES.get(editor, editor).casefold())
         if function.get("name") == "activate_protocol":
             protocol = str(function.get("arguments", {}).get("protocol", ""))
             label = protocol.replace("_", " ")
@@ -124,8 +137,83 @@ def validate_application_targets(prompt: str, calls: list[dict]) -> str | None:
     return None
 
 
+def validate_resource_target(prompt: str, function: dict) -> str | None:
+    """Conservative current-request grounding for typed file operations.
+
+    This deliberately asks for clarification on conditions, negation, or
+    questions about execution. It is not a general natural-language proof.
+    Catalog matches never substitute for the user's authorization.
+    """
+    arguments = function.get('arguments', {})
+    operation = arguments.get('operation', 'run_script' if function.get('name') == 'run_python_script' else '')
+    target = arguments.get('target', arguments.get('script_path', ''))
+    allowed = {'open': {'open'}, 'launch': {'open', 'launch', 'start', 'execute'},
+               'run_script': {'run', 'execute'}, 'read': {'read'}}
+    if operation not in allowed or not isinstance(target, str) or not target.strip():
+        return 'Please specify a supported resource operation and target. No actions were started.'
+    if re.search(r"\b(?:if|unless|don't|do not|never|why|how)\b", prompt, re.I):
+        return 'Please state the resource operation directly, including any conditions. No actions were started.'
+    verbs = list(re.finditer(r'\b(open|launch|start|execute|run|read)\s+', prompt, re.I))
+    grounded = False
+    for index, match in enumerate(verbs):
+        if match.group(1).casefold() not in allowed[operation]:
+            continue
+        prefix = prompt[:match.start()]
+        if re.search(r'\b(?:search|find|explain|tell|discuss)\b', prefix, re.I) and not re.search(r'\b(?:and|then|also)\s+(?:(?:then|also)\s+)?$', prefix, re.I):
+            continue
+        end = verbs[index + 1].start() if index + 1 < len(verbs) else len(prompt)
+        if _mentions_target(prompt[match.end():end], target):
+            grounded = True
+    if not grounded:
+        return f"The resource operation or target '{target}' was not explicitly requested. No actions were started."
+    root = arguments.get('root')
+    if root:
+        drive = re.fullmatch(r'([a-z]):[\\/]?', str(root), re.I)
+        if not _mentions_target(prompt, str(root)) and not (drive and re.search(r'\b' + drive.group(1) + r'\s+drive\b', prompt, re.I)):
+            return 'The proposed folder or drive scope was not named in your request. No actions were started.'
+    editor = arguments.get('editor')
+    if editor and (operation != 'open' or not _mentions_target(prompt, str(editor))):
+        return 'The proposed editor was not requested. No actions were started.'
+    extra = arguments.get('arguments', arguments.get('args', []))
+    if extra and (not isinstance(extra, list) or any(not isinstance(value, str) or value not in prompt for value in extra)):
+        return 'Script and application arguments must be explicitly supplied as literal values. No actions were started.'
+    return None
+
+
 class PlanClarification(ValueError):
     """An explicit launch list could not be parsed completely."""
+
+
+def explicit_resource_plan(prompt: str) -> list[dict] | None:
+    """Single literal resource requests; resolution stays in the catalog."""
+    text = prompt.strip().rstrip('.!?')
+    match = re.fullmatch(r'(?:please\s+)?(?:(?:can|could|would) you\s+)?(run|execute|read|open)\s+(.+)', text, re.I)
+    if not match:
+        return None
+    verb, target = match.groups()
+    if re.search(r'\band not pad\b', target, re.I):
+        raise PlanClarification('Did you mean to open the document in Notepad? Please repeat the complete request. No actions were started.')
+    if re.search(r"\b(?:and|then|if|unless|with|without|don't|do not|never)\b", target, re.I):
+        return None
+    target = re.sub(r'\s+(?:for me|please)$', '', target, flags=re.I)
+    editor = re.search(r'\s+in\s+(notepad|textedit)$', target, re.I)
+    if verb.casefold() == 'open' and not editor:
+        return None
+    options = {}
+    if editor:
+        if verb.casefold() != 'open':
+            return None
+        options['editor'] = editor.group(1)
+        target = target[:editor.start()].strip()
+    operation = {'run': 'run_script', 'execute': 'run_script', 'read': 'read', 'open': 'open'}[verb.casefold()]
+    # Native executable requests remain with the native application planner.
+    if operation == 'run_script' and re.search(r'\.(exe|app)$|\bgame$', target, re.I):
+        return None
+    if operation == 'run_script' and not re.search(r'\.(py|ps1|sh)$|\bscript$', target, re.I):
+        return None
+    if not target:
+        raise PlanClarification('Which resource should I use?')
+    return [_call('operate_resource', operation=operation, target=target.strip('"'), **options)]
 
 
 def _call(name: str, **arguments) -> dict:
@@ -148,6 +236,10 @@ def explicit_launch_plan(prompt: str) -> list[dict] | None:
     if not prefix:
         return None
     remainder = prefix.group(1).strip()
+    # File/editor requests belong to the resource planner, not the application
+    # alias list. A named editor is not another application launch target.
+    if re.search(r'[\\/]|\.(?:txt|md|pdf|docx?|xlsx?|exe|app|py|ps1|sh)\b|\bin (?:notepad|textedit)\b', remainder, re.I):
+        return None
     # Conditions, exclusions, sequencing beyond this grammar and quoted
     # discussion require the general planner; never infer them as launches.
     if re.search(r"\b(?:if|unless|except|don't|do not|without|before|after|instead)\b", remainder, re.I):

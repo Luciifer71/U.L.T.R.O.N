@@ -1,4 +1,20 @@
 import pytest
+from ultron_control.request_planning import explicit_resource_plan
+
+
+def test_spoken_script_stem_is_preserved_without_model_substitution():
+    plan = explicit_resource_plan('run Ultron smoke script.')
+    assert plan[0]['function']['arguments'] == {'operation': 'run_script', 'target': 'Ultron smoke script'}
+
+
+def test_editor_request_preserves_spoken_resource_stem():
+    plan = explicit_resource_plan('Open Ultron smoke note in Notepad.')
+    assert plan[0]['function']['arguments'] == {'operation': 'open', 'target': 'Ultron smoke note', 'editor': 'Notepad'}
+
+
+def test_actual_misheard_editor_requires_clarification():
+    with pytest.raises(PlanClarification):
+        explicit_resource_plan('Open Ultron smoke note and not pad.')
 from ultron_control.request_planning import explicit_launch_plan, PlanClarification
 
 

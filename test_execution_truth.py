@@ -157,7 +157,7 @@ def test_normalized_existing_script_still_resolves(tmp_path) -> None:
     ) == "voice_listener.py"
 
 
-def test_strong_fuzzy_script_match_is_still_allowed(tmp_path, monkeypatch) -> None:
+def test_similar_script_name_is_not_execution_authorization(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         "brain_agent.os.listdir",
         lambda _: [
@@ -169,7 +169,7 @@ def test_strong_fuzzy_script_match_is_still_allowed(tmp_path, monkeypatch) -> No
     assert resolve_script_filename(
         "audio lesson.py",
         str(tmp_path),
-    ) == "audio_listen.py"
+    ) is None
 
 
 def test_missing_tool_call_retries_and_stages_without_executing(monkeypatch):

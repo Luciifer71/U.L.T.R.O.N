@@ -103,6 +103,16 @@ def test_calibration_does_not_wait_forever_for_dead_microphone(monkeypatch, list
 def test_existing_wake_word_and_command_route_is_preserved(listener):
     assert listener.extract_wake_word_command("Hey Ultron, open calculator.") == (True, "open calculator.")
     assert listener.extract_wake_word_command("ambient speech") == (False, "")
+
+
+@pytest.mark.parametrize('text', ['Open Ultron smoke note and not pad.', 'run Ultron smoke script.'])
+def test_resource_name_inside_command_is_not_a_wake_prefix(listener, text):
+    assert listener.extract_wake_word_command(text) == (False, '')
+
+
+def test_wake_prefix_preserves_later_ultron_filename(listener):
+    assert listener.extract_wake_word_command('Hey Ultron, run Ultron smoke script.') == (True, 'run Ultron smoke script.')
+    assert listener.extract_wake_word_command('Okay, so, hey Ultron, open calculator.') == (True, 'open calculator.')
     assert listener.is_valid_command_prompt("open calculator")
     assert not listener.is_valid_command_prompt("um")
 

@@ -322,7 +322,7 @@ def extract_wake_word_command(
 ) -> Tuple[bool, str]:
 
     pattern = (
-        r"\b(?:hey\s+|ok\s+|hello\s+)?ultron\b"
+        r"^\s*(?:(?:(?:ok(?:ay)?[\s,]+)?(?:so[\s,]+)?(?:hey|hello)[\s,]+)|ok(?:ay)?[\s,]+)?ultron\b"
     )
 
     match = re.search(

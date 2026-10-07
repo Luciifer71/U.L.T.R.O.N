@@ -1,0 +1,28 @@
+name: Resource contracts
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  portable:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        python: ['3.12', '3.13']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install pytest psutil
+      - run: python -m pytest -q test_resource_catalog.py test_resource_cli.py test_exact_app_discovery.py test_request_planning.py test_intent_guard.py
+  brain:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install pytest psutil keyboard ollama nats-py numpy python-dotenv
+      - run: python -m pytest -q test_resource_integration.py test_execution_truth.py test_resource_execution.py test_task_memory.py test_audio_pipeline.py test_start_ultron.py test_verify_ultron.py
