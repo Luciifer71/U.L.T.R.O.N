@@ -7,9 +7,29 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import sys
 import time
 import uuid
 import unicodedata
+
+
+# macOS supplies these root-level aliases. Arbitrary user links remain denied.
+_MACOS_SYSTEM_ALIASES = {Path('/var'): Path('/private/var'),
+                         Path('/tmp'): Path('/private/tmp')}
+
+
+def _is_macos_system_alias(path: Path) -> bool:
+    if sys.platform != 'darwin' or path not in _MACOS_SYSTEM_ALIASES:
+        return False
+    expected = _MACOS_SYSTEM_ALIASES[path]
+    try:
+        # Check both the link itself and its physical destination; do not trust
+        # an alias that has been redirected through an additional link.
+        return (path.is_symlink()
+                and path.parent / os.readlink(path) == expected
+                and path.resolve(strict=True) == expected)
+    except (OSError, RuntimeError):
+        return False
 
 
 class ResourceError(RuntimeError):
@@ -59,7 +79,8 @@ class PathPolicy:
         # Do not follow symlinks/junctions into a different protected resource.
         for path in (original, *original.parents):
             if path.is_symlink() or (hasattr(path, 'is_junction') and path.is_junction()):
-                raise AccessDenied('Symlinks and junctions require an explicit supported resolution policy.')
+                if not _is_macos_system_alias(path):
+                    raise AccessDenied('Symlinks and junctions require an explicit supported resolution policy.')
         path = original.resolve(strict=must_exist)
         if not any(path == root or path.is_relative_to(root) for root in self.roots):
             raise AccessDenied('Target is outside the configured resource roots.')

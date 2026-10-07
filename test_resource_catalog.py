@@ -10,7 +10,8 @@ class CatalogTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.base = Path(self.temp.name)
+        # Windows may return an 8.3 short name and macOS an OS alias.
+        self.base = Path(self.temp.name).resolve()
         self.root = self.base / 'files'; self.root.mkdir()
         self.catalog = ResourceCatalog(self.base / 'catalog.db', PathPolicy([self.root]))
 
@@ -192,7 +193,8 @@ class AdapterTests(unittest.TestCase):
     def test_file_dispatch_is_not_claimed_as_verified(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as folder:
-            path=Path(folder)/'notes.txt';path.write_text('hello')
+            folder=Path(folder).resolve()
+            path=folder/'notes.txt';path.write_text('hello')
             service=ResourceService(ResourceCatalog(Path(folder)/'db',PathPolicy([folder])),Mock(open=Mock(return_value=None)))
             self.assertEqual(service.open(str(path)).state,'dispatched')
 
@@ -200,9 +202,78 @@ class AdapterTests(unittest.TestCase):
 class OutputBoundTests(unittest.TestCase):
     def test_large_stdout_is_drained_and_bounded(self):
         with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder); script=root/'large.py'; script.write_text('print("x" * 100000)')
+            root=Path(folder).resolve(); script=root/'large.py'; script.write_text('print("x" * 100000)')
             service=ResourceService(ResourceCatalog(root/'db',PathPolicy([root])))
             result=service.run_script(str(script))
             self.assertTrue(result.success)
             self.assertEqual(len(result.stdout),20000)
             self.assertTrue(result.output_truncated)
+
+
+class PlatformPathTests(unittest.TestCase):
+    def test_raw_temporary_path_can_be_indexed_and_read(self):
+        # Exercise the actual OS spelling, including /var on macOS and 8.3
+        # names on Windows, even though other fixtures use canonical paths.
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            note = root / 'report.txt'
+            note.write_text('platform path test', encoding='utf-8')
+            catalog = ResourceCatalog(root / 'catalog.db', PathPolicy([root]))
+            self.assertTrue(catalog.index(root)['complete'])
+            self.assertEqual(catalog.resolve('report').path, str(note.resolve()))
+            self.assertEqual(ResourceService(catalog).read_text(str(note)), 'platform path test')
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name).resolve()
+
+    def alias_fixture(self):
+        from unittest.mock import patch
+        root = self.base / 'physical'; root.mkdir()
+        alias = self.base / 'alias'
+        try:
+            alias.symlink_to(root, target_is_directory=True)
+        except OSError:
+            self.skipTest('Host does not permit creation of symlinks.')
+        self.enterContext(patch('ultron_resources.catalog.sys.platform', 'darwin'))
+        self.enterContext(patch('ultron_resources.catalog._MACOS_SYSTEM_ALIASES', {alias: root}))
+        note = root / 'report.txt'; note.write_text('hello')
+        return root, alias, note
+
+    def test_known_platform_alias_resolves(self):
+        root, alias, note = self.alias_fixture()
+        self.assertEqual(PathPolicy([root]).resolve(alias / note.name), note)
+
+    def test_platform_alias_does_not_bypass_protected_location(self):
+        root, alias, note = self.alias_fixture()
+        with self.assertRaises(AccessDenied):
+            PathPolicy([root], protected=[root]).resolve(alias / note.name)
+
+    def test_platform_alias_does_not_expand_authorized_scope(self):
+        root, alias, note = self.alias_fixture()
+        allowed = root / 'allowed'; allowed.mkdir()
+        with self.assertRaises(AccessDenied):
+            PathPolicy([allowed]).resolve(alias / note.name)
+
+    def test_redirected_platform_alias_is_rejected(self):
+        root, alias, note = self.alias_fixture()
+        other = self.base / 'other'; other.mkdir()
+        (other / note.name).write_text('wrong target')
+        alias.unlink(); alias.symlink_to(other, target_is_directory=True)
+        with self.assertRaises(AccessDenied):
+            PathPolicy([self.base]).resolve(alias / note.name)
+
+    def test_nested_user_link_is_still_rejected(self):
+        root, alias, note = self.alias_fixture()
+        shortcut = root / 'shortcut'
+        shortcut.symlink_to(root, target_is_directory=True)
+        with self.assertRaises(AccessDenied):
+            PathPolicy([root]).resolve(alias / 'shortcut' / note.name)
+
+    def test_platform_exception_is_not_enabled_on_other_systems(self):
+        from unittest.mock import patch
+        root, alias, note = self.alias_fixture()
+        with patch('ultron_resources.catalog.sys.platform', 'linux'):
+            with self.assertRaises(AccessDenied):
+                PathPolicy([root]).resolve(alias / note.name)
