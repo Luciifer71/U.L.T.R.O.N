@@ -195,6 +195,14 @@ def is_conversational_only(prompt: str) -> bool:
 
     text = re.sub(r"[^a-z0-9']+", " ", _normalize_text(prompt)).strip()
 
+    # No pending confirmation state exists: a bare answer must not be
+    # interpreted as permission to replay a physical action from chat history.
+    if text in {
+        "yes", "yes please", "yeah", "yep", "sure", "no", "no thanks",
+        "do you hear me", "can you hear me", "are you listening",
+    }:
+        return True
+
     if not text:
         return False
 
@@ -369,6 +377,12 @@ def contains_execution_claim(text: str) -> bool:
     """Detect language that claims a physical action actually occurred."""
 
     normalized = _normalize_text(text)
+    # A generated clarification can explicitly state that nothing ran. Remove
+    # only that negative clause; any later affirmative claim still gets checked.
+    normalized = re.sub(
+        r"\bno actions were (?:started|executed|dispatched|launched)\b",
+        "", normalized,
+    )
 
     patterns = (
         r"\bopened\b",

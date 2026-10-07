@@ -47,7 +47,7 @@ def test_application_resources_are_rejected() -> None:
         executor.open(resource)
 
 
-def test_local_file_is_verified_after_dispatch(
+def test_local_file_existence_is_not_visible_open_verification(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -88,12 +88,12 @@ def test_local_file_is_verified_after_dispatch(
     assert result.dispatched is True
     assert result.process_created is False
     assert result.pid is None
-    assert result.state == "verified"
+    assert result.state == "dispatched"
     assert result.verification == "target_exists"
     assert result.target == str(test_file)
 
 
-def test_local_directory_is_verified_after_dispatch(
+def test_local_directory_existence_is_not_visible_open_verification(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -125,7 +125,7 @@ def test_local_directory_is_verified_after_dispatch(
     assert result.dispatched is True
     assert result.process_created is False
     assert result.pid is None
-    assert result.state == "verified"
+    assert result.state == "dispatched"
     assert result.verification == "target_exists"
 
 

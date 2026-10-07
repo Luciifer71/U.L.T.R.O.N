@@ -78,8 +78,12 @@ hint can influence recognition; it does not prove correct recognition by itself.
 
 The listener keeps its existing English vocabulary prompt, wake-word handling,
 VAD parameters, NATS subjects and UI listening events. `.env.example` documents
-**process environment variables**; this listener does not automatically load
-a `.env` file. PowerShell variables above apply to the current terminal session.
+settings that can be saved in `.env` beside `voice_listener.py`. The listener
+loads that file at startup, regardless of the current working directory.
+Existing process variables take precedence for temporary testing overrides.
+After saving your settings once, start with
+`.\.venv\Scripts\python.exe .\voice_listener.py`.
+The brain, action daemon and NATS must still be running separately.
 
 ## Model choice and fallback policy
 
@@ -120,10 +124,43 @@ Measure command transcription errors and false activations, as well as latency.
 - Confirm strict mode reports missing libraries and exits, while automatic
   mode logs the reason and preserves the selected model on CPU.
 
-The existing listener still has a serial inference/audio-consumption loop and
-an unbounded capture queue. Continuous-utterance limits, backlog management and
-echo suppression need separate measured audio-pipeline work. This patch does
-not claim that those issues, or macOS GPU support, have been solved.
+## Capture buffering and utterance limits
+
+The listener uses a bounded, thread-safe mailbox with at most one pending
+event-loop notification. At 16 kHz/1024 samples per block it holds 31 blocks
+(approximately two seconds). Frames carry a sequence number, callback capture
+time, capture-time TTS gate state and a discontinuity flag. Sample counts govern
+the 1.4-second endpoint pause, including when buffered frames are consumed quickly.
+
+A recording is rejected in its entirety if it loses audio, arrives more than
+two seconds late, or would exceed the 15-second sample budget. The budget includes
+pre-roll and the endpoint pause. The listener discards the remainder until a
+complete 1.4-second quiet interval before accepting a new utterance. It never
+transcribes a duration-limited fragment into an actionable command. Active
+sessions receive a spoken request to repeat after a reported rejection; standby
+rejections are logged without treating room noise as a user request.
+
+Frames captured while TTS is gated stay muted even if consumed after playback.
+If TTS interrupts an utterance, its remaining tail is discarded until quiet.
+Calibration skips gated, stale and discontinuous frames, has a ten-second overall
+deadline, and fails if audio stops arriving. The running listener also reports
+an error and closes its stream if no frame arrives within five seconds.
+
+Inference/audio consumption is still serial. A slow CPU inference can exceed the
+backlog budget; the listener explicitly rejects damaged audio instead of silently
+executing a fragment. Continuous recording/transcription workers, acoustic echo
+cancellation, a larger recognition benchmark and macOS GPU support remain future
+work.
+
+For audio-buffer changes, include `test_audio_pipeline.py` in the regression
+suite and validate on Windows with the UI, Ollama and TTS running:
+
+- Single and consecutive commands, mid-sentence pauses shorter than 1.4 seconds,
+  session timeout/reactivation, and microphone noise calibration.
+- An uninterrupted utterance longer than 15 seconds: expect `[AUDIO DISCARD]`,
+  no transcription/intent for that utterance, and recovery after a full quiet gap.
+- TTS output never becoming a new user request, and a deliberate microphone
+  interruption producing a clear failure rather than false listening readiness.
 
 ## References
 

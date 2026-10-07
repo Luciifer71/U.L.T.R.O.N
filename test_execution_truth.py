@@ -157,7 +157,7 @@ def test_normalized_existing_script_still_resolves(tmp_path) -> None:
     ) == "voice_listener.py"
 
 
-def test_strong_fuzzy_script_match_is_still_allowed(tmp_path, monkeypatch) -> None:
+def test_similar_script_name_is_not_execution_authorization(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         "brain_agent.os.listdir",
         lambda _: [
@@ -169,4 +169,121 @@ def test_strong_fuzzy_script_match_is_still_allowed(tmp_path, monkeypatch) -> No
     assert resolve_script_filename(
         "audio lesson.py",
         str(tmp_path),
-    ) == "audio_listen.py"
+    ) is None
+
+
+def test_missing_tool_call_retries_and_stages_without_executing(monkeypatch):
+    async def run():
+        brain = bare_brain()
+        calls = []
+        async def chat(**kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                return {"message": {"content": "I opened Calculator."}}
+            return {"message": {"tool_calls": [{"function": {
+                "name": "open_application", "arguments": {"app_name": "Calculator"}
+            }}]}}
+        from types import SimpleNamespace
+        brain.ollama = SimpleNamespace(chat=chat)
+        brain.capabilities = SimpleNamespace(open_resource=lambda *a, **kw: None)
+        async def visual(*a, **kw):
+            pass
+        brain._publish_visual = visual
+        monkeypatch.setattr("brain_agent.create_task", lambda *a, **kw: None)
+        reply, actions = await brain.process_intent("I would like you to open calculator.", "retry-task")
+        assert len(calls) == 2
+        assert all("tools" in call for call in calls)
+        assert len(actions) == 1
+        assert actions[0].name == "open_application:Calculator"
+        assert brain.execution_ledger == {}
+        assert brain.last_plan_error is None
+    asyncio.run(run())
+
+
+def test_missing_plan_stops_after_one_retry_without_synthesis(monkeypatch):
+    async def run():
+        brain = bare_brain()
+        calls = []
+        async def chat(**kwargs):
+            calls.append(kwargs)
+            return {"message": {"content": "I opened Calculator."}}
+        from types import SimpleNamespace
+        brain.ollama = SimpleNamespace(chat=chat)
+        async def visual(*a, **kw):
+            pass
+        brain._publish_visual = visual
+        monkeypatch.setattr("brain_agent.create_task", lambda *a, **kw: None)
+        reply, actions = await brain.process_intent("I would like you to open calculator.", "failed-plan")
+        assert len(calls) == 2
+        assert actions == []
+        assert "could not produce" in reply
+        assert brain.last_plan_error
+    asyncio.run(run())
+
+
+def test_explicit_multi_app_plan_stages_every_target_without_llm(monkeypatch):
+    async def run():
+        from types import SimpleNamespace
+        brain = bare_brain()
+        async def unexpected_chat(**kwargs):
+            raise AssertionError('Explicit complete launch list must not require model inference')
+        brain.ollama = SimpleNamespace(chat=unexpected_chat)
+        brain.capabilities = SimpleNamespace(open_resource=lambda *a, **kw: None)
+        async def visual(*a, **kw):
+            pass
+        brain._publish_visual = visual
+        monkeypatch.setattr('brain_agent.create_task', lambda *a, **kw: None)
+        _, actions = await brain.process_intent('Ok, can you open file explorer perplexity notion and search on youtube quantum computers.', 'complete-plan')
+        assert [action.name for action in actions] == [
+            'open_application:File Explorer', 'open_application:Perplexity',
+            'open_application:Notion',
+            'open_website:https://www.youtube.com/results?search_query=quantum+computers',
+        ]
+        assert brain.execution_ledger == {}
+        assert brain.last_plan_error is None
+    asyncio.run(run())
+
+
+def test_partial_explicit_list_stages_nothing(monkeypatch):
+    async def run():
+        brain = bare_brain()
+        async def visual(*a, **kw):
+            pass
+        brain._publish_visual = visual
+        _, actions = await brain.process_intent('Open calculator mysteryapp notion.', 'ambiguous-plan')
+        assert actions == []
+        assert brain.last_plan_error
+    asyncio.run(run())
+
+
+def test_actual_garbled_request_never_reaches_model_or_execution():
+    async def run():
+        brain = bare_brain()
+        async def visual(*args, **kwargs):
+            pass
+        brain._publish_visual = visual
+        reply, actions = await brain.process_intent('Open Perplexory Notion, task manager, search on youtube, quantum computers and also open file explorer.', 'garbled')
+        assert actions == []
+        assert 'No actions were started' in reply
+        assert brain.last_plan_error
+        assert brain.execution_ledger == {}
+    asyncio.run(run())
+
+
+def test_model_inserted_app_is_rejected_before_staging(monkeypatch):
+    async def run():
+        from types import SimpleNamespace
+        brain = bare_brain()
+        async def visual(*args, **kwargs):
+            pass
+        async def chat(**kwargs):
+            return {'message': {'tool_calls': [{'function': {'name': 'open_application', 'arguments': {'app_name': 'Microsoft Edge'}}}]}}
+        brain._publish_visual = visual
+        brain.ollama = SimpleNamespace(chat=chat)
+        monkeypatch.setattr('brain_agent.create_task', lambda *a, **kw: None)
+        reply, actions = await brain.process_intent('I would like you to open Notion.', 'inserted')
+        assert actions == []
+        assert 'not named' in reply
+        assert brain.last_plan_error
+        assert brain.last_replay_plan is None
+    asyncio.run(run())

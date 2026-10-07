@@ -34,7 +34,6 @@ import webbrowser
 
 import re
 
-import difflib
 import inspect
 
 import uuid
@@ -58,6 +57,10 @@ import psutil
 from visual_events import publish_visual_event
 
 from ultron_control.capability_broker import CapabilityBroker
+from ultron_control.request_planning import explicit_launch_plan, explicit_resource_plan, PlanClarification, validate_application_targets
+from ultron_resources.config import create_service as create_resource_service
+from ultron_resources.catalog import ResourceError, AmbiguousResource, AccessDenied
+from ultron_resources.native_apps import ExactApplicationDiscovery
 from ultron_control.intent_guard import (
     build_replay_plan,
     contains_physical_action_request,
@@ -327,8 +330,9 @@ TOOLS = [
                     },
 
                     "args": {
-
-                        "type": "string",
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": 64,
 
                         "description": (
 
@@ -934,42 +938,26 @@ def resolve_script_filename(requested_name: str, base_dir: str = ".") -> str | N
 
 
 
-    # 4. Controlled fuzzy fallback for STT mishearings.
-    #
-    # A low fuzzy threshold can turn a missing executable request into an
-    # unrelated Python file (for example, "launch_game.py" previously
-    # resolving to "ollama_runtime.py"). Keep fuzzy matching only when the
-    # match is strong and clearly better than the runner-up.
-    matches = difflib.get_close_matches(
-        snake_case,
-        existing_files,
-        n=2,
-        cutoff=0.72,
-    )
-
-    if matches:
-        best_ratio = difflib.SequenceMatcher(
-            None,
-            snake_case,
-            matches[0],
-        ).ratio()
-
-        if len(matches) == 1:
-            return matches[0]
-
-        second_ratio = difflib.SequenceMatcher(
-            None,
-            snake_case,
-            matches[1],
-        ).ratio()
-
-        if best_ratio - second_ratio >= 0.10:
-            return matches[0]
-
+    # Spelling substitutions are never executable authorization. The runtime
+    # now uses ResourceCatalog instead; keep this legacy helper exact only.
     return None
 
 
 
+
+
+TOOLS.extend([
+    {"type": "function", "function": {
+        "name": "find_resources", "description": "Search the local resource metadata catalog for files, folders, executables, or scripts. Returns candidates only; never executes. Use the user's literal target name and explicit folder/drive scope. Indexing is performed separately with resource_cli.py.",
+        "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "root": {"type": "string"}}, "required": ["query"]}}},
+    {"type": "function", "function": {
+        "name": "operate_resource", "description": "Perform an explicitly requested local resource operation under normal account permissions. Exact paths or unique exact catalog names only. open uses file association; an editor can be Notepad on Windows or TextEdit on macOS. launch starts an .exe/.app. run_script uses a matching interpreter. Preserve the user's target wording; never invent a path, change the name, or use this for shell commands. Ambiguous/missing resources require clarification.",
+        "parameters": {"type": "object", "properties": {
+            "operation": {"type": "string", "enum": ["open", "launch", "read", "run_script"]},
+            "target": {"type": "string"}, "root": {"type": "string"}, "editor": {"type": "string"},
+            "arguments": {"type": "array", "items": {"type": "string"}, "maxItems": 64}},
+            "required": ["operation", "target"]}}},
+])
 
 
 class UltronBrain:
@@ -1000,6 +988,9 @@ class UltronBrain:
         # Physical system actions should flow through the broker rather than
         # directly through shell commands wherever a broker capability exists.
         self.capabilities = CapabilityBroker()
+        self.capabilities.apps = ExactApplicationDiscovery()
+        self.capabilities.resources.applications = self.capabilities.apps
+        self.resource_service = None
 
         self.current_task_id: str | None = None
 
@@ -1078,7 +1069,9 @@ CRITICAL RULES:
 
 7. EXECUTION TRUTH: Tool calls are only a plan. Never claim a physical action happened merely because a tool call was produced. The execution layer is authoritative.
 
-8. REPEAT REQUESTS: When the user asks to repeat or redo a previous task, use the stored replay plan supplied by the execution system. Never invent a previous task from conversational wording alone."""
+8. REPEAT REQUESTS: When the user asks to repeat or redo a previous task, use the stored replay plan supplied by the execution system. Never invent a previous task from conversational wording alone.
+
+9. LOCAL RESOURCES: Use operate_resource for explicitly requested files, folders, games, or scripts. Preserve the user's literal target name; exact paths or unique exact catalog names are resolved by the service. Use launch for native executables, run_script for scripts, open for documents/folders or a requested editor, and read for UTF-8 text. find_resources searches metadata only. Do not invent paths, executable names, arguments, permissions, security restrictions, or success. Report the actual tool error and ask for a folder/path when a target is missing or ambiguous. Scripts execute as the current user; resource scope is not a script sandbox."""
         )
 
         recent_history = get_recent_chat_history(limit=10)
@@ -1088,6 +1081,11 @@ CRITICAL RULES:
         ]
 
 
+
+    def _get_resource_service(self):
+        if getattr(self, "resource_service", None) is None:
+            self.resource_service = create_resource_service()
+        return self.resource_service
 
     def _compose_latest_task_status(self) -> str:
         """Return status from durable task memory, never from model inference."""
@@ -1189,6 +1187,10 @@ CRITICAL RULES:
                             "resolved",
                             "launchMethod",
                             "source",
+                            "exitCode",
+                            "stdout",
+                            "stderr",
+                            "outputTruncated",
                         ):
                             if key in result_data:
                                 outcome[key] = result_data[key]
@@ -1275,6 +1277,7 @@ CRITICAL RULES:
         verified: list[str] = []
         dispatched: list[str] = []
         failed: list[str] = []
+        completed: list[str] = []
 
         for outcome in outcomes:
             name = str(outcome.get("name") or "action")
@@ -1287,7 +1290,9 @@ CRITICAL RULES:
                 failed.append(f"{label} ({error})" if error else label)
                 continue
 
-            if (
+            if state == "completed" and outcome.get("exitCode") == 0:
+                completed.append(self._friendly_action_name(name))
+            elif (
                 state == "dispatched"
                 or verification == "not_observable"
             ):
@@ -1310,6 +1315,9 @@ CRITICAL RULES:
                 )
 
         parts: list[str] = []
+
+        if completed:
+            parts.append("Completed: " + ", ".join(completed) + ".")
 
         if verified:
             parts.append(
@@ -1336,6 +1344,8 @@ CRITICAL RULES:
 
     @staticmethod
     def _friendly_action_name(action_name: str) -> str:
+        if action_name.startswith("operate_resource:"):
+            return action_name.split(":", 2)[-1]
         if action_name.startswith("open_application:"):
             return action_name.split(":", 1)[1]
 
@@ -1383,6 +1393,7 @@ CRITICAL RULES:
         task_id: str,
     ) -> tuple[str, list]:
         self.current_task_id = task_id
+        self.last_plan_error = None
         await self._publish_visual("thinking", task_id=task_id)
 
         self.history.append(
@@ -1398,6 +1409,12 @@ CRITICAL RULES:
                 "Which app, file, folder, or target did you mean?",
                 [],
             )
+
+        try:
+            explicit_calls = explicit_resource_plan(prompt) or explicit_launch_plan(prompt)
+        except PlanClarification as exc:
+            self.last_plan_error = str(exc)
+            return str(exc), []
 
         replay_request = is_replay_request(prompt)
         replay_calls = extract_replay_plan(
@@ -1417,13 +1434,14 @@ CRITICAL RULES:
         # never reach this point.
         create_task(task_id, prompt, status="thinking")
 
-        if replay_calls:
+        selected_calls = replay_calls or explicit_calls
+        if selected_calls:
             message = {
                 "role": "assistant",
                 "content": "",
-                "tool_calls": replay_calls,
+                "tool_calls": selected_calls,
             }
-            tool_calls = list(replay_calls)
+            tool_calls = list(selected_calls)
             content_text = ""
         else:
             fast_options = {
@@ -1491,6 +1509,47 @@ CRITICAL RULES:
                 or []
             )
 
+        # A prose answer cannot execute a physical request. Retry planning once,
+        # retaining context and the same validation/execution path.
+        if (
+            not tool_calls
+            and "<tool_call>" not in content_text
+            and contains_physical_action_request(prompt)
+        ):
+            print(f"[PLAN RETRY] [task={task_id}]: model returned no tool calls.")
+            retry_messages = [
+                *self.history,
+                {
+                    "role": "user",
+                    "content": (
+                        "For my latest request, return the necessary tool calls "
+                        "using the provided tools. Nothing has executed yet. "
+                        "Do not claim success or invent missing targets. If the "
+                        "request is ambiguous or unsupported, ask for clarification."
+                    ),
+                },
+            ]
+            try:
+                retry = await self.ollama.chat(
+                    model=MODEL_NAME, messages=retry_messages, tools=TOOLS,
+                    options={"num_predict": 256, "temperature": 0},
+                )
+                retry_msg = getattr(retry, "message", None)
+                if retry_msg is None:
+                    retry_msg = retry.get("message", {})
+                if isinstance(retry_msg, dict):
+                    message = dict(retry_msg)
+                else:
+                    message = {
+                        "role": getattr(retry_msg, "role", "assistant"),
+                        "content": getattr(retry_msg, "content", "") or "",
+                        "tool_calls": getattr(retry_msg, "tool_calls", []) or [],
+                    }
+                content_text = message.get("content", "") or ""
+                tool_calls = list(message.get("tool_calls", []) or [])
+            except Exception as exc:
+                print(f"[PLAN RETRY ERROR]: {type(exc).__name__}: {exc!r}")
+
         if "<tool_call>" in content_text:
             matches = re.findall(
                 r"<tool_call>\s*(.*?)\s*</tool_call>",
@@ -1536,14 +1595,30 @@ CRITICAL RULES:
             )
 
             if clarification:
+                self.last_plan_error = clarification
                 return clarification, []
 
             tool_calls = normalized_calls
+            if not replay_calls:
+                grounding_error = validate_application_targets(prompt, tool_calls)
+                if grounding_error:
+                    self.last_plan_error = grounding_error
+                    print(f"[PLAN REJECTED] [task={task_id}]: {grounding_error}")
+                    return grounding_error, []
             message["tool_calls"] = tool_calls
 
             replay_plan = build_replay_plan(tool_calls)
             if replay_plan:
                 self.last_replay_plan = replay_plan
+
+        if not tool_calls and contains_physical_action_request(prompt):
+            self.last_plan_error = "No validated execution plan was produced."
+            # Do not ask a tools-disabled synthesis pass to invent an outcome.
+            reply = "I could not produce a validated execution plan. Please restate the action and its target."
+            self.history.append({"role": "assistant", "content": reply})
+            if len(self.history) > 11:
+                self.history = [self.history[0], *self.history[-10:]]
+            return reply, []
 
         pending_actions: list[PendingAction] = []
 
@@ -1591,7 +1666,32 @@ CRITICAL RULES:
                     f"{func_name}({args})"
                 )
 
-                if func_name == "get_system_telemetry":
+                if func_name == "find_resources":
+                    service = await asyncio.to_thread(self._get_resource_service)
+                    matches = await asyncio.to_thread(service.catalog.search, str(args.get("query", "")), root=args.get("root"))
+                    res = json.dumps({"candidates": [item.to_dict() for item in matches], "executed": False}, ensure_ascii=False)
+
+                elif func_name == "operate_resource":
+                    operation = str(args.get("operation", ""))
+                    target = str(args.get("target", ""))
+                    options = {"root": args.get("root")}
+                    if operation == "open":
+                        options["editor"] = args.get("editor")
+                    elif operation in {"launch", "run_script"}:
+                        options["arguments"] = args.get("arguments", [])
+                    if operation == "read":
+                        service = await asyncio.to_thread(self._get_resource_service)
+                        res = await asyncio.to_thread(service.read_text, target, root=args.get("root"), max_bytes=20_000)
+                    else:
+                        async def execute_resource(op=operation, name=target, kwargs=options):
+                            service = await asyncio.to_thread(self._get_resource_service)
+                            return await asyncio.to_thread(getattr(service, op), name, **kwargs)
+                        pending_actions.append(PendingAction(
+                            name=f"operate_resource:{operation}:{target}", execute=execute_resource,
+                        ))
+                        res = f"Resource operation '{operation}' staged for '{target}'."
+
+                elif func_name == "get_system_telemetry":
                     cpu = psutil.cpu_percent(interval=0.1)
                     ram = psutil.virtual_memory().percent
                     battery = psutil.sensors_battery()
@@ -1606,54 +1706,14 @@ CRITICAL RULES:
                     )
 
                 elif func_name == "run_python_script":
-                    raw_path = str(
-                        args.get(
-                            "script_path",
-                            "",
-                        )
-                    ).strip()
-                    extra_args = str(
-                        args.get(
-                            "args",
-                            "",
-                        )
-                    ).strip()
-
-                    actual_file = resolve_script_filename(
-                        raw_path
-                    )
-
-                    if actual_file and os.path.exists(
-                        actual_file
-                    ):
-                        cmd = (
-                            f"py .\\\\{actual_file} "
-                            f"{extra_args}"
-                        ).strip()
-
-                        pending_actions.append(
-                            PendingAction(
-                                name=(
-                                    "run_python_script:"
-                                    f"{actual_file}"
-                                ),
-                                execute=lambda c=cmd: subprocess.Popen(
-                                    c,
-                                    shell=True,
-                                ),
-                                completion="wait",
-                            )
-                        )
-
-                        res = (
-                            f"Executing script '{actual_file}'."
-                        )
-
-                    else:
-                        res = (
-                            f"Script '{raw_path}' could not be resolved "
-                            "to any file in project directory."
-                        )
+                    raw_path = str(args.get('script_path', '')).strip()
+                    async def run_python_resource(target=raw_path, arguments=args.get('args') or []):
+                        service = await asyncio.to_thread(self._get_resource_service)
+                        return await asyncio.to_thread(service.run_script, target, arguments=arguments)
+                    pending_actions.append(PendingAction(
+                        name=f'operate_resource:run_script:{raw_path}', execute=run_python_resource,
+                    ))
+                    res = f"Python script '{raw_path}' staged through the resource service."
 
                 elif func_name == "control_media":
                     action = args.get("action")
@@ -1701,6 +1761,15 @@ CRITICAL RULES:
                         async def open_app(
                             target_app: str = app_name,
                         ) -> Any:
+                            service = await asyncio.to_thread(self._get_resource_service)
+                            try:
+                                resource = await asyncio.to_thread(service.catalog.resolve, target_app, suffixes={'.exe', '.app'})
+                            except (AmbiguousResource, AccessDenied):
+                                raise
+                            except ResourceError:
+                                resource = None
+                            if resource is not None and os.path.splitext(resource.path)[1].casefold() in {'.exe', '.app'}:
+                                return await asyncio.to_thread(service.launch, resource.path)
                             return await self.capabilities.open_resource(
                                 target_app,
                                 task_id=task_id,
@@ -2434,7 +2503,13 @@ async def main():
 
                 elif is_conversational_only(prompt):
                     await brain._publish_visual("thinking", task_id=task_id)
-                    reply_text = "Understood. I'm ready for your next command."
+                    conversational_text = re.sub(r"[^a-z0-9']+", " ", prompt.lower()).strip()
+                    if conversational_text in {"do you hear me", "can you hear me", "are you listening"}:
+                        reply_text = "Yes, I received your message. I'm listening."
+                    elif conversational_text in {"yes", "yes please", "yeah", "yep", "sure"}:
+                        reply_text = "Understood. Please state the action you want me to perform."
+                    else:
+                        reply_text = "Understood. I'm ready for your next command."
                     pending_actions = []
                     action_ok = True
                     action_error = None
@@ -2453,6 +2528,9 @@ async def main():
                         pending_actions,
                         task_id,
                     )
+                    if brain.last_plan_error:
+                        action_ok = False
+                        action_error = brain.last_plan_error
 
                 if pending_actions:
                     # The execution ledger, not the model's planning text, is

@@ -6,12 +6,14 @@ import ctypes
 from ctypes import wintypes
 from dataclasses import dataclass
 from typing import Literal
+from types import SimpleNamespace
+from pathlib import Path
 
 from .models import CapabilityError, ResolvedResource
 
 
-shell32 = ctypes.WinDLL("shell32", use_last_error=True)
-kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+shell32 = ctypes.WinDLL("shell32", use_last_error=True) if hasattr(ctypes, 'WinDLL') else SimpleNamespace(ShellExecuteExW=None)
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True) if hasattr(ctypes, 'WinDLL') else SimpleNamespace(GetProcessId=None, CloseHandle=None)
 
 
 SEE_MASK_NOCLOSEPROCESS = 0x00000040
@@ -52,20 +54,13 @@ class SHELLEXECUTEINFOW(ctypes.Structure):
     ]
 
 
-shell32.ShellExecuteExW.argtypes = [
-    ctypes.POINTER(SHELLEXECUTEINFOW),
-]
-shell32.ShellExecuteExW.restype = wintypes.BOOL
-
-kernel32.GetProcessId.argtypes = [
-    wintypes.HANDLE,
-]
-kernel32.GetProcessId.restype = wintypes.DWORD
-
-kernel32.CloseHandle.argtypes = [
-    wintypes.HANDLE,
-]
-kernel32.CloseHandle.restype = wintypes.BOOL
+if shell32.ShellExecuteExW is not None:
+    shell32.ShellExecuteExW.argtypes = [ctypes.POINTER(SHELLEXECUTEINFOW)]
+    shell32.ShellExecuteExW.restype = wintypes.BOOL
+    kernel32.GetProcessId.argtypes = [wintypes.HANDLE]
+    kernel32.GetProcessId.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +108,9 @@ class ResourceExecutionCapability:
                 f"Resolved resource '{resource.requested}' "
                 "has no executable target."
             )
+
+        if not callable(shell32.ShellExecuteExW):
+            raise CapabilityError('This legacy Shell adapter requires Windows. Use the resource service on macOS.')
 
         info = SHELLEXECUTEINFOW()
         info.cbSize = ctypes.sizeof(SHELLEXECUTEINFOW)
@@ -172,10 +170,10 @@ class ResourceExecutionCapability:
             verification = "target_exists"
 
             if resource.path and self._target_exists(resource.path):
-                state: ExecutionState = "verified"
+                state: ExecutionState = "dispatched"
                 verification_reason = (
                     "Windows accepted the open request and "
-                    "the target resource exists."
+                    "the target resource exists. Visible application handling has not been verified."
                 )
             elif process_created:
                 state = "launched"
@@ -235,9 +233,6 @@ class ResourceExecutionCapability:
     @staticmethod
     def _target_exists(path: str) -> bool:
         try:
-            return bool(
-                ctypes.windll.kernel32.GetFileAttributesW(path)
-                != 0xFFFFFFFF
-            )
-        except Exception:
+            return Path(path).exists()
+        except OSError:
             return False
