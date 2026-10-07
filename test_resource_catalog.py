@@ -229,13 +229,17 @@ class PlatformPathTests(unittest.TestCase):
         self.base = Path(self.temp.name).resolve()
 
     def alias_fixture(self):
+        import os
         from unittest.mock import patch
         root = self.base / 'physical'; root.mkdir()
         alias = self.base / 'alias'
         try:
-            alias.symlink_to(root, target_is_directory=True)
+            # A relative link models macOS aliases without Windows adding its
+            # extended-path prefix to an absolute link's readlink() result.
+            alias.symlink_to(root.name, target_is_directory=True)
         except OSError:
             self.skipTest('Host does not permit creation of symlinks.')
+        self.assertEqual(os.readlink(alias), root.name)
         self.enterContext(patch('ultron_resources.catalog.sys.platform', 'darwin'))
         self.enterContext(patch('ultron_resources.catalog._MACOS_SYSTEM_ALIASES', {alias: root}))
         note = root / 'report.txt'; note.write_text('hello')
@@ -247,20 +251,20 @@ class PlatformPathTests(unittest.TestCase):
 
     def test_platform_alias_does_not_bypass_protected_location(self):
         root, alias, note = self.alias_fixture()
-        with self.assertRaises(AccessDenied):
+        with self.assertRaisesRegex(AccessDenied, 'protected location'):
             PathPolicy([root], protected=[root]).resolve(alias / note.name)
 
     def test_platform_alias_does_not_expand_authorized_scope(self):
         root, alias, note = self.alias_fixture()
         allowed = root / 'allowed'; allowed.mkdir()
-        with self.assertRaises(AccessDenied):
+        with self.assertRaisesRegex(AccessDenied, 'outside the configured resource roots'):
             PathPolicy([allowed]).resolve(alias / note.name)
 
     def test_redirected_platform_alias_is_rejected(self):
         root, alias, note = self.alias_fixture()
         other = self.base / 'other'; other.mkdir()
         (other / note.name).write_text('wrong target')
-        alias.unlink(); alias.symlink_to(other, target_is_directory=True)
+        alias.unlink(); alias.symlink_to(other.name, target_is_directory=True)
         with self.assertRaises(AccessDenied):
             PathPolicy([self.base]).resolve(alias / note.name)
 
