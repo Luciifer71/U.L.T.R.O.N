@@ -303,9 +303,10 @@ TOOLS = [
 
             "description": (
 
-                "Execute a local Python (.py) file in the system or project"
-
-                " workspace."
+                "Legacy Python-only execution tool. Prefer operate_resource with operation=run_script. "
+                "Use this only when the user explicitly supplies a literal .py filename or path. "
+                "Copy that target exactly; never derive a filename from a spoken name, "
+                "append an extension, or correct an extension such as .py5."
 
             ),
 
@@ -1065,11 +1066,13 @@ CRITICAL RULES:
 
 5. WEBSITE SEARCH: To search inside a website, use ONE `open_website` call with both `target` and `query` whenever supported. Example: target=`youtube`, query=`quantum computers`. Do NOT use `query_knowledge_base` or `live_web_search` for an on-site search requested by the user.
 
-6. INCOMPLETE REQUESTS: Never invent missing targets, application names, search destinations, or arguments. Ask the user for the missing information.
+6. INCOMPLETE REQUESTS: Never invent missing targets, application names, search destinations, or arguments. Ask the user for the missing information. 'Open the file' requires clarification; 'file' is not a supplied filename.
 
 7. EXECUTION TRUTH: Tool calls are only a plan. Never claim a physical action happened merely because a tool call was produced. The execution layer is authoritative.
 
-8. REPEAT REQUESTS: When the user asks to repeat or redo a previous task, use the stored replay plan supplied by the execution system. Never invent a previous task from conversational wording alone.
+8. REPEAT REQUESTS: When the user asks to repeat or redo a previous task, use the stored replay plan supplied by the execution system. Never invent a previous task from conversational wording alone. Negated, quoted, hypothetical, and explanatory requests do not authorize execution. A conversational check such as 'Can you hear me?' does not authorize running a listener or repeating a previous task. Do not turn these requests into unrelated memory lookups.
+
+TARGET FIDELITY: Copy resource names and paths from the current request, preserving spaces, punctuation and extensions. Never convert a spoken script name to an invented filename. Never change report.py5 to report.py. For 'run Ultron smoke script', use operate_resource(operation='run_script', target='Ultron smoke script'). For 'open report in Notepad', use operate_resource(operation='open', target='report', editor='Notepad'); opening only Notepad omits the requested document. Unknown extensions or uncertain targets require clarification, not correction. These examples illustrate the rule; they do not authorize actions unless requested in the current turn.
 
 9. LOCAL RESOURCES: Use operate_resource for explicitly requested files, folders, games, or scripts. Preserve the user's literal target name; exact paths or unique exact catalog names are resolved by the service. Use launch for native executables, run_script for scripts, open for documents/folders or a requested editor, and read for UTF-8 text. find_resources searches metadata only. Do not invent paths, executable names, arguments, permissions, security restrictions, or success. Report the actual tool error and ask for a folder/path when a target is missing or ambiguous. Scripts execute as the current user; resource scope is not a script sandbox."""
         )

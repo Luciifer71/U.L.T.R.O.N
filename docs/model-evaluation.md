@@ -1,8 +1,8 @@
 # Comparing ULTRON's local language models
 
 This is a model-selection experiment, not a model upgrade or production-readiness
-certificate. The working brain remains `qwen2.5:7b`. No existing runtime module,
-`.env`, memory database, speech setting or tool execution rule is changed.
+certificate. The working brain remains `qwen2.5:7b`. Running the benchmark does
+not change `.env`, memory databases, speech settings or tool execution rules.
 
 ## What the benchmark does
 
@@ -29,9 +29,35 @@ it does not endorse executing that file type. Execution policy remains separate.
 
 This bypasses ULTRON's deterministic request parser and runtime guards to expose
 model differences. It does not reproduce the full live pipeline. For example,
-the known `Okay, can you run...` parser defect is still tracked separately.
+the `Okay, can you run...` parser fix is tested separately in the regression suite.
 Do not promote a model based only on this small development set; add held-out
 cases and live tests before changing the default.
+
+## 8 October development results and request-fidelity patch
+
+The supplied laptop reports measured Qwen2.5 7B at 27/42 contract passes
+(three rounds), Qwen3.5 4B at 6/14, and Qwen3 8B at 10/14 (one round each).
+Median model-request times were 0.748, 1.566, and 1.093 seconds respectively.
+These are brain-only runs; no combined Whisper performance has been measured.
+Qwen3 is a candidate, not a promoted default. It changed `report.py5` to
+`report.py`, invented script filenames and omitted a requested document.
+
+The request-fidelity patch shares polite prefixes between app and resource
+parsers, preserves punctuation during resource target validation, and clarifies
+the prompt and legacy Python tool description. App catalog alias matching stays
+separate. This bounded grammar is not a universal natural-language intent proof.
+Catalog-backed clarification and arbitrary multi-step completeness remain open.
+
+Because the prompt now includes examples drawn from observed failures, future
+scores on these same fourteen cases measure development regressions, not held-out
+generalization. Compare unseen filenames and phrasing before promotion. Local
+tests use mocked model responses and do not establish improved LLM accuracy.
+
+After installing the reviewed patch, first run `verify_ultron.py`, then compare
+the baseline and Qwen3 using the same updated prompt. Separately measure the
+candidate with Whisper loaded and transcribing. The `--label` option only labels
+reports; it does not load Whisper. Runtime thinking/context controls must match
+the benchmark before any live default change. Keep `qwen2.5:7b` as rollback.
 
 ## Laptop target and candidates
 
