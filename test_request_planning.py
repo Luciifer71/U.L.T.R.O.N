@@ -1,5 +1,58 @@
 import pytest
 from ultron_control.request_planning import explicit_resource_plan
+from ultron_control.request_planning import validate_resource_target
+
+
+@pytest.mark.parametrize('prefix', [
+    'Okay, can you ', 'Ok, please ', 'Could you please ',
+    'Please could you ', 'Can you do me a favor and ',
+])
+def test_resource_conversational_prefix_preserves_target(prefix):
+    plan = explicit_resource_plan(prefix + 'run Ultron smoke script?')
+    function = plan[0]['function']
+    assert function == {'name': 'operate_resource', 'arguments': {
+        'operation': 'run_script', 'target': 'Ultron smoke script'}}
+    assert validate_resource_target(prefix + 'run Ultron smoke script?', function) is None
+
+
+@pytest.mark.parametrize('prompt', [
+    'Okay, do not run Ultron smoke script.',
+    'Okay, if I ask, run Ultron smoke script.',
+    'Explain "run Ultron smoke script".',
+    'Okay, can you run Ultron smoke script if I approve?',
+])
+def test_resource_prefix_does_not_strip_intent_conditions(prompt):
+    assert explicit_resource_plan(prompt) is None
+
+
+@pytest.mark.parametrize('prompt,target', [
+    ('Run report.py5.', 'report.py'),
+    ('Run report.py.', 'report'),
+    ('Run report.py.', 'reportpy'),
+    ('Run report-v2.py.', 'report_v2.py'),
+    ('Run Ultron smoke script.', 'ultron_smoke.py'),
+    (r'Run C:\work\report.py.', r'C:\workreport.py'),
+])
+@pytest.mark.parametrize('tool', ['operate_resource', 'run_python_script'])
+def test_resource_guard_rejects_filename_mutations(prompt, target, tool):
+    arguments = ({'operation': 'run_script', 'target': target}
+                 if tool == 'operate_resource' else {'script_path': target})
+    assert validate_resource_target(prompt, {'name': tool, 'arguments': arguments})
+
+
+@pytest.mark.parametrize('target', [
+    'report.py', 'report-v2.py', 'Ultron smoke script', r'C:\work\report.py',
+])
+def test_resource_guard_accepts_literal_targets(target):
+    function = {'name': 'operate_resource', 'arguments': {
+        'operation': 'run_script', 'target': target}}
+    assert validate_resource_target(f'Okay, can you run {target}?', function) is None
+
+
+def test_polite_editor_plan_keeps_document_and_editor():
+    plan = explicit_resource_plan('Okay, could you please open report in Notepad?')
+    assert plan[0]['function']['arguments'] == {
+        'operation': 'open', 'target': 'report', 'editor': 'Notepad'}
 
 
 def test_spoken_script_stem_is_preserved_without_model_substitution():
@@ -50,10 +103,27 @@ def test_other_intents_are_not_deterministic_launches(prompt):
     assert explicit_launch_plan(prompt) is None
 
 
-@pytest.mark.parametrize('prompt', ['Open calculator mysteryapp notion.', 'Open calculator and delete files.', 'Open calculator,'])
+@pytest.mark.parametrize('prompt', ['Open calculator mysteryapp notion.', 'Open calculator and delete files.', 'Open calculator, Notepad,', 'Open calculator and', 'Open calculator,,'])
 def test_partial_or_unsupported_list_never_returns_partial_plan(prompt):
     with pytest.raises(PlanClarification):
         explicit_launch_plan(prompt)
+
+
+@pytest.mark.parametrize('prompt,expected', [
+    ('open calculator,', 'Calculator'),
+    ('Okay, could you open calculator,', 'Calculator'),
+    ('Launch File Explorer,', 'File Explorer'),
+])
+def test_single_known_app_accepts_transcription_terminal_comma(prompt, expected):
+    assert names(explicit_launch_plan(prompt)) == [expected]
+
+
+@pytest.mark.parametrize('prompt', [
+    'Do not open calculator,', 'If I ask, open calculator,',
+    'Explain "open calculator,"', 'Open calculator unless I approve,',
+])
+def test_terminal_comma_does_not_authorize_negative_or_conditional_intent(prompt):
+    assert explicit_launch_plan(prompt) is None
 
 
 def test_duplicate_launch_is_preserved():

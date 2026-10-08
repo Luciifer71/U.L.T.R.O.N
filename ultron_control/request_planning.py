@@ -25,6 +25,22 @@ APPLICATION_ALIASES = {
     "terminal": "Windows Terminal", "firefox": "Firefox", "brave": "Brave",
 }
 SEARCH_SITES = {"youtube", "google", "bing", "github", "reddit", "duckduckgo"}
+REQUEST_PREFIX = (
+    r"(?:(?:ok|okay)[, ]+)?(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?"
+    r"(?:do\s+me\s+a\s+favor\s+and\s+)?(?:please\s+)?"
+)
+
+
+def _mentions_resource(text: str, target: str) -> bool:
+    """Preserve filename/path punctuation; app alias matching is too loose here."""
+    text = unicodedata.normalize('NFC', text).casefold()
+    target = unicodedata.normalize('NFC', target.strip()).casefold()
+    if not target:
+        return False
+    return re.search(
+        r"(?<![\w./\\:-])" + re.escape(target) + r"(?![\w/\\:-]|\.(?=\S))",
+        text,
+    ) is not None
 
 
 def _words(text: str) -> str:
@@ -162,7 +178,11 @@ def validate_resource_target(prompt: str, function: dict) -> str | None:
         if re.search(r'\b(?:search|find|explain|tell|discuss)\b', prefix, re.I) and not re.search(r'\b(?:and|then|also)\s+(?:(?:then|also)\s+)?$', prefix, re.I):
             continue
         end = verbs[index + 1].start() if index + 1 < len(verbs) else len(prompt)
-        if _mentions_target(prompt[match.end():end], target):
+        clause = prompt[match.end():end]
+        # Preserve the existing cosmetic matching for native app catalog names,
+        # but never apply it to filenames, paths, or script operations.
+        native_name = operation == 'launch' and re.fullmatch(r'[\w ]+', target)
+        if (_mentions_target(clause, target) if native_name else _mentions_resource(clause, target)):
             grounded = True
     if not grounded:
         return f"The resource operation or target '{target}' was not explicitly requested. No actions were started."
@@ -187,7 +207,7 @@ class PlanClarification(ValueError):
 def explicit_resource_plan(prompt: str) -> list[dict] | None:
     """Single literal resource requests; resolution stays in the catalog."""
     text = prompt.strip().rstrip('.!?')
-    match = re.fullmatch(r'(?:please\s+)?(?:(?:can|could|would) you\s+)?(run|execute|read|open)\s+(.+)', text, re.I)
+    match = re.fullmatch(REQUEST_PREFIX + r'(run|execute|read|open)\s+(.+)', text, re.I)
     if not match:
         return None
     verb, target = match.groups()
@@ -229,13 +249,18 @@ def explicit_launch_plan(prompt: str) -> list[dict] | None:
     """
     text = re.sub(r"\s+", " ", prompt.strip())
     prefix = re.fullmatch(
-        r"(?:(?:ok|okay)[, ]+)?(?:please )?(?:(?:can|could|would) you )?"
-        r"(?:do me a favor and )?(?:please )?(?:open|launch) (.+?)[.!?]*",
+        REQUEST_PREFIX + r"(?:open|launch) (.+?)[.!?]*",
         text, re.IGNORECASE,
     )
     if not prefix:
         return None
     remainder = prefix.group(1).strip()
+    # ASR may add a terminal comma to a complete one-app utterance. Accept
+    # exactly one known alias here; dangling multi-app lists still clarify.
+    if remainder.endswith(','):
+        single_target = remainder[:-1].strip().casefold()
+        if single_target in APPLICATION_ALIASES:
+            return [_call('open_application', app_name=APPLICATION_ALIASES[single_target])]
     # File/editor requests belong to the resource planner, not the application
     # alias list. A named editor is not another application launch target.
     if re.search(r'[\\/]|\.(?:txt|md|pdf|docx?|xlsx?|exe|app|py|ps1|sh)\b|\bin (?:notepad|textedit)\b', remainder, re.I):

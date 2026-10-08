@@ -65,6 +65,26 @@ def make_brain(tmp_path, monkeypatch, model_calls):
     return brain
 
 
+def test_polite_script_bypasses_model_and_preserves_target(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    async def forbidden_model(**kwargs):
+        pytest.fail('Explicit polite script request must not reach the model')
+    brain.ollama.chat = forbidden_model
+    async def run():
+        _, actions = await brain.process_intent('Okay, can you run Ultron smoke script?', 'polite')
+        assert len(actions) == 1
+        assert actions[0].name == 'operate_resource:run_script:Ultron smoke script'
+    asyncio.run(run())
+
+
+def test_model_extension_correction_never_stages_execution(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [call('run_script', 'report.py')])
+    async def run():
+        _, actions = await brain.process_intent('Run report.py5.', 'extension')
+        assert actions == []
+    asyncio.run(run())
+
+
 def test_script_is_staged_then_completed_from_real_exit_code(tmp_path, monkeypatch):
     script = tmp_path / 'sample.py'
     marker = tmp_path / 'ran.txt'
