@@ -103,10 +103,27 @@ def test_other_intents_are_not_deterministic_launches(prompt):
     assert explicit_launch_plan(prompt) is None
 
 
-@pytest.mark.parametrize('prompt', ['Open calculator mysteryapp notion.', 'Open calculator and delete files.', 'Open calculator,'])
+@pytest.mark.parametrize('prompt', ['Open calculator mysteryapp notion.', 'Open calculator and delete files.', 'Open calculator, Notepad,', 'Open calculator and', 'Open calculator,,'])
 def test_partial_or_unsupported_list_never_returns_partial_plan(prompt):
     with pytest.raises(PlanClarification):
         explicit_launch_plan(prompt)
+
+
+@pytest.mark.parametrize('prompt,expected', [
+    ('open calculator,', 'Calculator'),
+    ('Okay, could you open calculator,', 'Calculator'),
+    ('Launch File Explorer,', 'File Explorer'),
+])
+def test_single_known_app_accepts_transcription_terminal_comma(prompt, expected):
+    assert names(explicit_launch_plan(prompt)) == [expected]
+
+
+@pytest.mark.parametrize('prompt', [
+    'Do not open calculator,', 'If I ask, open calculator,',
+    'Explain "open calculator,"', 'Open calculator unless I approve,',
+])
+def test_terminal_comma_does_not_authorize_negative_or_conditional_intent(prompt):
+    assert explicit_launch_plan(prompt) is None
 
 
 def test_duplicate_launch_is_preserved():

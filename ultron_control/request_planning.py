@@ -255,6 +255,12 @@ def explicit_launch_plan(prompt: str) -> list[dict] | None:
     if not prefix:
         return None
     remainder = prefix.group(1).strip()
+    # ASR may add a terminal comma to a complete one-app utterance. Accept
+    # exactly one known alias here; dangling multi-app lists still clarify.
+    if remainder.endswith(','):
+        single_target = remainder[:-1].strip().casefold()
+        if single_target in APPLICATION_ALIASES:
+            return [_call('open_application', app_name=APPLICATION_ALIASES[single_target])]
     # File/editor requests belong to the resource planner, not the application
     # alias list. A named editor is not another application launch target.
     if re.search(r'[\\/]|\.(?:txt|md|pdf|docx?|xlsx?|exe|app|py|ps1|sh)\b|\bin (?:notepad|textedit)\b', remainder, re.I):

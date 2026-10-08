@@ -63,6 +63,15 @@ the benchmark before any live default change. Keep `qwen2.5:7b` as rollback.
 
 ### Opt-in Qwen3 live trial
 
+Live trial follow-up: Whisper produced `open calculator,` twice. The bounded
+app parser now tolerates one terminal comma only when the entire target is one
+known application alias. It still requests clarification for `open calculator
+and`, repeated commas and dangling multi-app lists. This does not recover lost
+audio; the listener must continue rejecting recordings with detected loss.
+No change to the audio queue, transcription filter or model warmup is included
+in this punctuation correction. The first live run exposed audio overflow and
+cold-start delays that remain open before release/default-model promotion.
+
 The revised prompt scored 12/14 for Qwen2.5 and 14/14 for Qwen3 in the supplied
 single-round report `20261008T011004504914Z.json`. Manual review confirmed Qwen3
 preserved `report.py5` but proposed running it; the resource service must still
