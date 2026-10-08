@@ -973,7 +973,7 @@ class UltronBrain:
 
         self.ollama = OllamaRuntime(
 
-            OllamaRuntimeConfig(
+            OllamaRuntimeConfig.from_env(
 
                 host=OLLAMA_HOST,
 

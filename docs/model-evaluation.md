@@ -61,6 +61,38 @@ the benchmark before any live default change. Keep `qwen2.5:7b` as rollback.
 
 ## Laptop target and candidates
 
+### Opt-in Qwen3 live trial
+
+The revised prompt scored 12/14 for Qwen2.5 and 14/14 for Qwen3 in the supplied
+single-round report `20261008T011004504914Z.json`. Manual review confirmed Qwen3
+preserved `report.py5` but proposed running it; the resource service must still
+reject unsupported script types. Qwen2.5 emitted a script call as plain text
+and proposed opening Notion for the hypothetical. No promotion is implied.
+
+After verification, stop all existing ULTRON components and run
+`start-qwen3-trial.cmd` from PowerShell. This inherits the normal launcher and
+sets process-local `LLM_MODEL=qwen3:8b`, `LLM_THINKING=off`, `LLM_CONTEXT=4096`,
+`LLM_TEMPERATURE=0`, and `LLM_SEED=42`. It does not edit `.env`. Runtime controls
+apply to initial inference, follow-up requests and retries. Unset controls leave
+the existing behavior intact; `LLM_THINKING=default` omits the think parameter.
+Only opt into thinking controls for a model that supports them.
+
+Confirm the brain banner names `qwen3:8b` and the listener reports CUDA. Capture
+`ollama ps` and `nvidia-smi` while both are loaded. Try fresh conversation and
+negative requests (for example, "If I asked you to open Spotify, explain what
+you would do, but do not open it"), then a harmless application request. Test
+the existing harmless script and editor request, including the polite prefix.
+Save transcripts and actual outcomes. These live checks are not part of the
+model-only score; throughput and speech quality remain unmeasured until tested.
+
+Rollback: stop all three components, then use `start-ultron.cmd` from a normal
+shell. It uses the original `.env`/environment model selection (Qwen2.5 by
+default). The trial wrapper uses `setlocal`, so its settings do not persist in
+the calling shell. Never start a second trial brain alongside an existing brain.
+
+`LLM_MODEL` is the actual model setting used by both launcher and brain;
+the old `OLLAMA_MODEL` example was incorrect and has been corrected.
+
 User-reported hardware: i9-14900HX, RTX 4060 Laptop 8 GB VRAM, 16 GB DDR5 RAM,
 1 TB Gen 4 SSD. Free disk space and sustained SSD speed are not yet measured.
 
