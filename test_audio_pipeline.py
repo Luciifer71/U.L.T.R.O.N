@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from audio_pipeline import AudioFrame, AudioMailbox, UtteranceSegmenter
+from audio_pipeline import AudioFrame, AudioMailbox, UtteranceSegmenter, TranscriptionWorker
 
 
 def segmenter(**kwargs):
@@ -135,4 +135,103 @@ def test_mailbox_waiter_receives_new_frame_without_lost_wakeup():
             await asyncio.to_thread(mailbox.push, AudioFrame([sequence], 0, sequence))
             assert (await asyncio.wait_for(waiter, 1)).sequence == sequence
         mailbox.close()
+    asyncio.run(run())
+
+
+def test_transcription_overload_invalidates_inflight_and_pending_results():
+    from threading import Event
+    from concurrent.futures import ThreadPoolExecutor
+    async def run():
+        loop = asyncio.get_running_loop()
+        started = asyncio.Event()
+        release = Event()
+        delivered = asyncio.Event()
+        results = []
+        decoded = []
+        def infer(audio):
+            decoded.append(audio)
+            if audio == 'first':
+                loop.call_soon_threadsafe(started.set)
+                assert release.wait(2)
+            return audio
+        async def result(text, elapsed):
+            results.append(text)
+            delivered.set()
+        async def discard(reason):
+            pytest.fail(reason)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            worker = TranscriptionWorker(infer, result, discard, executor=executor)
+            worker.submit('first', worker.clock())
+            task = asyncio.create_task(worker.run())
+            try:
+                await asyncio.wait_for(started.wait(), 1)
+                assert worker.submit('second', worker.clock())
+                assert not worker.submit('third', worker.clock())
+                assert worker.queue.empty()
+                assert worker.submit('fresh', worker.clock())
+                release.set()
+                await asyncio.wait_for(delivered.wait(), 1)
+                assert results == ['fresh']
+                assert decoded == ['first', 'fresh']
+            finally:
+                release.set()
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('expire_during', [False, True])
+def test_expired_transcription_never_reaches_result_handler(expire_during):
+    async def run():
+        clock = [0 if expire_during else 20]
+        discarded = asyncio.Event()
+        calls = []
+        reasons = []
+        def infer(audio):
+            calls.append(audio)
+            clock[0] = 20
+            return 'open calculator'
+        async def result(*args):
+            pytest.fail('Expired command must not be published')
+        async def discard(reason):
+            reasons.append(reason)
+            discarded.set()
+        worker = TranscriptionWorker(infer, result, discard, clock=lambda: clock[0])
+        worker.submit('audio', 0)
+        task = asyncio.create_task(worker.run())
+        try:
+            await asyncio.wait_for(discarded.wait(), 1)
+            assert ('during' if expire_during else 'before') in reasons[0]
+            assert calls == (['audio'] if expire_during else [])
+        finally:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+    asyncio.run(run())
+
+
+def test_cancelled_transcription_never_publishes_late_native_result():
+    from threading import Event
+    async def run():
+        started = asyncio.Event()
+        release = Event()
+        loop = asyncio.get_running_loop()
+        def infer(audio):
+            loop.call_soon_threadsafe(started.set)
+            release.wait(2)
+            return 'open calculator'
+        async def result(*args):
+            pytest.fail('Cancelled worker must not publish')
+        worker = TranscriptionWorker(infer, result, result)
+        worker.submit('audio', worker.clock())
+        task = asyncio.create_task(worker.run())
+        try:
+            await asyncio.wait_for(started.wait(), 1)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert not worker.busy
+        finally:
+            release.set()
     asyncio.run(run())

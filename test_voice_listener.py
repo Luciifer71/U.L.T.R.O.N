@@ -161,10 +161,20 @@ def test_calibration_is_bounded_even_if_tts_never_releases_gate(listener, monkey
     asyncio.run(run())
 
 
-def test_main_routes_complete_utterance_and_cleans_up_on_cancel(listener, monkeypatch):
+@pytest.mark.parametrize('slow_inference', [False, True])
+def test_main_routes_complete_utterance_and_cleans_up_on_cancel(listener, monkeypatch, slow_inference):
     import json
+    from threading import Event
     calls = []
     streams = []
+    mailboxes = []
+    captured_while_transcribing = Event()
+    mailbox_type = listener.AudioMailbox
+    def mailbox(*args, **kwargs):
+        result = mailbox_type(*args, **kwargs)
+        mailboxes.append(result)
+        return result
+    monkeypatch.setattr(listener, 'AudioMailbox', mailbox)
     async def run():
         intent_received = asyncio.Event()
         class Nats:
@@ -186,6 +196,8 @@ def test_main_routes_complete_utterance_and_cleans_up_on_cancel(listener, monkey
         class Whisper:
             def transcribe(self, samples):
                 assert len(samples) == 38 * 1024
+                if slow_inference:
+                    assert captured_while_transcribing.wait(2)
                 return "Hey Ultron, open calculator."
         class Stream:
             def __init__(self, **kwargs):
@@ -198,6 +210,11 @@ def test_main_routes_complete_utterance_and_cleans_up_on_cancel(listener, monkey
                         data = np.full((1024, 1), 0.1 if 8 <= index < 16 else 0.0, dtype=np.float32)
                         self.callback(data, 1024, None, False)
                         await asyncio.sleep(0.002)
+                    if slow_inference:
+                        for _ in range(100):
+                            self.callback(np.zeros((1024, 1), dtype=np.float32), 1024, None, False)
+                            await asyncio.sleep(0.002)
+                        captured_while_transcribing.set()
                 self.producer = asyncio.create_task(produce())
             def stop(self):
                 self.producer.cancel()
@@ -216,8 +233,10 @@ def test_main_routes_complete_utterance_and_cleans_up_on_cancel(listener, monkey
         try:
             await asyncio.wait_for(intent_received.wait(), 2)
         finally:
+            captured_while_transcribing.set()
             task.cancel()
             await task
         assert streams[0].closed
+        assert mailboxes[0].dropped_frames == 0
     asyncio.run(run())
     assert calls == [{"prompt": "open calculator."}]

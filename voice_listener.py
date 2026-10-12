@@ -18,7 +18,7 @@ from nats.aio.client import Client as NATS
 import sounddevice as sd
 
 from visual_events import publish_visual_event
-from audio_pipeline import AudioFrame, AudioMailbox, UtteranceSegmenter
+from audio_pipeline import AudioFrame, AudioMailbox, UtteranceSegmenter, TranscriptionWorker
 
 
 # =========================================================
@@ -543,10 +543,213 @@ async def main():
     # MAIN AUDIO LOOP
     # =====================================================
 
+
+    async def report_transcription_discard(reason):
+        logging.warning("[STT DISCARD]: %s; repeat the complete command.", reason)
+        if is_active_session:
+            await nc.publish("ultron.voice", json.dumps({
+                "speech": "Speech processing fell behind. Please repeat the complete command."
+            }).encode())
+
+    async def handle_transcription(transcription, elapsed):
+        nonlocal is_active_session, last_interaction_time
+        logging.info("[STT]: inference_seconds=%.3f usable_transcript=%s", elapsed, bool(transcription))
+        if transcription:
+
+            print(
+                f"[TRANSCRIPTION]: "
+                f"'{transcription}'"
+            )
+
+
+            # =============================================
+            # STANDBY SESSION
+            # =============================================
+
+            if not is_active_session:
+
+                (
+                    has_wake_word,
+                    remaining_command,
+                ) = extract_wake_word_command(
+                    transcription
+                )
+
+
+                if has_wake_word:
+
+                    is_active_session = True
+
+                    last_interaction_time = time.monotonic()
+
+                    print(
+                        "\n>>> "
+                        "[WAKE WORD DETECTED]: "
+                        "Session Activated! "
+                        "<<<"
+                    )
+
+
+                    greeting_text = random.choice(
+                        ULTRON_GREETINGS
+                    )
+
+                    await nc.publish(
+                        "ultron.voice",
+                        json.dumps(
+                            {
+                                "speech": greeting_text
+                            }
+                        ).encode(),
+                    )
+
+                    await nc.flush()
+
+
+                    if (
+                        remaining_command
+                        and is_valid_command_prompt(
+                            remaining_command
+                        )
+                    ):
+
+                        print(
+                            "[EXECUTING COMMAND]: "
+                            f"'{remaining_command}'"
+                        )
+
+                        payload = json.dumps(
+                            {
+                                "prompt":
+                                    remaining_command
+                            }
+                        ).encode()
+
+                        await nc.publish(
+                            "ultron.intent",
+                            payload,
+                        )
+
+                        await nc.flush()
+
+                    else:
+
+                        print(
+                            "[SESSION READY]: "
+                            "Awaiting next instruction..."
+                        )
+
+                else:
+
+                    print(
+                        "[IGNORED]: "
+                        "Wake word 'Ultron' "
+                        "not present."
+                    )
+
+
+            # =============================================
+            # ACTIVE SESSION
+            # =============================================
+
+            else:
+
+                last_interaction_time = (
+                    time.monotonic()
+                )
+
+                (
+                    has_wake_word,
+                    remaining_command,
+                ) = extract_wake_word_command(
+                    transcription
+                )
+
+
+                if (
+                    has_wake_word
+                    and not remaining_command
+                ):
+
+                    greeting_text = random.choice(
+                        ULTRON_GREETINGS
+                    )
+
+                    await nc.publish(
+                        "ultron.voice",
+                        json.dumps(
+                            {
+                                "speech":
+                                    greeting_text
+                            }
+                        ).encode(),
+                    )
+
+                    await nc.flush()
+
+                else:
+
+                    final_prompt = (
+                        remaining_command
+                        if (
+                            has_wake_word
+                            and remaining_command
+                        )
+                        else transcription
+                    )
+
+
+                    if is_valid_command_prompt(
+                        final_prompt
+                    ):
+
+                        print(
+                            "[SESSION COMMAND DISPATCHED]: "
+                            f"'{final_prompt}'"
+                        )
+
+                        payload = json.dumps(
+                            {
+                                "prompt":
+                                    final_prompt
+                            }
+                        ).encode()
+
+                        await nc.publish(
+                            "ultron.intent",
+                            payload,
+                        )
+
+                        await nc.flush()
+
+                    else:
+
+                        print(
+                            "[DISCARDED NOISE PROMPT]: "
+                            f"'{final_prompt}'"
+                        )
+
+
+        else:
+
+            print(
+                "[DISCARDED]: "
+                "No usable transcript (no speech, filter rejection or inference error)."
+            )
+
+
+    transcriber = TranscriptionWorker(
+        whisper_engine.transcribe, handle_transcription, report_transcription_discard,
+        executor=thread_pool,
+    )
+    transcription_task = asyncio.create_task(transcriber.run(), name="ultron-transcription")
+
     try:
 
         while True:
 
+            if transcription_task.done():
+                transcription_task.result()
             now = time.monotonic()
 
 
@@ -556,7 +759,7 @@ async def main():
 
             if is_active_session:
 
-                if acoustic_gate.is_speaking:
+                if acoustic_gate.is_speaking or transcriber.busy:
 
                     last_interaction_time = now
 
@@ -612,6 +815,7 @@ async def main():
                         "speech": "I lost part of that recording. Please repeat the complete command."
                     }).encode())
             if segment.started:
+                last_interaction_time = now
                 try:
                     await publish_visual_event(nc, "listening", source="voice_listener")
                 except Exception as e:
@@ -624,201 +828,8 @@ async def main():
                 last_meter_time = now
             if segment.blocks is not None:
                 full_audio = np.concatenate(segment.blocks, axis=0)
-                print("\n[ULTRON EARS]: Processing speech buffer...")
-
-                transcription = (
-                    await loop.run_in_executor(
-                        thread_pool,
-                        whisper_engine.transcribe,
-                        full_audio,
-                    )
-                )
-
-
-                if transcription:
-
-                    print(
-                        f"[TRANSCRIPTION]: "
-                        f"'{transcription}'"
-                    )
-
-
-                    # =============================================
-                    # STANDBY SESSION
-                    # =============================================
-
-                    if not is_active_session:
-
-                        (
-                            has_wake_word,
-                            remaining_command,
-                        ) = extract_wake_word_command(
-                            transcription
-                        )
-
-
-                        if has_wake_word:
-
-                            is_active_session = True
-
-                            last_interaction_time = time.monotonic()
-
-                            print(
-                                "\n>>> "
-                                "[WAKE WORD DETECTED]: "
-                                "Session Activated! "
-                                "<<<"
-                            )
-
-
-                            greeting_text = random.choice(
-                                ULTRON_GREETINGS
-                            )
-
-                            await nc.publish(
-                                "ultron.voice",
-                                json.dumps(
-                                    {
-                                        "speech": greeting_text
-                                    }
-                                ).encode(),
-                            )
-
-                            await nc.flush()
-
-
-                            if (
-                                remaining_command
-                                and is_valid_command_prompt(
-                                    remaining_command
-                                )
-                            ):
-
-                                print(
-                                    "[EXECUTING COMMAND]: "
-                                    f"'{remaining_command}'"
-                                )
-
-                                payload = json.dumps(
-                                    {
-                                        "prompt":
-                                            remaining_command
-                                    }
-                                ).encode()
-
-                                await nc.publish(
-                                    "ultron.intent",
-                                    payload,
-                                )
-
-                                await nc.flush()
-
-                            else:
-
-                                print(
-                                    "[SESSION READY]: "
-                                    "Awaiting next instruction..."
-                                )
-
-                        else:
-
-                            print(
-                                "[IGNORED]: "
-                                "Wake word 'Ultron' "
-                                "not present."
-                            )
-
-
-                    # =============================================
-                    # ACTIVE SESSION
-                    # =============================================
-
-                    else:
-
-                        last_interaction_time = (
-                            time.monotonic()
-                        )
-
-                        (
-                            has_wake_word,
-                            remaining_command,
-                        ) = extract_wake_word_command(
-                            transcription
-                        )
-
-
-                        if (
-                            has_wake_word
-                            and not remaining_command
-                        ):
-
-                            greeting_text = random.choice(
-                                ULTRON_GREETINGS
-                            )
-
-                            await nc.publish(
-                                "ultron.voice",
-                                json.dumps(
-                                    {
-                                        "speech":
-                                            greeting_text
-                                    }
-                                ).encode(),
-                            )
-
-                            await nc.flush()
-
-                        else:
-
-                            final_prompt = (
-                                remaining_command
-                                if (
-                                    has_wake_word
-                                    and remaining_command
-                                )
-                                else transcription
-                            )
-
-
-                            if is_valid_command_prompt(
-                                final_prompt
-                            ):
-
-                                print(
-                                    "[SESSION COMMAND EXECUTED]: "
-                                    f"'{final_prompt}'"
-                                )
-
-                                payload = json.dumps(
-                                    {
-                                        "prompt":
-                                            final_prompt
-                                    }
-                                ).encode()
-
-                                await nc.publish(
-                                    "ultron.intent",
-                                    payload,
-                                )
-
-                                await nc.flush()
-
-                            else:
-
-                                print(
-                                    "[DISCARDED NOISE PROMPT]: "
-                                    f"'{final_prompt}'"
-                                )
-
-
-                else:
-
-                    print(
-                        "[DISCARDED]: "
-                        "Audio rejected as ambient noise "
-                        "or hallucination."
-                    )
-
+                if not transcriber.submit(full_audio, captured_at=frame.captured_at):
+                    await report_transcription_discard("transcription queue overloaded; pending results invalidated")
 
             await asyncio.sleep(
                 0.001
@@ -852,6 +863,13 @@ async def main():
         )
 
 
+        transcription_task.cancel()
+        try:
+            await transcription_task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logging.exception("[STT WORKER]: worker stopped after failure")
         audio_queue.close()
 
         if stream_manager.stream:

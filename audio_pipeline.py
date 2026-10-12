@@ -2,10 +2,63 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections import deque
 from dataclasses import dataclass, replace
 from threading import Lock
 from typing import Any
+
+
+class TranscriptionWorker:
+    """One inference in flight and one complete utterance waiting.
+
+    The audio consumer never waits for inference. Overload invalidates both
+    pending and in-flight results rather than executing an old command later.
+    Native inference cannot be interrupted, but its invalidated result is ignored.
+    All methods except the supplied inference callable run on the asyncio loop.
+    """
+    def __init__(self, transcribe, on_result, on_discard, *, executor=None,
+                 max_age_seconds=15.0, clock=time.monotonic):
+        if max_age_seconds <= 0:
+            raise ValueError('Transcription age limit must be positive')
+        self.transcribe = transcribe
+        self.on_result = on_result
+        self.on_discard = on_discard
+        self.executor = executor
+        self.max_age_seconds = max_age_seconds
+        self.clock = clock
+        self.queue = asyncio.Queue(maxsize=1)
+        self.generation = 0
+        self.busy = False
+
+    def submit(self, audio, captured_at):
+        if self.queue.full():
+            self.generation += 1
+            self.queue.get_nowait()
+            return False
+        self.queue.put_nowait((audio, captured_at, self.generation))
+        return True
+
+    async def run(self):
+        loop = asyncio.get_running_loop()
+        while True:
+            audio, captured_at, generation = await self.queue.get()
+            if self.clock() - captured_at > self.max_age_seconds:
+                await self.on_discard('utterance expired before transcription')
+                continue
+            self.busy = True
+            started = self.clock()
+            try:
+                result = await loop.run_in_executor(self.executor, self.transcribe, audio)
+                if generation != self.generation:
+                    # submit() already reported this overload episode.
+                    continue
+                if self.clock() - captured_at > self.max_age_seconds:
+                    await self.on_discard('utterance expired during transcription')
+                    continue
+                await self.on_result(result, self.clock() - started)
+            finally:
+                self.busy = False
 
 
 @dataclass(frozen=True)

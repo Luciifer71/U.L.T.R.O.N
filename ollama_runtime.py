@@ -24,6 +24,12 @@ class OllamaRuntimeConfig:
     temperature: float | None = None
     seed: int | None = None
 
+    def __post_init__(self):
+        if self.num_ctx is not None and self.num_ctx < 1:
+            raise ValueError('LLM_CONTEXT must be positive')
+        if self.temperature is not None and not 0 <= self.temperature <= 2:
+            raise ValueError('LLM_TEMPERATURE must be between 0 and 2')
+
     @classmethod
     def from_env(cls, **kwargs):
         thinking = os.getenv('LLM_THINKING', 'default').strip().lower()
@@ -46,10 +52,6 @@ class OllamaRuntime:
             raise ValueError("retry_attempts must be >= 1")
         if config.request_timeout_sec <= 0:
             raise ValueError("request_timeout_sec must be > 0")
-        if config.num_ctx is not None and config.num_ctx < 1:
-            raise ValueError('LLM_CONTEXT must be positive')
-        if config.temperature is not None and not 0 <= config.temperature <= 2:
-            raise ValueError('LLM_TEMPERATURE must be between 0 and 2')
 
         self.config = config
         self.client = AsyncClient(host=config.host)

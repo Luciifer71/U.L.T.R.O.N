@@ -16,7 +16,7 @@ import sys
 import time
 import traceback
 from urllib.parse import urlparse
-from urllib.request import ProxyHandler, build_opener
+from urllib.request import ProxyHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parent
 COMPONENTS = ('action_daemon', 'brain_agent', 'voice_listener')
@@ -158,6 +158,33 @@ def running_components(root, processes):
     return running
 
 
+def warm_ollama(host, model):
+    """Exercise selected inference before starting a fresh microphone session."""
+    from ollama_runtime import OllamaRuntimeConfig
+    try:
+        config = OllamaRuntimeConfig.from_env(host=host, model=model)
+        options = {'num_predict': 1, 'temperature': 0}
+        for key, value in (('num_ctx', config.num_ctx), ('temperature', config.temperature),
+                           ('seed', config.seed)):
+            if value is not None:
+                options[key] = value
+        payload = {'model': model, 'messages': [{'role': 'user', 'content': 'Reply OK.'}],
+                   'stream': False, 'keep_alive': '10m', 'options': options}
+        if config.think is not None:
+            payload['think'] = config.think
+        request = Request(host.rstrip('/') + '/api/chat', data=json.dumps(payload).encode(),
+                          headers={'Content-Type': 'application/json'}, method='POST')
+        print(f'Warming {model} before microphone startup (up to 300 seconds)...', flush=True)
+        started = time.monotonic()
+        with build_opener(ProxyHandler({})).open(request, timeout=300) as response:
+            result = json.load(response)
+        if not isinstance(result, dict) or result.get('error') or result.get('done') is not True:
+            raise ValueError('Ollama did not return a completed warmup response')
+        print(f'Model warmup complete in {time.monotonic() - started:.1f}s. Starting components.', flush=True)
+    except (OSError, ValueError) as exc:
+        raise StartupError(f'Model warmup failed; microphone not started: {exc}') from exc
+
+
 @contextmanager
 def startup_lock():
     # Serializes launch attempts for this checkout; never locks other projects.
@@ -234,6 +261,11 @@ def main():
             ensure_ollama(os.getenv('OLLAMA_HOST', 'http://127.0.0.1:11434'),
                           os.getenv('LLM_MODEL', 'qwen2.5:7b'))
             existing = running_components(ROOT, psutil.process_iter(['cmdline', 'cwd']))
+            if not existing:
+                warm_ollama(os.getenv('OLLAMA_HOST', 'http://127.0.0.1:11434'),
+                            os.getenv('LLM_MODEL', 'qwen2.5:7b'))
+            else:
+                print('Existing components detected; warmup skipped. Stop all components for a fresh model trial.', flush=True)
             for component in COMPONENTS:
                 if component in existing:
                     print(f'{component} is already running; skipped.', flush=True)

@@ -72,6 +72,30 @@ No change to the audio queue, transcription filter or model warmup is included
 in this punctuation correction. The first live run exposed audio overflow and
 cold-start delays that remain open before release/default-model promotion.
 
+The subsequent voice-readiness patch separates microphone consumption and
+segmentation from a single transcription worker. At most one complete utterance
+waits while another is transcribed. If this queue overflows, pending and in-flight
+results are invalidated and the user is asked to repeat; native inference may
+finish but its old result is not dispatched. Recordings older than 15 seconds
+from the end of capture are rejected before or after inference. Existing raw
+audio-loss, TTS gating, duration and backlog protections remain active.
+
+Fresh launcher sessions now warm the selected model with a tool-free one-token
+chat request before launching any components. Warmup uses the configured trial
+settings, waits at most 300 seconds and fails startup on an incomplete/error
+response. Existing component sessions skip warmup and print an explicit warning;
+stop every component for a fresh trial. Directly launching brain/listener scripts
+bypasses this launcher warmup. The tiny warmup does not prefill the full tool
+prompt or guarantee future model residency under memory pressure.
+
+New logs show `[STT]` inference duration and `[STT DISCARD]` overload/expiry.
+`SESSION COMMAND DISPATCHED` describes intent publication, not action completion.
+The slow-inference test continues producing microphone blocks while inference
+is held; its mailbox must not overflow. Tests also cover stale-result rejection,
+overload invalidation, cancellation and failed warmup preventing launches.
+Real Windows/RTX/Whisper contention and the unexplained video transcript still
+require live validation. No model, microphone or VAD algorithm was replaced.
+
 The revised prompt scored 12/14 for Qwen2.5 and 14/14 for Qwen3 in the supplied
 single-round report `20261008T011004504914Z.json`. Manual review confirmed Qwen3
 preserved `report.py5` but proposed running it; the resource service must still
