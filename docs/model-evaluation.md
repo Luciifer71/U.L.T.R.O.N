@@ -247,3 +247,23 @@ Keep benchmark implementation and CI/documentation as reviewable commits. Do not
 commit local reports, `.env`, audio, resource indexes or machine-specific data.
 
 Sources: https://docs.ollama.com/api/chat and https://docs.ollama.com/api/ps
+
+## Windows live trial checkpoint — 12 October 2026
+
+The supplied Qwen3 8B trial logs show Whisper small.en running on CUDA with
+float16. A conversational request to open Calculator and Notion produced two
+`ACTION COMPLETE` events. Visual confirmation that both windows opened remains
+pending. No mailbox-loss or transcription-overload warnings appear in this short
+session; this is not evidence of sustained reliability.
+
+The request was dispatched at 20:02:23 IST and the daemon reported execution
+around 20:02:54, approximately 31 seconds later. Speech transcription took 1.952
+seconds. The delay after dispatch is unresolved; launcher warmup output and
+Ollama timing logs are needed to distinguish inference from other processing.
+A correctly transcribed GitHub-push request produced no validated plan and no
+reported Git execution. The intended application behind the transcript
+“hairdryne” still needs clarification.
+
+Keep the trial opt-in and PR #3 in draft pending the updated Windows verification
+result, latency investigation and remaining live action checks. No default model
+change or merge is justified by this checkpoint alone.
