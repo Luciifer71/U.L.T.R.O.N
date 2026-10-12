@@ -518,6 +518,9 @@ docker compose up -d
 .\.venv\Scripts\python.exe .\voice_listener.py
 ```
 
+Wait for microphone calibration to finish and `STANDBY MODE` to appear before
+saying **“Hey Ultron”** and giving your command.
+
 ## Terminal 4 — Frontend
 
 From the UI directory:
