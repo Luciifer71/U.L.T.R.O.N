@@ -500,6 +500,9 @@ The Brain performs a runtime readiness check before accepting intent processing.
 
 # ▶️ Running Ultron-AI
 
+Run the PowerShell commands below from the repository root unless a different
+directory is specified. The Python commands use the project’s `.venv` interpreter.
+
 ## Terminal 1 — NATS Infrastructure
 
 ```powershell
