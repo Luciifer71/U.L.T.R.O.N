@@ -20,7 +20,7 @@ scipy>=1.11.0
 pyttsx3>=2.90
 
 # --- Voice Output & Action Daemon ---
-edge-tts==7.2.8
+edge-tts==7.3.1
 pygame==2.6.1
 psutil>=5.9.0
 

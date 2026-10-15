@@ -290,3 +290,40 @@ from the live checkpoint, waiting for completion between requests. Compare the
 first and repeated requests. Confirm actual windows opened and record any audio
 loss warnings. Use the task IDs and timing fields to locate the delay before
 changing model settings or claiming a latency fix.
+
+
+## 15 October live checkpoint and speech-output recovery
+
+Direct Calculator planning/preparation took 0.029 s and execution 1.211 s;
+Notion plus Calculator took 0.016 s and 1.207 s. These requests used the
+deterministic planner, with no Ollama timing record, so they do not diagnose
+the earlier 31-second model-path delay. The second-screen request was rejected
+without actions because its full target/modifier could not be resolved.
+
+Speech output failed repeatedly with HTTP 403. The SPEAKING line precedes
+synthesis and does not prove playback. Update the edge-tts pin from 7.2.8 to
+7.3.1: upstream 7.3.0 added Sec-MS-GEC v2 support and 7.3.1 fixed locale-dependent
+server-date parsing. This is a candidate service-compatibility fix, not a
+confirmed resolution on the user's machine.
+
+Sources: https://github.com/rany2/edge-tts/releases/tag/7.3.0 and
+https://github.com/rany2/edge-tts/releases/tag/7.3.1
+
+After pulling the trial branch, stop all components and run in PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install edge-tts==7.3.1
+.\.venv\Scripts\python.exe -m edge_tts --voice en-US-ChristopherNeural --text "Ultron speech test." --write-media "$env:TEMP\ultron-tts-test.mp3"
+```
+
+Only if synthesis succeeds, open that MP3 and confirm audible speech. Then run
+verify_ultron.py and restart the trial. Report any remaining error and the
+installed package version; do not commit the generated audio.
+
+One microphone-loss warning occurred with mailbox dropped_frames=0. The current
+callback marks any capture status as a discontinuity, and sequence gaps can also
+trigger rejection; zero counted mailbox drops does not prove zero capture loss.
+Whisper remained on CUDA float16, but its warmup took 19.530 s. The attached
+Ollama excerpt ends during model metadata loading and cannot confirm completed
+warmup or subsequent chat latency. Keep PR #3 draft pending speech recovery,
+Windows verification and remaining live tests.
