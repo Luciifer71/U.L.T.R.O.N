@@ -267,3 +267,26 @@ reported Git execution. The intended application behind the transcript
 Keep the trial opt-in and PR #3 in draft pending the updated Windows verification
 result, latency investigation and remaining live action checks. No default model
 change or merge is justified by this checkpoint alone.
+
+## Diagnosing live response delay
+
+The brain prints `[OLLAMA TIMING]` for each model attempt, labelled with its task
+ID and phase (`plan`, `plan_retry`, or `followup`). It includes initial readiness
+wait, attempt wall time, cumulative request time (including retry recovery), and
+available model load, prompt-evaluation and generation durations in seconds.
+Missing server metrics are omitted, not treated as zero. Counts and timings are
+logged without adding prompts or response contents to these diagnostic records.
+
+`[BRAIN TIMING]` separates handler lock wait, planning plus tool preparation, and
+execution. Handler lock wait starts when the NATS callback begins; it does not
+measure time already spent queued in NATS. Planning time includes model calls,
+so these overlapping measurements should not be added together. These logs do
+not measure TTS duration or prove that a model was kept resident after warmup.
+
+For a fresh trial, stop all components, run `verify_ultron.py`, then launch
+`start-qwen3-trial.cmd`. Save launcher warmup output and all three component logs.
+Try a direct Calculator request and the conversational Calculator/Notion request
+from the live checkpoint, waiting for completion between requests. Compare the
+first and repeated requests. Confirm actual windows opened and record any audio
+loss warnings. Use the task IDs and timing fields to locate the delay before
+changing model settings or claiming a latency fix.

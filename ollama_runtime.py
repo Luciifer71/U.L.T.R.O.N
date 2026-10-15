@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import json
+import time
 import os
 from dataclasses import dataclass
 
@@ -126,7 +128,7 @@ class OllamaRuntime:
 
                     await asyncio.sleep(self.config.startup_retry_sec)
 
-    async def chat(self, **kwargs):
+    async def chat(self, *, diagnostic_task_id=None, diagnostic_phase="chat", **kwargs):
         """Execute a chat request with bounded retries and recovery."""
         # A configured trial profile applies to every brain request, including
         # retries and follow-up summaries. Never mutate a caller's options.
@@ -141,21 +143,47 @@ class OllamaRuntime:
             kwargs['options'] = options
         if self.config.think is not None:
             kwargs['think'] = self.config.think
+        request_started = time.perf_counter()
         await self.wait_until_ready()
+        ready_seconds = time.perf_counter() - request_started
+
+        def report(outcome, attempt, started, response=None):
+            row = {
+                "task_id": diagnostic_task_id, "phase": diagnostic_phase,
+                "outcome": outcome, "attempt": attempt,
+                "ready_seconds": round(ready_seconds, 3),
+                "attempt_seconds": round(time.perf_counter() - started, 3),
+                "request_seconds": round(time.perf_counter() - request_started, 3),
+            }
+            # Only numerical performance metadata: never log message content.
+            for field in ("total_duration", "load_duration", "prompt_eval_duration",
+                          "eval_duration", "prompt_eval_count", "eval_count"):
+                value = response.get(field) if isinstance(response, dict) else getattr(response, field, None)
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    if field.endswith("_duration"):
+                        row[field.replace("_duration", "_seconds")] = round(value / 1e9, 3)
+                    else:
+                        row[field] = value
+            print("[OLLAMA TIMING] " + json.dumps(row), flush=True)
 
         last_error: Exception | None = None
 
         for attempt in range(1, self.config.retry_attempts + 1):
+            started = time.perf_counter()
             try:
-                return await asyncio.wait_for(
+                response = await asyncio.wait_for(
                     self.client.chat(**kwargs),
                     timeout=self.config.request_timeout_sec,
                 )
+                report("ok", attempt, started, response)
+                return response
 
             except asyncio.CancelledError:
+                report("cancelled", attempt, started)
                 raise
 
             except Exception as exc:
+                report(type(exc).__name__, attempt, started)
                 last_error = exc
                 self._ready = False
                 self._last_error = str(exc)

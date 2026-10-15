@@ -38,6 +38,8 @@ import inspect
 
 import uuid
 
+import time
+
 from dataclasses import dataclass
 
 from typing import Any, Callable, Literal
@@ -1453,6 +1455,7 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
             }
             try:
                 response = await self.ollama.chat(
+                    diagnostic_task_id=task_id, diagnostic_phase="plan",
                     model=MODEL_NAME,
                     messages=self.history,
                     tools=TOOLS,
@@ -1534,6 +1537,7 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
             ]
             try:
                 retry = await self.ollama.chat(
+                    diagnostic_task_id=task_id, diagnostic_phase="plan_retry",
                     model=MODEL_NAME, messages=retry_messages, tools=TOOLS,
                     options={"num_predict": 256, "temperature": 0},
                 )
@@ -2345,6 +2349,7 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
         if not pending_actions:
             try:
                 final_response = await self.ollama.chat(
+                    diagnostic_task_id=task_id, diagnostic_phase="followup",
                     model=MODEL_NAME,
                     messages=self.history,
                     options={
@@ -2477,8 +2482,10 @@ async def main():
 
 
     async def intent_handler(msg):
+        received_at = time.perf_counter()
         async with brain.task_lock:
             task_id = str(uuid.uuid4())
+            print(f"[BRAIN TIMING] [task={task_id}] handler_lock_wait_seconds={time.perf_counter() - received_at:.3f}", flush=True)
 
             try:
                 data = json.loads(msg.data.decode())
@@ -2518,6 +2525,7 @@ async def main():
                     action_error = None
 
                 else:
+                    planning_started = time.perf_counter()
                     reply_text, pending_actions = await brain.process_intent(
                         prompt,
                         task_id,
@@ -2527,10 +2535,13 @@ async def main():
                     # PHYSICAL ACTION EXECUTION
                     # -------------------------------------------------
 
+                    print(f"[BRAIN TIMING] [task={task_id}] plan_and_prepare_seconds={time.perf_counter() - planning_started:.3f}", flush=True)
+                    execution_started = time.perf_counter()
                     action_ok, action_error = await brain._run_pending_actions(
                         pending_actions,
                         task_id,
                     )
+                    print(f"[BRAIN TIMING] [task={task_id}] execution_seconds={time.perf_counter() - execution_started:.3f}", flush=True)
                     if brain.last_plan_error:
                         action_ok = False
                         action_error = brain.last_plan_error

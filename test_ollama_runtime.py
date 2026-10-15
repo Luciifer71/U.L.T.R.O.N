@@ -64,3 +64,64 @@ def test_invalid_profile_fails_before_client_creation(monkeypatch, key, value):
     monkeypatch.setattr('ollama_runtime.AsyncClient', forbidden_client)
     with pytest.raises(ValueError):
         OllamaRuntime(OllamaRuntimeConfig.from_env())
+
+
+@pytest.mark.parametrize('shape', ['dict', 'object', 'missing'])
+def test_timing_metadata_preserves_response_and_excludes_content(monkeypatch, capsys, shape):
+    import json
+    from types import SimpleNamespace
+    metadata = {'load_duration': 2_000_000_000, 'prompt_eval_duration': 3_000_000_000,
+                'eval_duration': 4_000_000_000, 'total_duration': 9_000_000_000,
+                'prompt_eval_count': 100, 'eval_count': 20,
+                'message': {'content': 'private response'}}
+    response = (metadata if shape == 'dict' else SimpleNamespace(**metadata)
+                if shape == 'object' else {'message': {'content': 'private response'}})
+    received = []
+    clock = [0.0]
+    monkeypatch.setattr('ollama_runtime.time.perf_counter', lambda: clock[0])
+    class Client:
+        async def chat(self, **kwargs):
+            received.append(kwargs)
+            clock[0] += 9
+            return response
+    monkeypatch.setattr('ollama_runtime.AsyncClient', lambda **kwargs: Client())
+    runtime = OllamaRuntime(OllamaRuntimeConfig())
+    async def ready():
+        clock[0] += 2
+    monkeypatch.setattr(runtime, 'wait_until_ready', ready)
+    result = asyncio.run(runtime.chat(diagnostic_task_id='task-1', diagnostic_phase='plan',
+                                     messages=[{'role': 'user', 'content': 'private prompt'}]))
+    assert result is response
+    assert set(received[0]) == {'messages'}
+    output = capsys.readouterr().out
+    assert 'private' not in output
+    row = json.loads(output.split('[OLLAMA TIMING] ')[1])
+    assert row['task_id'] == 'task-1' and row['phase'] == 'plan'
+    assert row['ready_seconds'] == 2 and row['attempt_seconds'] == 9
+    assert row['request_seconds'] == 11
+    if shape == 'missing':
+        assert 'load_seconds' not in row
+    else:
+        assert row['load_seconds'] == 2 and row['prompt_eval_seconds'] == 3
+        assert row['eval_seconds'] == 4 and row['eval_count'] == 20
+
+
+def test_timing_reports_failed_attempt_and_recovery(monkeypatch, capsys):
+    import json
+    calls = []
+    class Client:
+        async def chat(self, **kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                raise OSError('temporary failure')
+            return {'message': {'content': 'ok'}}
+    monkeypatch.setattr('ollama_runtime.AsyncClient', lambda **kwargs: Client())
+    runtime = OllamaRuntime(OllamaRuntimeConfig(retry_attempts=2, retry_backoff_sec=0))
+    async def ready():
+        pass
+    monkeypatch.setattr(runtime, 'wait_until_ready', ready)
+    result = asyncio.run(runtime.chat(messages=[]))
+    assert result['message']['content'] == 'ok'
+    rows = [json.loads(line.split('[OLLAMA TIMING] ')[1])
+            for line in capsys.readouterr().out.splitlines()]
+    assert [(row['attempt'], row['outcome']) for row in rows] == [(1, 'OSError'), (2, 'ok')]
