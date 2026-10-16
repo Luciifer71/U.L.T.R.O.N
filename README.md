@@ -446,6 +446,20 @@ python -m pip install keyboard psutil pyperclip duckduckgo-search
 
 ---
 
+### Windows CUDA speech dependencies
+
+For NVIDIA GPU speech recognition on x64 Windows, install the speech requirements
+into the same environment used by the listener:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-speech-windows.txt
+```
+
+This does not install or update the NVIDIA driver. Follow the
+[speech runtime guide](docs/voice-runtime.md) for CUDA validation and microphone checks.
+
+---
+
 ## 5. Configure Environment Variables
 
 Create the local environment file:
