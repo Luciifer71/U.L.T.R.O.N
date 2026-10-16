@@ -733,3 +733,27 @@ This repository and its source code are **proprietary**.
 Permission is granted solely to view the code for educational and demonstration purposes.
 
 No part of this software may be reproduced, distributed, modified, or used in commercial applications without explicit prior written consent from the owner.
+
+### One diagnostic report (no paid APIs)
+
+With the normal services running, check the Qwen3 trial configuration and regression suite:
+
+```powershell
+.\.venv\Scripts\python.exe .\ultron_diagnostics.py --model qwen3:8b --tests
+```
+
+The report is saved under `runtime/diagnostics/`. It includes dependency versions,
+CPU/RAM/battery/uptime readings, local Ollama model inventory, the NATS greeting,
+and regression status. Omit `--tests` for a quick read-only report. Without
+`--model`, the command uses `LLM_MODEL` from the environment or `.env`.
+It does not start services, load models, record audio, or launch applications.
+Service reachability does not prove that brain/listener/daemon subscribers are
+healthy. Missing readings and untested microphone/speaker/desktop checks remain
+explicit. The report excludes environment dumps, credentials, transcripts, and
+raw test output. Exit status reports regression failure; inspect service statuses
+in the report separately.
+
+Ask "What is my uptime?" or "What are my system statistics?" for measured local
+readings. Battery percentage and plugged-in status are reported separately.
+"Okay, are there any errors?" reports the latest recorded task and explicitly
+states that a full system health check has not been performed.

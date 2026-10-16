@@ -252,3 +252,33 @@ def test_read_tool_still_gets_followup_with_evidence(tmp_path, monkeypatch):
     reply, actions = asyncio.run(brain.process_intent(f'Read {tmp_path / "note.txt"}', 'read'))
     assert len(calls) == 1 and actions == []
     assert 'Actual note contents' in reply
+
+
+@pytest.mark.parametrize('prompt', ['Okay, are there any errors?', 'technology stack.',
+                                   'What is my uptime?'])
+def test_grounded_variants_do_not_call_model(tmp_path, monkeypatch, prompt):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    async def forbidden(**kwargs):
+        pytest.fail('Grounded requests must not call a model')
+    brain.ollama.chat = forbidden
+    monkeypatch.setattr('brain_agent.get_latest_task', lambda: None)
+    reply, actions = asyncio.run(brain.process_intent(prompt, 'grounded'))
+    assert reply and not actions
+    assert 'proprietary' not in reply and 'No errors detected' not in reply
+
+
+def test_model_selected_telemetry_is_reported_without_invented_followup(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    calls = []
+    async def chat(**kwargs):
+        calls.append(kwargs)
+        assert len(calls) == 1
+        return {'message': {'content': '', 'tool_calls': [
+            {'function': {'name': 'get_system_telemetry', 'arguments': {}}}]}}
+    brain.ollama.chat = chat
+    monkeypatch.setattr('brain_agent.collect_telemetry', lambda: {
+        'cpu_percent': 5, 'memory_percent': 90, 'uptime_seconds': 3600,
+        'battery_percent': 80, 'power_plugged': True})
+    reply, actions = asyncio.run(brain.process_intent('How long has this computer been running?', 'telemetry'))
+    assert '1 hours' in reply and 'Battery: 80%' in reply and 'Power: plugged in' in reply
+    assert len(calls) == 1 and not actions

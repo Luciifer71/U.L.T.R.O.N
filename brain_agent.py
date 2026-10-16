@@ -58,6 +58,7 @@ import psutil
 
 from visual_events import publish_visual_event
 
+from ultron_control.system_info import collect_telemetry, format_telemetry
 from ultron_control.capability_broker import CapabilityBroker
 from ultron_control.request_planning import explicit_launch_plan, explicit_resource_plan, PlanClarification, validate_application_targets
 from ultron_resources.config import create_service as create_resource_service
@@ -212,9 +213,8 @@ TOOLS = [
 
             "description": (
 
-                "Get real-time CPU utilization %, RAM usage %, battery status,"
-
-                " and storage details."
+                "Read current CPU and RAM usage, battery percentage, plugged-in status, "
+                "and system uptime since boot. Not a full health check; unavailable readings are explicit."
 
             ),
 
@@ -1057,6 +1057,10 @@ class UltronBrain:
         self.system_prompt = (
             f"""You are Ultron, an advanced AI assistant. Keep all spoken responses concise and direct.{facts_summary}
 
+CONFIGURED ARCHITECTURE: Python, an Ollama local model, NATS component messaging, SQLite task memory, Faster-Whisper speech recognition and Edge TTS speech output. These are configuration facts, not evidence that every component is healthy. Never describe this as a secret proprietary stack.
+
+GROUNDING: For current system usage, battery or uptime call get_system_telemetry. Battery percentage is not a power source. A successful task does not prove the whole system has no errors. State the scope of available evidence. If no available tool can retrieve a fact, say so; do not offer an unspecified alternate method or search the web for this computer's live state. Ambiguous speech needs a brief clarification, not a reprimand. Interpret the current request independently of unrelated previous answers.
+
 CRITICAL RULES:
 
 1. MEMORY STORAGE: If the user states a fact, preference, or detail about themselves (e.g., favorite game, name, movie list), you MUST execute `remember_fact`.
@@ -1117,6 +1121,8 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
 
     def _compose_local_reply(self, prompt: str) -> str | None:
         kind = local_information_kind(prompt)
+        if kind == "telemetry":
+            return format_telemetry(collect_telemetry())
         if kind == "health":
             return (
                 "I have not run a full system health check. "
@@ -1658,6 +1664,7 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
             return reply, []
 
         pending_actions: list[PendingAction] = []
+        telemetry_reply = None
 
         if tool_calls:
             self.history.append(message)
@@ -1729,18 +1736,9 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
                         res = f"Resource operation '{operation}' staged for '{target}'."
 
                 elif func_name == "get_system_telemetry":
-                    cpu = psutil.cpu_percent(interval=0.1)
-                    ram = psutil.virtual_memory().percent
-                    battery = psutil.sensors_battery()
-                    bat_str = (
-                        f"{battery.percent}%"
-                        if battery
-                        else "AC Power"
-                    )
-                    res = (
-                        f"System Metrics: CPU at {cpu}%, "
-                        f"RAM at {ram}%, Power Source: {bat_str}."
-                    )
+                    metrics = await asyncio.to_thread(collect_telemetry)
+                    res = json.dumps(metrics)
+                    telemetry_reply = format_telemetry(metrics)
 
                 elif func_name == "run_python_script":
                     raw_path = str(args.get('script_path', '')).strip()
@@ -2380,6 +2378,8 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
             # The initial response already answers a conversational request.
             # A second tools-disabled call has no new evidence to summarize.
             final_text = content_text or "Could you clarify your question?"
+        elif len(tool_calls) == 1 and telemetry_reply is not None:
+            final_text = telemetry_reply
         elif not pending_actions:
             try:
                 final_response = await self.ollama.chat(
