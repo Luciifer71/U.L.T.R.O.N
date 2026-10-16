@@ -336,3 +336,31 @@ def test_health_db_failure_is_explicit(tmp_path, monkeypatch):
     reply = brain._compose_local_reply('Are there any errors?')
     assert 'task history is unavailable' in reply
     assert 'private database' not in reply
+
+
+@pytest.mark.parametrize('prompt', [
+    'Okay then, can you open calculator and file explorer for me?',
+    'Can you open the calculator and file explorer?',
+    'Please open the calculator and the file explorer.',
+])
+def test_support_bundle_app_requests_bypass_model(tmp_path, monkeypatch, prompt):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    async def forbidden(**kwargs):
+        pytest.fail('Known application list must not require model inference')
+    brain.ollama.chat = forbidden
+    _, actions = asyncio.run(brain.process_intent(prompt, 'apps'))
+    assert [a.name for a in actions] == ['open_application:Calculator', 'open_application:File Explorer']
+
+
+def test_support_bundle_uptime_paraphrase_is_concise(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    monkeypatch.setattr('brain_agent.collect_telemetry', lambda: {'uptime_seconds': 3600})
+    assert brain._compose_local_reply('Where is my uptime?') == 'System uptime: 1 hour.'
+
+
+def test_model_can_request_uptime_only(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [
+        {'function': {'name': 'get_system_telemetry', 'arguments': {'metric': 'uptime'}}}])
+    monkeypatch.setattr('brain_agent.collect_telemetry', lambda: {'uptime_seconds': 60, 'cpu_percent': 5})
+    reply, actions = asyncio.run(brain.process_intent('How long has this computer been running?', 'uptime-model'))
+    assert reply == 'System uptime: 1 minute.' and not actions

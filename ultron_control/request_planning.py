@@ -26,7 +26,7 @@ APPLICATION_ALIASES = {
 }
 SEARCH_SITES = {"youtube", "google", "bing", "github", "reddit", "duckduckgo"}
 REQUEST_PREFIX = (
-    r"(?:(?:ok|okay)[, ]+)?(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?"
+    r"(?:(?:ok|okay)[, ]+(?:(?:then|and)[, ]+)?)?(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?"
     r"(?:do\s+me\s+a\s+favor\s+and\s+)?(?:please\s+)?"
 )
 
@@ -285,6 +285,10 @@ def explicit_launch_plan(prompt: str) -> list[dict] | None:
     calls = []
     remaining = remainder.lower()
     while remaining:
+        # Articles are grammar only before a known application alias.
+        article_target = remaining[4:] if remaining.startswith("the ") else remaining
+        if any(article_target == name or article_target.startswith(name + " ") or article_target.startswith(name + ",") for name in aliases):
+            remaining = article_target
         alias = next((name for name in aliases if remaining == name or remaining.startswith(name + " ") or remaining.startswith(name + ",")), None)
         if alias is None:
             if not calls:

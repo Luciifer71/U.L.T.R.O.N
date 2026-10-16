@@ -226,7 +226,7 @@ TOOLS = [
 
             ),
 
-            "parameters": {"type": "object", "properties": {}, "required": []},
+            "parameters": {"type": "object", "properties": {"metric": {"type": "string", "enum": ["all", "uptime"], "description": "Choose uptime when only time since boot is requested; otherwise all."}}, "required": []},
 
         },
 
@@ -1767,7 +1767,7 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
                 elif func_name == "get_system_telemetry":
                     metrics = await asyncio.to_thread(collect_telemetry)
                     res = json.dumps(metrics)
-                    telemetry_reply = format_telemetry(metrics)
+                    telemetry_reply = format_uptime(metrics) if args.get("metric") == "uptime" else format_telemetry(metrics)
 
                 elif func_name == "run_python_script":
                     raw_path = str(args.get('script_path', '')).strip()

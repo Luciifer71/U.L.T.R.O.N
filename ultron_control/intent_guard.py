@@ -288,6 +288,8 @@ def local_information_kind(prompt: str) -> str | None:
         "what model are you using", "which model are you using",
     }:
         return "stack"
+    if re.fullmatch(r"(?:what|where) (?:is|s) (?:my |the |my system )?uptime", text):
+        return "uptime"
     if text in {"what is my uptime", "what's my uptime", "system uptime", "what is my system uptime"}:
         return "uptime"
     if text in {

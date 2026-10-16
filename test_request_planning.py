@@ -208,3 +208,19 @@ def test_negated_or_quoted_protocol_does_not_authorize_activation():
     calls = [{'function': {'name': 'activate_protocol', 'arguments': {'protocol': 'gaming_mode'}}}]
     assert validate_application_targets('Do not activate gaming mode.', calls)
     assert validate_application_targets('Search youtube for how to start gaming mode.', calls)
+
+
+@pytest.mark.parametrize('prompt', [
+    'Okay then, do not open the calculator.',
+    'Okay then, if I ask open the calculator.',
+    'Explain "open the calculator".',
+])
+def test_polite_articles_do_not_remove_conditions(prompt):
+    from ultron_control.request_planning import explicit_launch_plan
+    assert explicit_launch_plan(prompt) is None
+
+
+def test_article_does_not_hide_unknown_application():
+    from ultron_control.request_planning import explicit_launch_plan, PlanClarification
+    with pytest.raises(PlanClarification):
+        explicit_launch_plan('Open the mystery app and calculator')
