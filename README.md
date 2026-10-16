@@ -398,7 +398,7 @@ Install:
 ## 2. Clone
 
 ```powershell
-git clone https://github.com/Luciifer71/Ultron-AI-Entity.git
+git clone https://github.com/Luciifer71/U.L.T.R.O.N.git Ultron-core
 cd Ultron-core
 ```
 
