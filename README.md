@@ -500,6 +500,19 @@ The Brain performs a runtime readiness check before accepting intent processing.
 
 # ▶️ Running Ultron-AI
 
+### Windows launcher
+
+After completing setup, run from the repository root:
+
+```powershell
+.\start-ultron.cmd
+```
+
+The launcher prepares Docker/NATS and Ollama, then opens the action daemon,
+brain, and voice listener in separate terminals. Check each terminal for
+readiness; wait for `STANDBY MODE` before speaking. The visual frontend is
+started separately using the instructions below.
+
 Run the PowerShell commands below from the repository root unless a different
 directory is specified. The Python commands use the project’s `.venv` interpreter.
 
