@@ -209,6 +209,12 @@ def startup_lock():
 
 
 def run_component(component):
+    from ultron_control.session_logs import capture_console
+    with capture_console(ROOT, component):
+        return _run_component(component)
+
+
+def _run_component(component):
     # Keep the console open after an error, so diagnostic output is readable.
     os.chdir(ROOT)
     sys.argv = [str(ROOT / (component + '.py'))]
