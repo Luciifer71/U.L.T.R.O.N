@@ -762,24 +762,27 @@ These represent the architectural direction of the project; not every component 
 
 # 🛠️ Technology Stack
 
-| Layer | Technology |
+| Area | Technologies and libraries |
 |---|---|
-| Primary Language | Python |
-| Frontend | React / TypeScript |
-| 3D / Rendering | React Three Fiber / Three.js |
-| GPU Visualization | WebGPU / TSL |
-| Local LLM Runtime | Ollama |
-| Default Model | Qwen 2.5 7B |
-| Event Bus | NATS |
-| Browser Event Transport | NATS WebSocket |
-| Relational Memory | SQLite |
-| Vector Database | ChromaDB |
-| Speech Recognition | Faster-Whisper |
-| Vision | MediaPipe / OpenCV |
-| Audio Processing | NumPy / SciPy |
-| Automation | Python system APIs |
-| Infrastructure | Docker |
-| Development | VS Code / Git |
+| Core runtime | Python; standard-library `asyncio`, `sqlite3`, `subprocess`, `pathlib`, and `ctypes` |
+| Local AI | Ollama and its Python client; Qwen2.5:7b default, Qwen3:8b evaluated on the trial branch |
+| Messaging | NATS, `nats-py`, and WebSocket events for the visual UI |
+| Memory and retrieval | SQLite and ChromaDB |
+| Speech recognition | Faster-Whisper, CTranslate2, SoundDevice, NumPy, and SciPy |
+| GPU speech runtime | NVIDIA CUDA with cuBLAS and cuDNN packages for supported Windows systems |
+| Spoken output | Edge TTS and pygame |
+| Vision and gestures | MediaPipe and OpenCV |
+| Computer utilities | `psutil`, `keyboard`, optional `pyperclip`, and native Windows APIs |
+| Web lookup | Optional `duckduckgo_search` / DDGS |
+| Configuration and supporting dependencies | `python-dotenv`; manifests also include `pydantic`, `requests`, `aiosqlite`, and `pyttsx3` |
+| Visual interface | React, React DOM, TypeScript, Three.js, React Three Fiber, Drei, React Three Postprocessing, WebGPU, and TSL |
+| Build and development | Vite, Oxlint, Node.js/npm, Git, and Docker Compose |
+| Testing and CI | pytest, repository verification scripts, and GitHub Actions |
+
+Dependency lists: [Python](requirements.txt), [Windows speech](requirements-speech-windows.txt),
+and [frontend](ultron-ui/package.json). Declared dependencies are not necessarily
+active in every runtime path. Trial-branch features are not yet part of `main`;
+browser automation and broader desktop control remain ongoing work.
 
 ---
 
