@@ -234,15 +234,17 @@ def get_task(task_id: str) -> dict | None:
         return dict(row) if row else None
 
 
-def get_latest_task() -> dict | None:
+def get_latest_task(exclude_task_id: str | None = None) -> dict | None:
     """Retrieve the most recently updated task."""
     with get_db_connection() as conn:
         row = conn.execute(
             """
             SELECT * FROM tasks
+            WHERE (? IS NULL OR task_id != ?)
             ORDER BY datetime(updated_at) DESC, rowid DESC
             LIMIT 1
-            """
+            """,
+            (exclude_task_id, exclude_task_id),
         ).fetchone()
         return dict(row) if row else None
 

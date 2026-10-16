@@ -58,7 +58,7 @@ import psutil
 
 from visual_events import publish_visual_event
 
-from ultron_control.system_info import collect_telemetry, format_telemetry
+from ultron_control.system_info import collect_telemetry, format_telemetry, format_uptime, format_runtime_status
 from ultron_control.capability_broker import CapabilityBroker
 from ultron_control.request_planning import explicit_launch_plan, explicit_resource_plan, PlanClarification, validate_application_targets
 from ultron_resources.config import create_service as create_resource_service
@@ -202,6 +202,14 @@ class PendingAction:
 # --- ALL AGENTIC TOOLS DEFINITION ---
 
 TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_runtime_status",
+            "description": "Check Ultron status/errors using the responding brain, its NATS connection, and the latest recorded task. Does not diagnose the whole OS, microphone or speaker. Use for health/error questions; never offer an unspecified alternate check.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 
     {
 
@@ -1059,7 +1067,7 @@ class UltronBrain:
 
 CONFIGURED ARCHITECTURE: Python, an Ollama local model, NATS component messaging, SQLite task memory, Faster-Whisper speech recognition and Edge TTS speech output. These are configuration facts, not evidence that every component is healthy. Never describe this as a secret proprietary stack.
 
-GROUNDING: For current system usage, battery or uptime call get_system_telemetry. Battery percentage is not a power source. A successful task does not prove the whole system has no errors. State the scope of available evidence. If no available tool can retrieve a fact, say so; do not offer an unspecified alternate method or search the web for this computer's live state. Ambiguous speech needs a brief clarification, not a reprimand. Interpret the current request independently of unrelated previous answers.
+GROUNDING: For Ultron health or error questions, call get_runtime_status and report its evidence without offering another unspecified method. For current system usage, battery or uptime call get_system_telemetry. Battery percentage is not a power source. A successful task does not prove the whole system has no errors. State the scope of available evidence. If no available tool can retrieve a fact, say so; do not offer an unspecified alternate method or search the web for this computer's live state. Ambiguous speech needs a brief clarification, not a reprimand. Interpret the current request independently of unrelated previous answers.
 
 CRITICAL RULES:
 
@@ -1119,16 +1127,31 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
 
 
 
+    def _runtime_status(self, exclude_task_id=None):
+        snapshot = {
+            "observed_at": time.time(),
+            "brain_responding": True,
+            "nats_connected": getattr(getattr(self, "nc", None), "is_connected", None),
+            "scope": "Brain connection and latest recorded task only; OS, microphone, speaker and other component health unverified",
+        }
+        try:
+            task = get_latest_task(exclude_task_id=exclude_task_id) if exclude_task_id else get_latest_task()
+            snapshot["latest_task"] = ({
+                "task_id": task.get("task_id"), "status": task.get("status"),
+                "updated_at": task.get("updated_at"), "error": task.get("error_text"),
+            } if task else None)
+        except Exception as exc:
+            snapshot["task_lookup_error"] = type(exc).__name__
+        return snapshot
+
     def _compose_local_reply(self, prompt: str) -> str | None:
         kind = local_information_kind(prompt)
         if kind == "telemetry":
             return format_telemetry(collect_telemetry())
+        if kind == "uptime":
+            return format_uptime(collect_telemetry())
         if kind == "health":
-            return (
-                "I have not run a full system health check. "
-                "I can report only the latest recorded task: "
-                + self._compose_latest_task_status()
-            )
+            return format_runtime_status(self._runtime_status())
         if kind == "stack":
             return (
                 f"My brain runs in Python using Ollama with {MODEL_NAME}. "
@@ -1665,6 +1688,7 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
 
         pending_actions: list[PendingAction] = []
         telemetry_reply = None
+        runtime_reply = None
 
         if tool_calls:
             self.history.append(message)
@@ -1734,6 +1758,11 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
                             name=f"operate_resource:{operation}:{target}", execute=execute_resource,
                         ))
                         res = f"Resource operation '{operation}' staged for '{target}'."
+
+                elif func_name == "get_runtime_status":
+                    snapshot = self._runtime_status(exclude_task_id=task_id)
+                    res = json.dumps(snapshot)
+                    runtime_reply = format_runtime_status(snapshot)
 
                 elif func_name == "get_system_telemetry":
                     metrics = await asyncio.to_thread(collect_telemetry)
@@ -2378,6 +2407,8 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
             # The initial response already answers a conversational request.
             # A second tools-disabled call has no new evidence to summarize.
             final_text = content_text or "Could you clarify your question?"
+        elif len(tool_calls) == 1 and runtime_reply is not None:
+            final_text = runtime_reply
         elif len(tool_calls) == 1 and telemetry_reply is not None:
             final_text = telemetry_reply
         elif not pending_actions:

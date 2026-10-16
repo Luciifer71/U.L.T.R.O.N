@@ -280,5 +280,59 @@ def test_model_selected_telemetry_is_reported_without_invented_followup(tmp_path
         'cpu_percent': 5, 'memory_percent': 90, 'uptime_seconds': 3600,
         'battery_percent': 80, 'power_plugged': True})
     reply, actions = asyncio.run(brain.process_intent('How long has this computer been running?', 'telemetry'))
-    assert '1 hours' in reply and 'Battery: 80%' in reply and 'Power: plugged in' in reply
+    assert '1 hour' in reply and 'Battery: 80%' in reply and 'Power: plugged in' in reply
     assert len(calls) == 1 and not actions
+
+
+@pytest.mark.parametrize('connected', [True, False, None])
+def test_live_error_phrase_uses_status_evidence_without_model(tmp_path, monkeypatch, connected):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    brain.nc = SimpleNamespace(is_connected=connected)
+    monkeypatch.setattr('brain_agent.get_latest_task', lambda: {
+        'task_id': 'failed-task', 'status': 'failed', 'error_text': 'File missing'})
+    async def forbidden(**kwargs):
+        pytest.fail('Known health question should not infer')
+    brain.ollama.chat = forbidden
+    reply, actions = asyncio.run(brain.process_intent('Okay, and are there any errors?', 'health'))
+    assert 'File missing' in reply and 'failed' in reply and not actions
+    expected = 'connected' if connected is True else 'disconnected' if connected is False else 'unknown'
+    assert f'NATS connection is {expected}' in reply
+    assert 'microphone and speaker health are unverified' in reply
+
+
+def test_model_health_tool_excludes_current_request_and_skips_synthesis(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    calls = []
+    async def chat(**kwargs):
+        calls.append(kwargs)
+        assert len(calls) == 1
+        return {'message': {'content': '', 'tool_calls': [
+            {'function': {'name': 'get_runtime_status', 'arguments': {}}}]}}
+    def latest(exclude_task_id=None):
+        assert exclude_task_id == 'health-question'
+        return {'status': 'failed', 'error_text': 'Previous execution failed'}
+    monkeypatch.setattr('brain_agent.get_latest_task', latest)
+    brain.ollama.chat = chat
+    reply, actions = asyncio.run(brain.process_intent('Check whether Ultron has a problem.', 'health-question'))
+    assert 'Previous execution failed' in reply and len(calls) == 1 and not actions
+    assert 'another method' not in reply
+
+
+def test_uptime_only_reply_omits_unrequested_metrics(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    monkeypatch.setattr('brain_agent.collect_telemetry', lambda: {
+        'uptime_seconds': 116880, 'cpu_percent': 1, 'memory_percent': 87,
+        'battery_percent': 80, 'power_plugged': True})
+    reply, actions = asyncio.run(brain.process_intent('What is my uptime?', 'uptime'))
+    assert reply == 'System uptime: 1 day, 8 hours, 28 minutes.'
+    assert not actions
+
+
+def test_health_db_failure_is_explicit(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    def fail():
+        raise OSError('private database details')
+    monkeypatch.setattr('brain_agent.get_latest_task', fail)
+    reply = brain._compose_local_reply('Are there any errors?')
+    assert 'task history is unavailable' in reply
+    assert 'private database' not in reply

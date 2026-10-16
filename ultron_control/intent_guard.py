@@ -274,7 +274,7 @@ def is_conversational_only(prompt: str) -> bool:
 def local_information_kind(prompt: str) -> str | None:
     """Recognize whole informational requests, never consume a mixed command."""
     text = re.sub(r"[^a-z0-9']+", " ", _normalize_text(prompt)).strip()
-    text = re.sub(r"^(?:(?:okay|ok|please)\s+)+", "", text)
+    text = re.sub(r"^(?:(?:okay|ok|please|and)\s+)+", "", text)
     if text in {
         "are there any errors", "any errors", "are there errors",
         "is everything working", "are you working properly", "are you healthy",
@@ -288,6 +288,8 @@ def local_information_kind(prompt: str) -> str | None:
         "what model are you using", "which model are you using",
     }:
         return "stack"
+    if text in {"what is my uptime", "what's my uptime", "system uptime", "what is my system uptime"}:
+        return "uptime"
     if text in {
         "what are my system statistics", "system statistics", "system usage",
         "what is my uptime", "what's my uptime", "system uptime",

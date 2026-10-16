@@ -13,7 +13,7 @@ def test_uptime_and_battery_are_separate_measurements(monkeypatch):
     data = system_info.collect_telemetry()
     reply = system_info.format_telemetry(data)
     assert data['uptime_seconds'] == 90061 and data['errors'] == {}
-    assert '1 days, 1 hours, 1 minutes' in reply
+    assert '1 day, 1 hour, 1 minute' in reply
     assert 'Battery: 80%' in reply and 'Power: on battery' in reply
 
 
@@ -43,3 +43,8 @@ def test_model_inventory_does_not_claim_inference(monkeypatch):
     monkeypatch.setattr(diagnostics, 'urlopen', lambda *a, **kw: io.BytesIO(b'{"models":[{"name":"qwen3:8b"}]}'))
     assert diagnostics.check_ollama('http://localhost:11434', 'qwen3:8b')['status'] == 'ok'
     assert diagnostics.check_ollama('http://localhost:11434', 'missing')['status'] == 'warning'
+
+
+def test_uptime_zero_and_missing_are_explicit():
+    assert system_info.format_uptime({'uptime_seconds': 0}) == 'System uptime: less than a minute.'
+    assert system_info.format_uptime({}) == 'System uptime: unavailable.'

@@ -33,16 +33,37 @@ def format_telemetry(data):
     for key, label in (("cpu_percent", "CPU"), ("memory_percent", "RAM")):
         value = data.get(key)
         parts.append(f"{label}: {value:g}%" if value is not None else f"{label}: unavailable")
-    seconds = data.get("uptime_seconds")
-    if seconds is None:
-        parts.append("System uptime: unavailable")
-    else:
-        days, remaining = divmod(int(seconds), 86400)
-        hours, remaining = divmod(remaining, 3600)
-        parts.append(f"System uptime: {days} days, {hours} hours, {remaining // 60} minutes")
+    parts.append(format_uptime(data).rstrip("."))
     battery = data.get("battery_percent")
     parts.append(f"Battery: {battery:g}%" if battery is not None else "Battery reading: unavailable")
     plugged = data.get("power_plugged")
     parts.append("Power: plugged in" if plugged is True else
                  "Power: on battery" if plugged is False else "Power source: unknown")
     return "; ".join(parts) + "."
+
+
+def format_uptime(data):
+    seconds = data.get("uptime_seconds")
+    if seconds is None:
+        return "System uptime: unavailable."
+    days, remaining = divmod(int(seconds), 86400)
+    hours, remaining = divmod(remaining, 3600)
+    units = [(days, "day"), (hours, "hour"), (remaining // 60, "minute")]
+    parts = [f"{value} {unit}{'s' if value != 1 else ''}" for value, unit in units if value]
+    return "System uptime: " + (", ".join(parts) if parts else "less than a minute") + "."
+
+
+def format_runtime_status(data):
+    connected = data.get("nats_connected")
+    bus = "connected" if connected is True else "disconnected" if connected is False else "unknown"
+    parts = ["My brain is responding", f"its NATS connection is {bus}"]
+    if data.get("task_lookup_error"):
+        parts.append("task history is unavailable")
+    elif data.get("latest_task"):
+        task = data["latest_task"]
+        parts.append(f"latest recorded task: {task.get('status') or 'unknown'}")
+        if task.get("error"):
+            parts.append("recorded error: " + str(task["error"])[:240])
+    else:
+        parts.append("no previous task is recorded")
+    return "; ".join(parts) + ". I have not run a full system health check; microphone and speaker health are unverified."
