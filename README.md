@@ -567,6 +567,21 @@ Additional perception, messaging, ingestion, and development utilities can be st
 
 # 🧪 Current Development Status
 
+### Run regression checks
+
+```powershell
+.\.venv\Scripts\python.exe .\verify_ultron.py
+```
+
+To also probe the configured speech runtime and microphone inventory:
+
+```powershell
+.\.venv\Scripts\python.exe .\verify_ultron.py --speech
+```
+
+Passing automated checks does not prove live microphone recognition, audible
+speech, or successful desktop actions. Validate those separately on your machine.
+
 ## Implemented
 
 - Local Python virtual environment
