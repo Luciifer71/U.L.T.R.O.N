@@ -524,7 +524,15 @@ docker compose up -d
 Wait for microphone calibration to finish and `STANDBY MODE` to appear before
 saying **“Hey Ultron”** and giving your command.
 
-## Terminal 4 — Frontend
+## Terminal 4 — Voice Output
+
+```powershell
+.\.venv\Scripts\python.exe .\action_daemon.py
+```
+
+This component handles spoken replies. Start it before giving voice commands.
+
+## Terminal 5 — Frontend
 
 From the UI directory:
 
