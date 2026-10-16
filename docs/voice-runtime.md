@@ -162,6 +162,50 @@ suite and validate on Windows with the UI, Ollama and TTS running:
 - TTS output never becoming a new user request, and a deliberate microphone
   interruption producing a clear failure rather than false listening readiness.
 
+## Speech output fails with HTTP 403
+
+Microphone recognition and spoken replies use separate services. If commands
+execute but the action daemon reports `ULTRON VOICE ERROR` with HTTP 403,
+troubleshoot Edge TTS first. A `SPEAKING` log is emitted before synthesis and
+is not proof that audio played. Changing Whisper or the reasoning model does
+not address this speech-service response.
+
+Stop running Ultron components. From the repository root, check the installed
+package and test synthesis independently:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip show edge-tts
+.\.venv\Scripts\python.exe -m edge_tts --voice en-US-ChristopherNeural --text "Ultron speech test." --write-media "$env:TEMP\ultron-tts-test.mp3"
+```
+
+Only after synthesis succeeds, open the generated file:
+
+```powershell
+Start-Process "$env:TEMP\ultron-tts-test.mp3"
+```
+
+For a 7.2.8 installation returning 403, test the following targeted update:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install edge-tts==7.3.1
+```
+
+Repeat synthesis and playback after the update. Upstream 7.3.0 added updated
+service-token support; 7.3.1 corrected server-date parsing. On 15 October 2026,
+the project's Windows tester confirmed audible standalone playback after this
+update. Integrated daemon playback still requires a separate check. This is
+not a guarantee that every 403 has the same cause.
+
+This troubleshooting step changes the local virtual environment. Check the
+branch's requirements pin before reinstalling all dependencies, as an older pin
+can restore the older package. If failure persists, record the installed version
+and error status without sharing the full request URL. Keep generated audio out
+of Git. Before declaring recovery, run `verify_ultron.py`, restart the components
+and confirm that both the greeting and an action reply are audible.
+
+Upstream release notes: [7.3.0](https://github.com/rany2/edge-tts/releases/tag/7.3.0)
+and [7.3.1](https://github.com/rany2/edge-tts/releases/tag/7.3.1).
+
 ## References
 
 - [Faster-Whisper GPU requirements](https://github.com/SYSTRAN/faster-whisper#gpu)

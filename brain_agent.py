@@ -68,6 +68,7 @@ from ultron_control.intent_guard import (
     contains_physical_action_request,
     extract_replay_plan,
     is_conversational_only,
+    local_information_kind,
     is_replay_request,
     is_task_status_request,
     looks_incomplete_request,
@@ -1114,6 +1115,32 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
 
 
 
+    def _compose_local_reply(self, prompt: str) -> str | None:
+        kind = local_information_kind(prompt)
+        if kind == "health":
+            return (
+                "I have not run a full system health check. "
+                "I can report only the latest recorded task: "
+                + self._compose_latest_task_status()
+            )
+        if kind == "stack":
+            return (
+                f"My brain runs in Python using Ollama with {MODEL_NAME}. "
+                "NATS connects my components, SQLite stores task memory, "
+                "Faster-Whisper handles speech recognition and Edge TTS generates spoken replies. "
+                "That describes my configured architecture, not a live health check."
+            )
+        if is_task_status_request(prompt):
+            return self._compose_latest_task_status()
+        if is_conversational_only(prompt):
+            text = re.sub(r"[^a-z0-9']+", " ", prompt.lower()).strip()
+            if text in {"do you hear me", "can you hear me", "are you listening"}:
+                return "Yes, I received your message. I'm listening."
+            if "thank" in text.split() or "thanks" in text.split():
+                return "You're welcome."
+            return "Understood. Please state the action you want me to perform."
+        return None
+
     async def _run_pending_actions(
         self,
         actions: list[PendingAction],
@@ -1399,6 +1426,9 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
     ) -> tuple[str, list]:
         self.current_task_id = task_id
         self.last_plan_error = None
+        local_reply = self._compose_local_reply(prompt)
+        if local_reply is not None:
+            return local_reply, []
         await self._publish_visual("thinking", task_id=task_id)
 
         self.history.append(
@@ -2346,7 +2376,11 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
 
         # For physical actions the final response is deliberately deferred
         # to the authoritative execution ledger in main().
-        if not pending_actions:
+        if not tool_calls:
+            # The initial response already answers a conversational request.
+            # A second tools-disabled call has no new evidence to summarize.
+            final_text = content_text or "Could you clarify your question?"
+        elif not pending_actions:
             try:
                 final_response = await self.ollama.chat(
                     diagnostic_task_id=task_id, diagnostic_phase="followup",
@@ -2504,22 +2538,10 @@ async def main():
                 # Status and courtesy messages must never be handed to the LLM
                 # as fresh physical-action decisions. These are deterministic
                 # conversational paths.
-                if is_task_status_request(prompt):
+                local_reply = brain._compose_local_reply(prompt)
+                if local_reply is not None:
                     await brain._publish_visual("thinking", task_id=task_id)
-                    reply_text = brain._compose_latest_task_status()
-                    pending_actions = []
-                    action_ok = True
-                    action_error = None
-
-                elif is_conversational_only(prompt):
-                    await brain._publish_visual("thinking", task_id=task_id)
-                    conversational_text = re.sub(r"[^a-z0-9']+", " ", prompt.lower()).strip()
-                    if conversational_text in {"do you hear me", "can you hear me", "are you listening"}:
-                        reply_text = "Yes, I received your message. I'm listening."
-                    elif conversational_text in {"yes", "yes please", "yeah", "yep", "sure"}:
-                        reply_text = "Understood. Please state the action you want me to perform."
-                    else:
-                        reply_text = "Understood. I'm ready for your next command."
+                    reply_text = local_reply
                     pending_actions = []
                     action_ok = True
                     action_error = None
@@ -2587,7 +2609,7 @@ async def main():
 
                 log_chat("assistant", reply_text)
 
-                if not is_task_status_request(prompt) and not is_conversational_only(prompt):
+                if local_reply is None:
                     final_status = "completed" if action_ok else "failed"
                     update_task(
                         task_id,

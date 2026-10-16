@@ -189,3 +189,66 @@ def test_actual_misheard_editor_request_never_reaches_model(tmp_path, monkeypatc
         assert not actions and brain.last_plan_error
         assert 'Notepad' in reply and 'Forza' not in reply
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('prompt', ['Okay, sure. Thank you.', 'Yes, thanks.',
+    'Are there any errors?', 'How is your technology stack that you are built on?'])
+def test_local_replies_do_not_infer_or_create_tasks(tmp_path, monkeypatch, prompt):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    async def forbidden(**kwargs):
+        pytest.fail('Local replies must not call the model')
+    def forbidden_task(*args, **kwargs):
+        pytest.fail('Local replies must not overwrite task evidence')
+    brain.ollama.chat = forbidden
+    monkeypatch.setattr('brain_agent.create_task', forbidden_task)
+    monkeypatch.setattr('brain_agent.get_latest_task', lambda: None)
+    reply, actions = asyncio.run(brain.process_intent(prompt, 'local'))
+    assert reply and actions == []
+    assert brain.last_replay_plan is None
+
+
+def test_health_reply_reports_failure_without_global_health_claim(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    monkeypatch.setattr('brain_agent.get_latest_task', lambda: {
+        'status': 'failed', 'prompt': 'Open example', 'error_text': 'Application missing'})
+    reply = brain._compose_local_reply('Are there any errors?')
+    assert 'not run a full system health check' in reply
+    assert 'failed' in reply and 'Application missing' in reply
+    assert 'No errors detected' not in reply
+
+
+def test_stack_reply_uses_configured_model(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    monkeypatch.setattr('brain_agent.MODEL_NAME', 'test-model')
+    reply = brain._compose_local_reply('What model are you using?')
+    assert 'test-model' in reply and 'Ollama' in reply and 'NATS' in reply
+    assert 'not disclosed' not in reply
+
+
+def test_plain_answer_uses_one_model_call_and_retains_history(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    calls = []
+    async def chat(**kwargs):
+        calls.append(kwargs)
+        return {'message': {'content': 'A queue stores items for processing.', 'tool_calls': []}}
+    brain.ollama.chat = chat
+    reply, actions = asyncio.run(brain.process_intent('What is a queue?', 'question'))
+    assert len(calls) == 1 and actions == []
+    assert reply == 'A queue stores items for processing.'
+    assert brain.history[-1] == {'role': 'assistant', 'content': reply}
+
+
+def test_read_tool_still_gets_followup_with_evidence(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    calls = []
+    (tmp_path / 'note.txt').write_text('Actual note contents')
+    async def chat(**kwargs):
+        calls.append(kwargs)
+        assert kwargs['diagnostic_phase'] == 'followup'
+        assert any(m['role'] == 'tool' and 'Actual note contents' in m['content']
+                   for m in kwargs['messages'])
+        return {'message': {'content': 'The note says: Actual note contents'}}
+    brain.ollama.chat = chat
+    reply, actions = asyncio.run(brain.process_intent(f'Read {tmp_path / "note.txt"}', 'read'))
+    assert len(calls) == 1 and actions == []
+    assert 'Actual note contents' in reply

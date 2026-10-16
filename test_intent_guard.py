@@ -300,3 +300,21 @@ def test_no_actions_started_is_not_a_success_claim():
     assert not contains_execution_claim('Please clarify the application name. No actions were started.')
     assert contains_execution_claim('No actions were started. I opened Calculator.')
     assert contains_execution_claim('Calculator started successfully.')
+
+
+@pytest.mark.parametrize('prompt', ['Okay, sure. Thank you.', 'Yes, thanks.', 'Sure, okay.'])
+def test_compound_acknowledgements(prompt):
+    from ultron_control.intent_guard import is_conversational_only
+    assert is_conversational_only(prompt)
+
+
+@pytest.mark.parametrize('prompt', [
+    'Sure, open Calculator.', 'Yes, delete the file.',
+    'Are there any errors? Open Notion.',
+    'What is your technology stack and launch Calculator?',
+    'Explain what "are there any errors" means.',
+])
+def test_local_information_does_not_swallow_mixed_requests(prompt):
+    from ultron_control.intent_guard import is_conversational_only, local_information_kind
+    assert not is_conversational_only(prompt)
+    assert local_information_kind(prompt) is None

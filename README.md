@@ -500,6 +500,9 @@ The Brain performs a runtime readiness check before accepting intent processing.
 
 # ▶️ Running Ultron-AI
 
+Run the PowerShell commands below from the repository root unless a different
+directory is specified. The Python commands use the project’s `.venv` interpreter.
+
 ## Terminal 1 — NATS Infrastructure
 
 ```powershell
@@ -517,6 +520,9 @@ docker compose up -d
 ```powershell
 .\.venv\Scripts\python.exe .\voice_listener.py
 ```
+
+Wait for microphone calibration to finish and `STANDBY MODE` to appear before
+saying **“Hey Ultron”** and giving your command.
 
 ## Terminal 4 — Frontend
 

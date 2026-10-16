@@ -209,6 +209,7 @@ def is_conversational_only(prompt: str) -> bool:
     tokens = text.split()
 
     acknowledgement_tokens = {
+        "sure", "yes", "yeah", "yep",
         "ok",
         "okay",
         "thanks",
@@ -238,6 +239,7 @@ def is_conversational_only(prompt: str) -> bool:
     }
 
     acknowledgement_anchors = {
+        "sure", "yes", "yeah", "yep",
         "ok",
         "okay",
         "thanks",
@@ -268,6 +270,24 @@ def is_conversational_only(prompt: str) -> bool:
         return False
 
     return True
+
+def local_information_kind(prompt: str) -> str | None:
+    """Recognize whole informational requests, never consume a mixed command."""
+    text = re.sub(r"[^a-z0-9']+", " ", _normalize_text(prompt)).strip()
+    if text in {
+        "are there any errors", "any errors", "are there errors",
+        "is everything working", "are you working properly", "are you healthy",
+    }:
+        return "health"
+    if text in {
+        "what is your technology stack", "what's your technology stack",
+        "what is your tech stack", "what are you built on", "what are you built with",
+        "how is your technology stack that you are built on",
+        "what model are you using", "which model are you using",
+    }:
+        return "stack"
+    return None
+
 
 def is_task_status_request(prompt: str) -> bool:
     """Detect requests asking for the status of an existing task."""

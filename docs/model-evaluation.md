@@ -327,3 +327,28 @@ Whisper remained on CUDA float16, but its warmup took 19.530 s. The attached
 Ollama excerpt ends during model metadata loading and cannot confirm completed
 warmup or subsequent chat latency. Keep PR #3 draft pending speech recovery,
 Windows verification and remaining live tests.
+
+
+## Response quality follow-up — 16 October 2026
+
+Windows verification passed: 325 tests, 7 skipped, 4 subtests. The user confirmed
+audible integrated replies and Calculator visibly opening quickly. The supplied
+run has no speech-service 403 or audio-loss warnings. Calculator planning took
+0.007 s and execution 1.202 s; model calls took 0.685–1.946 s. The earlier
+31-second delay did not recur; its original cause remains unproven.
+
+The follow-up change answers bounded health questions from recorded task status,
+explicitly stating that no full system health check ran. Stack questions use the
+configured model and documented core components. Whole-request matching avoids
+consuming an attached command. Compound acknowledgements use the local reply
+path and cannot authorize replay. These replies do not create a new task record.
+Plain model answers reuse the first response; tool-result summaries retain a
+follow-up inference call. This does not guarantee the factual accuracy of all
+other model-generated answers.
+
+Main's documentation changes are incorporated. Before merge, verify this combined
+branch on Windows and try “Are there any errors?”, “What is your technology
+stack?”, “Okay, sure. Thank you.” and “What is a queue?”. The first three should
+not produce Ollama timing entries; the last should produce one plan call and no
+follow-up unless a tool was used. Repeat the remaining script/editor, negative
+command and sustained voice checks; keep Qwen3 opt-in.
