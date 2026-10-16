@@ -577,6 +577,15 @@ http://localhost:5173
 
 Additional perception, messaging, ingestion, and development utilities can be started independently as required.
 
+### Stop or restart
+
+Press **Ctrl+C** in each component terminal and wait for shutdown to finish.
+Stop the frontend separately in its terminal if it is running. Stop existing
+components before restarting or switching launch configurations.
+
+Docker and Ollama remain running after the launcher’s component windows stop.
+
+
 ---
 
 # 🧪 Current Development Status
