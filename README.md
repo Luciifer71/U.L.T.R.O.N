@@ -762,27 +762,54 @@ These represent the architectural direction of the project; not every component 
 
 # 🛠️ Technology Stack
 
-| Area | Technologies and libraries |
-|---|---|
-| Core runtime | Python; standard-library `asyncio`, `sqlite3`, `subprocess`, `pathlib`, and `ctypes` |
-| Local AI | Ollama and its Python client; Qwen2.5:7b default, Qwen3:8b evaluated on the trial branch |
-| Messaging | NATS, `nats-py`, and WebSocket events for the visual UI |
-| Memory and retrieval | SQLite and ChromaDB |
-| Speech recognition | Faster-Whisper, CTranslate2, SoundDevice, NumPy, and SciPy |
-| GPU speech runtime | NVIDIA CUDA with cuBLAS and cuDNN packages for supported Windows systems |
-| Spoken output | Edge TTS and pygame |
-| Vision and gestures | MediaPipe and OpenCV |
-| Computer utilities | `psutil`, `keyboard`, optional `pyperclip`, and native Windows APIs |
-| Web lookup | Optional `duckduckgo_search` / DDGS |
-| Configuration and supporting dependencies | `python-dotenv`; manifests also include `pydantic`, `requests`, `aiosqlite`, and `pyttsx3` |
-| Visual interface | React, React DOM, TypeScript, Three.js, React Three Fiber, Drei, React Three Postprocessing, WebGPU, and TSL |
-| Build and development | Vite, Oxlint, Node.js/npm, Git, and Docker Compose |
-| Testing and CI | pytest, repository verification scripts, and GitHub Actions |
+Ultron combines local AI reasoning, voice interaction, persistent memory, controlled
+computer actions, and an event-driven visual interface. The overview below preserves
+the core technologies and names the supporting libraries without describing internal
+prompts or implementation algorithms.
 
-Dependency lists: [Python](requirements.txt), [Windows speech](requirements-speech-windows.txt),
-and [frontend](ultron-ui/package.json). Declared dependencies are not necessarily
-active in every runtime path. Trial-branch features are not yet part of `main`;
-browser automation and broader desktop control remain ongoing work.
+| Layer | Technologies / libraries | Role |
+|---|---|---|
+| Primary language | Python | Backend components, task orchestration, and system integration |
+| Local LLM runtime | Ollama; `ollama` Python client | Local model inference and tool-call planning |
+| Default model | Qwen2.5:7b | Default configured language model on `main` |
+| Model evaluation | Qwen3:8b on the trial branch | Evaluated alternative; not the default on `main` |
+| Event bus | NATS; `nats-py` | Asynchronous communication between components |
+| Browser event transport | NATS WebSocket | Delivers visual-state events to the frontend |
+| Relational memory | SQLite; Python `sqlite3` | Persistent facts, conversation history, and task records |
+| Vector database / RAG | ChromaDB; `chromadb` | Retrieval from indexed local knowledge |
+| Speech recognition | Faster-Whisper; `faster-whisper`, `ctranslate2` | Converts captured speech into text |
+| Microphone capture | `sounddevice` | Microphone input for the voice listener |
+| Audio processing | NumPy; SciPy | Audio arrays and signal-processing support |
+| GPU speech acceleration | NVIDIA CUDA; `nvidia-cublas-cu12`, `nvidia-cudnn-cu12` | GPU speech inference on supported Windows systems |
+| Spoken replies | `edge-tts`; `pygame` | Speech generation and audio playback |
+| Vision / gestures | MediaPipe; `opencv-python` | Camera-based perception and hand-gesture processing |
+| System telemetry | `psutil` | Operating-system resource measurements |
+| Computer automation | Python system APIs; `keyboard`, `ctypes`, `subprocess`, `pathlib` | Keyboard integration, native Windows calls, processes, and resource paths |
+| Clipboard integration | Optional `pyperclip` | Clipboard access when installed |
+| Web lookup | Optional `duckduckgo_search` / DDGS | Search integration; distinct from browser automation |
+| Configuration | `python-dotenv` | Loads local environment configuration |
+| Async runtime | Python `asyncio` | Coordinates asynchronous component work |
+| Supporting declared dependencies | `pydantic`, `requests`, `aiosqlite`, `pyttsx3` | Listed in the Python manifest; not all are active in every runtime path |
+| Frontend | React; React DOM; TypeScript | Visual interface and typed frontend code |
+| 3D / rendering | Three.js; React Three Fiber | Scene rendering and React integration |
+| Visual helpers / effects | Drei; React Three Postprocessing | Scene utilities and visual effects |
+| GPU visualization | WebGPU; Three.js Shading Language (TSL) | GPU rendering and procedural shader work |
+| Frontend build / lint | Vite; React Vite plugin; Oxlint; TypeScript type packages | Development server, builds, static typing, and linting |
+| Infrastructure | Docker; Docker Compose | Local NATS deployment |
+| Development | VS Code; Git; Node.js; npm | Editing, version control, and frontend dependency management |
+| Testing / CI | pytest; verification scripts; GitHub Actions | Regression checks and automated validation |
+
+**Scope:** This is a technology inventory, not a claim that every integration is
+complete or production-ready. Trial-branch work is identified separately.
+Broader browser and desktop automation remain under development.
+
+**Dependency references:** [Python](requirements.txt),
+[Windows GPU speech](requirements-speech-windows.txt), and
+[frontend](ultron-ui/package.json) contain the declared packages and version constraints.
+
+This overview is provided for technical review. See **License & Ownership** below
+for the project's stated usage restrictions; listing third-party technologies does
+not grant permission to reuse Ultron's implementation.
 
 ---
 
