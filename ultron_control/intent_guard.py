@@ -275,6 +275,14 @@ def local_information_kind(prompt: str) -> str | None:
     """Recognize whole informational requests, never consume a mixed command."""
     text = re.sub(r"[^a-z0-9']+", " ", _normalize_text(prompt)).strip()
     text = re.sub(r"^(?:(?:okay|ok|please|and)\s+)+", "", text)
+    for kind, phrases in {
+        "clock": {"what time is it", "what is the time", "what's the time", "current time", "tell me the time"},
+        "date": {"what is today's date", "what's today's date", "what is the date", "what's the date", "what day is it", "today's date"},
+        "disk": {"how much disk space is free", "how much disk space do i have", "disk space", "free disk space", "check disk space"},
+        "capabilities": {"what can you do", "what can you help me with", "show your capabilities", "list your capabilities"},
+    }.items():
+        if text in phrases:
+            return kind
     if text in {
         "are there any errors", "any errors", "are there errors",
         "is everything working", "are you working properly", "are you healthy",

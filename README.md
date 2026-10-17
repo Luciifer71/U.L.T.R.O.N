@@ -883,3 +883,12 @@ explicit app/file actions are preflighted together and run in order; later steps
 stop if one fails. See [file workflow details](docs/local-file-workflow.md).
 Uncertain speech is rejected as a whole and prompts a repeat during an active
 session; this does not guarantee recognition of every spoken title.
+
+### Local assistant facts
+
+Ask “what time is it?”, “what is today's date?”, “how much disk space is free?”
+or “what can you do?” for a direct local answer without model inference. Clock
+answers use the computer's configured timezone; disk space covers the volume
+containing your home folder. These commands do not connect email, calendars or
+reminders. See the [my-jarvis review and adopted ideas](docs/my-jarvis-review.md)
+for the comparison that motivated this addition.

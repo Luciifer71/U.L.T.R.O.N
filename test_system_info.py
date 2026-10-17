@@ -62,3 +62,32 @@ def test_process_memory_is_sorted_bounded_and_omits_sensitive_fields(monkeypatch
     assert result['top_processes'][0] == {'pid': 11, 'name': 'app', 'rss_bytes': 1100}
     assert result['skipped'] == 1
     assert 'secret' not in str(result)
+
+
+def test_local_clock_uses_explicit_offset_and_midnight_date():
+    from datetime import datetime, timezone, timedelta
+    from ultron_control.local_facts import clock_reply
+    now = datetime(2026, 10, 18, 0, 5, tzinfo=timezone(timedelta(hours=5, minutes=30)))
+    assert '00:05 (UTC+05:30)' in clock_reply('clock', now=now)
+    assert '18 October 2026' in clock_reply('date', now=now)
+
+
+def test_disk_fact_is_scoped_and_does_not_leak_exception(monkeypatch):
+    from ultron_control import local_facts
+    gib = 1024 ** 3
+    monkeypatch.setattr(local_facts.shutil, 'disk_usage', lambda path: SimpleNamespace(total=100*gib, used=80*gib, free=20*gib))
+    assert local_facts.disk_reply() == 'Volume containing your home folder: 20.0 GiB free of 100.0 GiB; 80.0 GiB used. Other volumes were not checked.'
+    def fail(path):
+        raise PermissionError('private path')
+    monkeypatch.setattr(local_facts.shutil, 'disk_usage', fail)
+    assert 'unavailable' in local_facts.disk_reply()
+    assert 'private path' not in local_facts.disk_reply()
+
+
+def test_local_facts_do_not_consume_mixed_commands():
+    from ultron_control.intent_guard import local_information_kind
+    for prompt in ['What time is it and open Calculator?', 'Check disk space then delete old files.',
+                   'Remind me tomorrow', 'What time is it in London?', 'What day is my appointment?']:
+        assert local_information_kind(prompt) is None
+    assert local_information_kind('Okay, what time is it?') == 'clock'
+    assert local_information_kind('What can you do?') == 'capabilities'
