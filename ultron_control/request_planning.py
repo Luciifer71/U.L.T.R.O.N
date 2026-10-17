@@ -87,6 +87,12 @@ def validate_application_targets(prompt: str, calls: list[dict]) -> str | None:
     This is a grounding check, not a universal natural-language intent proof.
     Explicit replay is handled separately by the brain's stored replay plan.
     """
+    try:
+        sequence = explicit_sequence_plan(prompt)
+    except PlanClarification as exc:
+        return str(exc)
+    if sequence is not None:
+        return None if calls == sequence else 'The plan must preserve every requested step in order. No actions were started.'
     clauses = _launch_clauses(prompt)
     if clauses:
         grounding_text = " ".join(clauses)
@@ -356,3 +362,23 @@ def explicit_launch_plan(prompt: str) -> list[dict] | None:
     if search_call:
         calls.append(search_call)
     return calls or None
+
+
+def explicit_sequence_plan(prompt: str) -> list[dict] | None:
+    """Up to five explicit app/file steps; no scripts, inferred steps or conditions."""
+    if not re.search(r"\bthen\b", prompt, re.I):
+        return None
+    parts = re.split(r"\s*(?:,|;)?\s*(?:and\s+)?then\s+", prompt.strip(), flags=re.I)
+    if len(parts) < 2:
+        return None
+    if len(parts) > 5 or re.search(r"\b(?:if|unless|don't|do not|never|before|after|instead)\b", prompt, re.I):
+        raise PlanClarification('Use up to five direct app or scoped file steps separated by then. No actions were started.')
+    calls = []
+    for part in parts:
+        plan = explicit_file_plan(part) or explicit_launch_plan(part)
+        if not plan or any(c['function']['name'] not in {'open_application', 'find_and_open_file'} for c in plan):
+            raise PlanClarification('I could not understand every step. Name each app, or each file and folder, separated by then. No actions were started.')
+        calls.extend(plan)
+    if len(calls) > 5:
+        raise PlanClarification('Please limit this request to five actions. No actions were started.')
+    return calls

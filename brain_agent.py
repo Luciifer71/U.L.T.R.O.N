@@ -62,8 +62,8 @@ from ultron_control.system_info import collect_telemetry, format_telemetry, form
 from ultron_control.capability_broker import CapabilityBroker
 from ultron_control.request_planning import explicit_launch_plan, explicit_resource_plan, PlanClarification, validate_application_targets
 from ultron_resources.config import create_service as create_resource_service
-from ultron_resources.file_workflow import prepare_file, open_prepared_file
-from ultron_control.request_planning import explicit_file_plan
+from ultron_resources.file_workflow import prepare_file, open_prepared_file, FileSelectionRequired, selection_number, MEDIA
+from ultron_control.request_planning import explicit_file_plan, explicit_sequence_plan
 from ultron_resources.catalog import ResourceError, AmbiguousResource, AccessDenied
 from ultron_resources.native_apps import ExactApplicationDiscovery
 from ultron_control.intent_guard import (
@@ -197,6 +197,7 @@ class PendingAction:
     completion: Literal["dispatch", "wait"] = "dispatch"
 
     preflight: Callable[[], Any] | None = None
+    stop_on_failure: bool = False
 
 
 
@@ -1334,6 +1335,12 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
                 )
 
             outcomes.append(outcome)
+            if not outcome['success'] and action.stop_on_failure:
+                for skipped in actions[len(outcomes):]:
+                    outcomes.append({'name': skipped.name, 'success': False, 'state': 'not_started',
+                                     'error': 'Not started because an earlier step failed.',
+                                     'message': 'Not started because an earlier step failed.'})
+                break
 
         self.execution_ledger[task_id] = outcomes
 
@@ -1480,6 +1487,27 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
         task_id: str,
     ) -> tuple[str, list]:
         previous = list(self.history)
+        selection = getattr(self, '_file_selection', None)
+        self._file_selection = None  # A choice is single-use and scoped to the next request.
+        number = selection_number(prompt)
+        if number is not None:
+            self.last_plan_error = None
+            if not selection or time.monotonic() > selection['expires']:
+                return 'There is no current file choice. Repeat the file title and folder.', []
+            if number > len(selection['files']):
+                return 'That number was not offered. Repeat the file title and folder.', []
+            prepared = selection['files'][number - 1]
+            if re.match(r'(?:please\s+)?play\b', prompt.strip(), re.I) and prepared.path.suffix.casefold() not in MEDIA:
+                return 'That choice is not a supported media file. Repeat the file request.', []
+            service = selection['service']
+            async def execute_choice():
+                return await asyncio.to_thread(open_prepared_file, service, prepared)
+            create_task(task_id, prompt, status='thinking')
+            return 'Selected file staged for opening.', [PendingAction(
+                name=f'operate_resource:open:{prepared.path.name}', execute=execute_choice)]
+        if selection and re.fullmatch(r"(?:cancel|never mind|nevermind|stop)[.!?]*", prompt.strip(), re.I):
+            self.last_plan_error = None
+            return 'File selection cancelled. Nothing was opened.', []
         try:
             reply, actions = await self._process_intent(prompt, task_id)
             # Only complete, ordinary conversation belongs in future dialogue.
@@ -1523,7 +1551,7 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
             )
 
         try:
-            explicit_calls = explicit_file_plan(prompt) or explicit_resource_plan(prompt) or explicit_launch_plan(prompt)
+            explicit_calls = explicit_sequence_plan(prompt) or explicit_file_plan(prompt) or explicit_resource_plan(prompt) or explicit_launch_plan(prompt)
         except PlanClarification as exc:
             self.last_plan_error = str(exc)
             return str(exc), []
@@ -1787,7 +1815,15 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
                     async def prepare_open_file(q=query, f=folder, media=args.get("media_only", False), state=prepared):
                         service = await asyncio.to_thread(self._get_resource_service)
                         state['service'] = service
-                        state['file'] = await asyncio.to_thread(prepare_file, service, q, f, media_only=media)
+                        try:
+                            state['file'] = await asyncio.to_thread(prepare_file, service, q, f, media_only=media)
+                        except FileSelectionRequired as exc:
+                            # A follow-up must never silently resume a larger failed batch.
+                            if len(pending_actions) == 1:
+                                self._file_selection = {'files': exc.prepared, 'service': service,
+                                                        'expires': time.monotonic() + 60}
+                                raise ResourceError(str(exc) + ' Say open the first one (or another listed number) within 60 seconds.') from exc
+                            raise
                     async def execute_open_file(state=prepared):
                         return await asyncio.to_thread(open_prepared_file, state['service'], state['file'])
                     pending_actions.append(PendingAction(name=f"operate_resource:open:{query}",
@@ -2546,6 +2582,9 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
         )
 
 
+        if explicit_calls and explicit_sequence_plan(prompt):
+            for action in pending_actions:
+                action.stop_on_failure = True
         return final_text, pending_actions
 
 
