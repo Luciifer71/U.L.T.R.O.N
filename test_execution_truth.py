@@ -287,3 +287,47 @@ def test_model_inserted_app_is_rejected_before_staging(monkeypatch):
         assert brain.last_plan_error
         assert brain.last_replay_plan is None
     asyncio.run(run())
+
+
+def test_failed_action_does_not_contaminate_next_conversation(monkeypatch):
+    from types import SimpleNamespace
+    async def run():
+        brain = bare_brain()
+        async def visual(*args, **kwargs):
+            pass
+        brain._publish_visual = visual
+        monkeypatch.setattr('brain_agent.create_task', lambda *a, **kw: None)
+        async def chat(**kwargs):
+            assert all('mysteryapp' not in m.get('content', '') for m in kwargs['messages'])
+            return {'message': {'content': 'What would you like to discuss?'}}
+        brain.ollama = SimpleNamespace(chat=chat)
+        _, actions = await brain.process_intent('Open calculator mysteryapp notion.', 'failed')
+        assert not actions
+        assert len(brain.history) == 1
+        reply, actions = await brain.process_intent('We have time.', 'conversation')
+        assert reply == 'What would you like to discuss?'
+        assert [m['role'] for m in brain.history] == ['system', 'user', 'assistant']
+    asyncio.run(run())
+
+
+def test_restart_keeps_facts_but_does_not_restore_mixed_chat_log(monkeypatch):
+    monkeypatch.setattr('brain_agent.get_all_facts', lambda: [{'key': 'name', 'value': 'Krish'}])
+    brain = object.__new__(UltronBrain)
+    brain.refresh_system_prompt()
+    assert len(brain.history) == 1
+    assert 'Krish' in brain.history[0]['content']
+
+
+def test_interrupted_turn_restores_previous_conversation():
+    async def run():
+        brain = bare_brain()
+        async def interrupted(prompt, task_id):
+            brain.history.append({'role': 'user', 'content': prompt})
+            raise asyncio.CancelledError
+        brain._process_intent = interrupted
+        try:
+            await brain.process_intent('anything', 'cancelled')
+        except asyncio.CancelledError:
+            pass
+        assert brain.history == [{'role': 'system', 'content': 'test'}]
+    asyncio.run(run())

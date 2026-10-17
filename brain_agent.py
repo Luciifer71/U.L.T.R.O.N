@@ -91,7 +91,6 @@ from memory_db import (
 
     log_chat,
 
-    get_recent_chat_history,
 
     create_task,
 
@@ -1092,11 +1091,10 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
 9. LOCAL RESOURCES: Use operate_resource for explicitly requested files, folders, games, or scripts. Preserve the user's literal target name; exact paths or unique exact catalog names are resolved by the service. Use launch for native executables, run_script for scripts, open for documents/folders or a requested editor, and read for UTF-8 text. find_resources searches metadata only. Do not invent paths, executable names, arguments, permissions, security restrictions, or success. Report the actual tool error and ask for a folder/path when a target is missing or ambiguous. Scripts execute as the current user; resource scope is not a script sandbox."""
         )
 
-        recent_history = get_recent_chat_history(limit=10)
-        self.history = [
-            {"role": "system", "content": self.system_prompt},
-            *recent_history,
-        ]
+        # Legacy chat rows mix conversation with task failures and staging text.
+        # Keep the audit log in SQLite, but do not replay it as model dialogue.
+        conversation = getattr(self, "history", [])[1:]
+        self.history = [{"role": "system", "content": self.system_prompt}, *conversation]
 
 
 
@@ -1453,6 +1451,28 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
         prompt: str,
         task_id: str,
     ) -> tuple[str, list]:
+        previous = list(self.history)
+        try:
+            reply, actions = await self._process_intent(prompt, task_id)
+            # Only complete, ordinary conversation belongs in future dialogue.
+            # Tool traces remain available within this turn; task outcomes and
+            # replay plans have their own authoritative stores.
+            new_messages = self.history[len(previous):]
+            conversation_only = (
+                not actions
+                and not self.last_plan_error
+                and not contains_physical_action_request(prompt)
+                and len(new_messages) == 2
+                and [m.get("role") for m in new_messages] == ["user", "assistant"]
+                and not any(m.get("tool_calls") for m in new_messages)
+            )
+            if conversation_only:
+                previous = [previous[0], *(previous[1:] + new_messages)[-10:]]
+            return reply, actions
+        finally:
+            self.history = previous
+
+    async def _process_intent(self, prompt: str, task_id: str) -> tuple[str, list]:
         self.current_task_id = task_id
         self.last_plan_error = None
         local_reply = self._compose_local_reply(prompt)
@@ -1682,8 +1702,6 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
             # Do not ask a tools-disabled synthesis pass to invent an outcome.
             reply = "I could not produce a validated execution plan. Please restate the action and its target."
             self.history.append({"role": "assistant", "content": reply})
-            if len(self.history) > 11:
-                self.history = [self.history[0], *self.history[-10:]]
             return reply, []
 
         pending_actions: list[PendingAction] = []
@@ -2469,11 +2487,6 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
             }
         )
 
-        if len(self.history) > 11:
-            self.history = (
-                [self.history[0]]
-                + self.history[-10:]
-            )
 
         return final_text, pending_actions
 
@@ -2664,6 +2677,7 @@ async def main():
                         "text": reply_text,
                         "speech": reply_text,
                         "taskId": task_id,
+                        "requestId": data.get("requestId") if isinstance(data.get("requestId"), str) else None,
                         "execution": {
                             "success": action_ok,
                             "error": action_error,
