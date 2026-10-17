@@ -48,7 +48,7 @@ def known_folder(name):
 
 
 def words(value):
-    return re.findall(r'\w+', unicodedata.normalize('NFC', value).casefold(), flags=re.UNICODE)
+    return re.findall(r'[^\W_]+', unicodedata.normalize('NFC', value).casefold(), flags=re.UNICODE)
 
 
 def matches_name(path, query):

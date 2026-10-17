@@ -19,7 +19,7 @@ locations, symlinks and junctions are excluded. An unreadable or incomplete scan
 cannot establish a unique match and therefore does not open a file.
 
 An explicit filename extension requires a complete filename match. Otherwise,
-the title must match contiguous words: “Supergirl” can match
+the title must match contiguous words (spaces, dots, hyphens and underscores separate words): “Supergirl” can match
 `Supergirl.2026.1080p.mkv`, but “super well” is not corrected to “Supergirl”. Multiple
 matches require a more specific filename or an exact-path request. There is no
 implicit “choose the first one” behavior or conversational candidate-selection

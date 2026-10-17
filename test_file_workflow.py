@@ -19,9 +19,10 @@ def service_for(tmp_path, monkeypatch):
     return service, folder, opened
 
 
-def test_unique_media_match_dispatches_without_catalog_index(tmp_path, monkeypatch):
+@pytest.mark.parametrize("filename", ["Supergirl.2026.1080p.mkv", "Supergirl_2026_1080p.mkv", "SUPERGIRL-2026.MP4"])
+def test_unique_media_match_dispatches_without_catalog_index(tmp_path, monkeypatch, filename):
     service, folder, opened = service_for(tmp_path, monkeypatch)
-    movie = folder / 'Supergirl.2026.1080p.mkv'
+    movie = folder / filename
     movie.write_bytes(b'test fixture')
     selected = workflow.prepare_file(service, 'Supergirl', 'downloads', media_only=True)
     assert opened == []
