@@ -1,0 +1,8 @@
+# Hardware-free development and acceptance checks (no model download).
+pytest>=9,<10
+psutil>=5.9
+keyboard>=0.13.5
+ollama>=0.6
+nats-py>=2.8
+numpy>=1.24
+python-dotenv>=1,<2

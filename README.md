@@ -859,3 +859,17 @@ brain and opens Calculator and File Explorer after offline checks pass.
 See [acceptance and release scope](docs/acceptance.md). Qwen3:8b is now the
 configurable default; existing `.env` and process overrides are respected.
 The earlier `start-qwen3-trial.cmd` remains a compatible explicit Qwen3 profile.
+
+
+### Scoped local files
+
+Say “Play the movie Supergirl from my Downloads folder” or “Open report.pdf from
+my Documents folder.” Ultron searches the named folder and opens a unique supported
+file through its OS association. Ambiguous, missing or incomplete searches stop
+before dispatch. See [supported file workflows and limits](docs/local-file-workflow.md).
+
+### Development and contributions
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for lightweight test setup, verification and
+reporting guidance. Issue and PR templates are available. Open-source licensing
+is pending an owner decision; the current ownership terms remain unchanged.

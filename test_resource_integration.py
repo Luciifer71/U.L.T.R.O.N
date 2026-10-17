@@ -394,3 +394,25 @@ def test_model_list_preflights_unknown_app_before_any_launch(tmp_path, monkeypat
         assert not ok and 'No actions were started' in error
         assert launched == []
     asyncio.run(run())
+
+
+def test_movie_request_prepares_then_dispatches_unique_local_file(tmp_path, monkeypatch):
+    from ultron_resources import file_workflow
+    folder = tmp_path / 'Downloads'
+    folder.mkdir()
+    movie = folder / 'Supergirl.2026.mp4'
+    movie.write_bytes(b'fixture')
+    monkeypatch.setattr(file_workflow, 'known_folder', lambda name: folder)
+    brain = make_brain(tmp_path, monkeypatch, [])
+    opened = []
+    brain.resource_service.adapter = SimpleNamespace(open=lambda path, editor=None: opened.append(str(path)))
+    async def forbidden_model(**kwargs):
+        pytest.fail('Scoped file request should not need model inference')
+    brain.ollama.chat = forbidden_model
+    async def run():
+        _, actions = await brain.process_intent('Play the movie Supergirl from my downloads folder.', 'movie')
+        assert len(actions) == 1 and opened == []
+        ok, error = await brain._run_pending_actions(actions, 'movie')
+        assert ok and not error and opened == [str(movie)]
+        assert brain._compose_execution_response('movie') == 'Dispatched: Supergirl.'
+    asyncio.run(run())

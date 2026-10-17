@@ -62,6 +62,8 @@ from ultron_control.system_info import collect_telemetry, format_telemetry, form
 from ultron_control.capability_broker import CapabilityBroker
 from ultron_control.request_planning import explicit_launch_plan, explicit_resource_plan, PlanClarification, validate_application_targets
 from ultron_resources.config import create_service as create_resource_service
+from ultron_resources.file_workflow import prepare_file, open_prepared_file
+from ultron_control.request_planning import explicit_file_plan
 from ultron_resources.catalog import ResourceError, AmbiguousResource, AccessDenied
 from ultron_resources.native_apps import ExactApplicationDiscovery
 from ultron_control.intent_guard import (
@@ -961,6 +963,11 @@ def resolve_script_filename(requested_name: str, base_dir: str = ".") -> str | N
 
 TOOLS.extend([
     {"type": "function", "function": {
+        "name": "find_and_open_file", "description": "Open a uniquely matching supported document or media file in an explicitly named user folder. Copy the literal query. play requests require media_only=true. No fuzzy correction; ambiguous or incomplete scans do not open anything. Supported phrasing: play the movie Supergirl from my Downloads folder.",
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string"}, "folder": {"type": "string", "enum": ["downloads", "documents", "desktop", "videos", "music", "pictures"]},
+            "media_only": {"type": "boolean"}}, "required": ["query", "folder", "media_only"]}}},
+    {"type": "function", "function": {
         "name": "find_resources", "description": "Search the local resource metadata catalog for files, folders, executables, or scripts. Returns candidates only; never executes. Use the user's literal target name and explicit folder/drive scope. Indexing is performed separately with resource_cli.py.",
         "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "root": {"type": "string"}}, "required": ["query"]}}},
     {"type": "function", "function": {
@@ -1516,7 +1523,7 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
             )
 
         try:
-            explicit_calls = explicit_resource_plan(prompt) or explicit_launch_plan(prompt)
+            explicit_calls = explicit_file_plan(prompt) or explicit_resource_plan(prompt) or explicit_launch_plan(prompt)
         except PlanClarification as exc:
             self.last_plan_error = str(exc)
             return str(exc), []
@@ -1773,7 +1780,21 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
                     f"{func_name}({args})"
                 )
 
-                if func_name == "find_resources":
+                if func_name == "find_and_open_file":
+                    query = str(args.get("query", ""))
+                    folder = str(args.get("folder", ""))
+                    prepared = {}
+                    async def prepare_open_file(q=query, f=folder, media=args.get("media_only", False), state=prepared):
+                        service = await asyncio.to_thread(self._get_resource_service)
+                        state['service'] = service
+                        state['file'] = await asyncio.to_thread(prepare_file, service, q, f, media_only=media)
+                    async def execute_open_file(state=prepared):
+                        return await asyncio.to_thread(open_prepared_file, state['service'], state['file'])
+                    pending_actions.append(PendingAction(name=f"operate_resource:open:{query}",
+                        execute=execute_open_file, preflight=prepare_open_file))
+                    res = f"Scoped file search staged for '{query}' in {folder}; nothing opened yet."
+
+                elif func_name == "find_resources":
                     service = await asyncio.to_thread(self._get_resource_service)
                     matches = await asyncio.to_thread(service.catalog.search, str(args.get("query", "")), root=args.get("root"))
                     res = json.dumps({"candidates": [item.to_dict() for item in matches], "executed": False}, ensure_ascii=False)
