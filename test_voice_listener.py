@@ -254,3 +254,18 @@ def test_main_routes_complete_utterance_and_cleans_up_on_cancel(listener, monkey
         assert mailboxes[0].dropped_frames == 0
     asyncio.run(run())
     assert calls == [{"prompt": "open calculator."}]
+
+
+@pytest.mark.parametrize('metrics', [{'avg_logprob': -1.1}, {'compression_ratio': 2.5}])
+def test_uncertain_segment_rejects_whole_command(listener, monkeypatch, metrics):
+    model = SimpleNamespace(transcribe=lambda *a, **k: (iter([
+        SimpleNamespace(text='Open calculator and'),
+        SimpleNamespace(text='notion', **metrics),
+    ]), None))
+    monkeypatch.setattr(listener, 'load_whisper_model', lambda config: (model, 'cpu', {}))
+    engine = listener.WhisperEngine()
+    assert engine.transcribe(np.ones(16000)) is None
+    assert 'uncertain speech' in engine.last_rejection
+    model.transcribe = lambda *a, **k: (iter([SimpleNamespace(text='Open calculator.', avg_logprob=-0.2, compression_ratio=1.2)]), None)
+    assert engine.transcribe(np.ones(16000)) == 'Open calculator.'
+    assert engine.last_rejection is None

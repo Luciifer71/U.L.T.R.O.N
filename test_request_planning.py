@@ -1,6 +1,6 @@
 import pytest
 from ultron_control.request_planning import explicit_resource_plan
-from ultron_control.request_planning import validate_resource_target
+from ultron_control.request_planning import validate_resource_target, validate_application_targets
 
 
 @pytest.mark.parametrize('prefix', [
@@ -275,3 +275,26 @@ def test_run_application_list_has_explicit_launch_intent():
     calls = [{'function': {'name': 'open_application', 'arguments': {'app_name': name}}}
              for name in ['Calculator', 'File Explorer']]
     assert validate_application_targets('Run calculator and file explorer for me.', calls) is None
+
+
+def test_ordered_app_and_file_plan_is_complete_and_grounded():
+    from ultron_control.request_planning import explicit_sequence_plan
+    prompt = 'Open calculator, then play Supergirl from Downloads.'
+    calls = explicit_sequence_plan(prompt)
+    assert [c['function']['name'] for c in calls] == ['open_application', 'find_and_open_file']
+    assert validate_application_targets(prompt, calls) is None
+    assert validate_application_targets(prompt, calls[::-1])
+    assert validate_application_targets(prompt, calls[:1])
+
+
+@pytest.mark.parametrize('prompt', [
+    'Open calculator then delete Downloads.',
+    'Open calculator then play Supergirl.',
+    'If I finish, open calculator then open notion.',
+    'Open calculator then run test.py.',
+    'Open calculator then open notion then open edge then open explorer then open notepad then open chrome.',
+])
+def test_unresolved_sequence_never_becomes_partial_plan(prompt):
+    from ultron_control.request_planning import explicit_sequence_plan
+    with pytest.raises(PlanClarification):
+        explicit_sequence_plan(prompt)

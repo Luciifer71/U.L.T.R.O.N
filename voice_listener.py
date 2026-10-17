@@ -128,6 +128,7 @@ class WhisperEngine:
         audio_data: np.ndarray,
     ) -> Optional[str]:
 
+        self.last_rejection = None
         if self.model is None or len(audio_data) == 0:
             return None
 
@@ -138,10 +139,17 @@ class WhisperEngine:
                 **transcription_options(self.config),
             )
 
-            full_text = " ".join(
-                segment.text.strip()
-                for segment in segments
-            ).strip()
+            segments = list(segments)
+            # Decoder fallback thresholds are not an execution-confidence gate.
+            # Reject the whole utterance if any speech segment is unreliable;
+            # dropping only that segment could silently change a command target.
+            for segment in segments:
+                if (getattr(segment, 'avg_logprob', 0.0) < -1.0
+                        or getattr(segment, 'compression_ratio', 0.0) > 2.4):
+                    self.last_rejection = 'uncertain speech; please repeat the complete request'
+                    logging.info('[WHISPER FILTER]: Uncertain segment; entire utterance rejected.')
+                    return None
+            full_text = " ".join(segment.text.strip() for segment in segments).strip()
 
             if not full_text or len(full_text) < 2:
                 return None
@@ -549,7 +557,9 @@ async def main():
         logging.warning("[STT DISCARD]: %s; repeat the complete command.", reason)
         if is_active_session:
             await nc.publish("ultron.voice", json.dumps({
-                "speech": "Speech processing fell behind. Please repeat the complete command."
+                "speech": ("I could not hear that clearly. Please repeat the complete command."
+                           if reason.startswith("uncertain speech") else
+                           "Speech processing fell behind. Please repeat the complete command.")
             }).encode())
 
     async def handle_transcription(transcription, elapsed):
@@ -732,7 +742,9 @@ async def main():
 
 
         else:
-
+            rejection = getattr(whisper_engine, 'last_rejection', None)
+            if rejection:
+                await report_transcription_discard(rejection)
             print(
                 "[DISCARDED]: "
                 "No usable transcript (no speech, filter rejection or inference error)."

@@ -416,3 +416,106 @@ def test_movie_request_prepares_then_dispatches_unique_local_file(tmp_path, monk
         assert ok and not error and opened == [str(movie)]
         assert brain._compose_execution_response('movie') == 'Dispatched: Supergirl.'
     asyncio.run(run())
+
+
+def setup_file_choices(tmp_path, monkeypatch):
+    from ultron_resources import file_workflow
+    folder = tmp_path / 'Downloads'
+    folder.mkdir()
+    for name in ['Supergirl.2026.mp4', 'Supergirl.2025.mp4']:
+        (folder / name).write_bytes(b'fixture')
+    monkeypatch.setattr(file_workflow, 'known_folder', lambda name: folder)
+    brain = make_brain(tmp_path, monkeypatch, [])
+    opened = []
+    brain.resource_service.adapter = SimpleNamespace(open=lambda path, editor=None: opened.append(str(path)))
+    return brain, folder, opened
+
+
+def test_numbered_file_followup_is_single_use_and_uses_offered_order(tmp_path, monkeypatch):
+    brain, folder, opened = setup_file_choices(tmp_path, monkeypatch)
+    async def run():
+        _, actions = await brain.process_intent('Play Supergirl from Downloads.', 'search')
+        ok, message = await brain._run_pending_actions(actions, 'search')
+        assert not ok and '1. Supergirl.2025.mp4' in message and not opened
+        _, actions = await brain.process_intent('Open the second one.', 'choice')
+        assert len(actions) == 1
+        ok, _ = await brain._run_pending_actions(actions, 'choice')
+        assert ok and opened == [str(folder / 'Supergirl.2026.mp4')]
+        reply, actions = await brain.process_intent('Open the second one.', 'again')
+        assert not actions and 'no current file choice' in reply
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('mode', ['expired', 'changed', 'unrelated', 'cancelled'])
+def test_file_followup_cannot_use_stale_or_changed_candidates(tmp_path, monkeypatch, mode):
+    brain, folder, opened = setup_file_choices(tmp_path, monkeypatch)
+    async def run():
+        _, actions = await brain.process_intent('Play Supergirl from Downloads.', 'search')
+        await brain._run_pending_actions(actions, 'search')
+        if mode == 'expired':
+            brain._file_selection['expires'] = 0
+        elif mode == 'changed':
+            (folder / 'Supergirl.2025.mp4').write_bytes(b'changed')
+        else:
+            await brain.process_intent('cancel' if mode == 'cancelled' else 'Thank you.', 'intervening')
+        _, actions = await brain.process_intent('Open the first one.', 'choice')
+        if actions:
+            ok, _ = await brain._run_pending_actions(actions, 'choice')
+            assert not ok
+        assert not opened
+    asyncio.run(run())
+
+
+def test_sequence_preflights_all_files_before_opening_any(tmp_path, monkeypatch):
+    brain, folder, opened = setup_file_choices(tmp_path, monkeypatch)
+    (folder / 'report.pdf').write_bytes(b'test')
+    async def run():
+        _, actions = await brain.process_intent('Open report.pdf from Downloads then play Supergirl from Downloads.', 'batch')
+        assert len(actions) == 2
+        ok, _ = await brain._run_pending_actions(actions, 'batch')
+        assert not ok and not opened
+        assert getattr(brain, '_file_selection', None) is None
+    asyncio.run(run())
+
+
+def test_sequence_stops_after_execution_failure(tmp_path, monkeypatch):
+    brain, folder, opened = setup_file_choices(tmp_path, monkeypatch)
+    for name in ['a.pdf', 'b.pdf']:
+        (folder / name).write_bytes(b'test')
+    def fail(path, editor=None):
+        opened.append(str(path))
+        raise RuntimeError('test OS refusal')
+    brain.resource_service.adapter = SimpleNamespace(open=fail)
+    async def run():
+        _, actions = await brain.process_intent('Open a.pdf from Downloads then open b.pdf from Downloads.', 'batch')
+        assert len(actions) == 2
+        ok, _ = await brain._run_pending_actions(actions, 'batch')
+        assert not ok and opened == [str(folder / 'a.pdf')]
+        assert brain.execution_ledger['batch'][1]['state'] == 'not_started'
+    asyncio.run(run())
+
+
+def test_ordered_files_dispatch_in_order_without_model(tmp_path, monkeypatch):
+    brain, folder, opened = setup_file_choices(tmp_path, monkeypatch)
+    for name in ['a.pdf', 'b.pdf']:
+        (folder / name).write_bytes(b'test')
+    async def forbidden(**kwargs):
+        pytest.fail('Explicit ordered request must not invoke model')
+    brain.ollama.chat = forbidden
+    async def run():
+        _, actions = await brain.process_intent('Open b.pdf from Downloads then open a.pdf from Downloads.', 'ordered')
+        assert not opened
+        ok, _ = await brain._run_pending_actions(actions, 'ordered')
+        assert ok and opened == [str(folder / 'b.pdf'), str(folder / 'a.pdf')]
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('choice_prompt', ['Open the fifth one.', 'Open the second one and delete the first.'])
+def test_unoffered_or_compound_choice_does_not_dispatch(tmp_path, monkeypatch, choice_prompt):
+    brain, folder, opened = setup_file_choices(tmp_path, monkeypatch)
+    async def run():
+        _, actions = await brain.process_intent('Play Supergirl from Downloads.', 'search')
+        await brain._run_pending_actions(actions, 'search')
+        _, actions = await brain.process_intent(choice_prompt, 'choice')
+        assert not actions and not opened
+    asyncio.run(run())

@@ -212,3 +212,14 @@ and [7.3.1](https://github.com/rany2/edge-tts/releases/tag/7.3.1).
 - [NVIDIA cuDNN Windows installation](https://docs.nvidia.com/deeplearning/cudnn/installation/latest/windows.html)
 - [cuDNN 9.10.2.21 Windows wheel](https://pypi.org/project/nvidia-cudnn-cu12/9.10.2.21/)
 - [cuBLAS 12.6.4.1 wheels](https://pypi.org/project/nvidia-cublas-cu12/12.6.4.1/)
+
+### Uncertain transcription
+
+Ultron now rejects an entire utterance if any decoded segment has average log
+probability below -1.0 or compression ratio above 2.4, matching the existing
+decoder thresholds. During an active session it asks for the complete request
+again. It never drops just the uncertain target or replaces it with a guessed
+application or filename. Ambient silence still produces no spoken prompt.
+These are heuristics, not calibrated certainty: a wrong but confident transcript
+can still pass, and quiet legitimate speech can be rejected. Recorded-audio and
+live-device evaluation are still needed to measure recognition accuracy.

@@ -873,3 +873,13 @@ before dispatch. See [supported file workflows and limits](docs/local-file-workf
 See [CONTRIBUTING.md](CONTRIBUTING.md) for lightweight test setup, verification and
 reporting guidance. Issue and PR templates are available. Open-source licensing
 is pending an owner decision; the current ownership terms remain unchanged.
+
+### Follow-up choices and ordered requests
+
+Scoped file requests can offer numbered choices: reply “open the second one”
+within 60 seconds. Choices expire after one subsequent request. For a bounded
+workflow, say “open Calculator, then play Supergirl from Downloads.” Up to five
+explicit app/file actions are preflighted together and run in order; later steps
+stop if one fails. See [file workflow details](docs/local-file-workflow.md).
+Uncertain speech is rejected as a whole and prompts a repeat during an active
+session; this does not guarantee recognition of every spoken title.

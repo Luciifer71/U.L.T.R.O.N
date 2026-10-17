@@ -21,9 +21,21 @@ cannot establish a unique match and therefore does not open a file.
 An explicit filename extension requires a complete filename match. Otherwise,
 the title must match contiguous words (spaces, dots, hyphens and underscores separate words): “Supergirl” can match
 `Supergirl.2026.1080p.mkv`, but “super well” is not corrected to “Supergirl”. Multiple
-matches require a more specific filename or an exact-path request. There is no
-implicit “choose the first one” behavior or conversational candidate-selection
-state yet. The workflow supports one requested file at a time.
+matches produce up to five numbered choices. For a single-file request, say
+“open the second one” or “play number 2” within 60 seconds. The displayed numbers
+refer to that particular list, sorted by path, not to a fresh search. A choice is
+single-use; an unrelated request, cancellation, restart or expiry clears it.
+This is one local user's session, not a multi-user or speaker-authenticated service.
+The selected file's identity and access policy are checked again before opening.
+A media-only play request cannot select a document.
+
+You can also use up to five ordered actions, for example “open Calculator, then
+play Supergirl from Downloads.” Every step must be a recognized app launch or
+scoped file opening; scripts, search queries and inferred steps are excluded.
+All steps are prepared before any executes. If execution fails, later steps are
+reported as not started; earlier side effects are not rolled back. Dispatch of a
+file does not wait for its application to finish loading. An ambiguous file in a
+multi-step request rejects the entire batch; no numbered follow-up resumes it.
 
 Play requests accept common audio/video extensions. Open requests also accept
 common documents and images. Scripts, executables, shortcuts and unknown file

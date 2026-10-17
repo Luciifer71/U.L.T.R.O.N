@@ -19,8 +19,10 @@ FOLDERS = {'downloads': 'Downloads', 'documents': 'Documents', 'desktop': 'Deskt
 
 class FileSelectionRequired(AmbiguousResource):
     def __init__(self, paths, root):
+        paths = sorted(paths, key=lambda path: str(path).casefold())
         self.candidates = [{'path': str(path)} for path in paths]
-        labels = '; '.join(str(path.relative_to(root)) for path in paths[:3])
+        self.prepared = tuple(PreparedFile(path, root, identity(path)) for path in paths)
+        labels = '; '.join(f'{i}. {path.relative_to(root)}' for i, path in enumerate(paths, 1))
         ResourceError.__init__(self, 'Several files match: ' + labels + '. Specify the exact filename or full path. Nothing was opened.')
 
 
@@ -124,3 +126,12 @@ def open_prepared_file(service, prepared):
     if not path.is_relative_to(prepared.root) or identity(path) != prepared.identity:
         raise ResourceError('The selected file changed after discovery; repeat the request. Nothing was opened.')
     return service.open(str(path), root=str(prepared.root))
+
+
+def selection_number(prompt):
+    """Only explicit opening requests select a previously offered candidate."""
+    match = re.fullmatch(r"(?:please\s+)?(?:open|play|choose)\s+(?:the\s+)?(?:(?:file|number|option)\s+)?(first|second|third|fourth|fifth|[1-5])(?:\s+(?:one|file))?[.!?]*", prompt.strip(), re.I)
+    if not match:
+        return None
+    value = match.group(1).lower()
+    return int(value) if value.isdigit() else ['first', 'second', 'third', 'fourth', 'fifth'].index(value) + 1
