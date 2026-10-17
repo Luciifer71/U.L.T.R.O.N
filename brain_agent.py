@@ -60,6 +60,7 @@ from visual_events import publish_visual_event
 
 from ultron_control.system_info import collect_telemetry, format_telemetry, format_uptime, format_runtime_status
 from ultron_control.capability_broker import CapabilityBroker
+from ultron_control.local_facts import clock_reply, disk_reply, capabilities_reply
 from ultron_control.request_planning import explicit_launch_plan, explicit_resource_plan, PlanClarification, validate_application_targets
 from ultron_resources.config import create_service as create_resource_service
 from ultron_resources.file_workflow import prepare_file, open_prepared_file, FileSelectionRequired, selection_number, MEDIA
@@ -1154,6 +1155,12 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
 
     def _compose_local_reply(self, prompt: str) -> str | None:
         kind = local_information_kind(prompt)
+        if kind in {'clock', 'date'}:
+            return clock_reply(kind)
+        if kind == 'disk':
+            return disk_reply()
+        if kind == 'capabilities':
+            return capabilities_reply()
         if kind == "telemetry":
             return format_telemetry(collect_telemetry())
         if kind == "uptime":
