@@ -152,7 +152,7 @@ def test_known_application_plan_still_uses_existing_broker(tmp_path, monkeypatch
     async def open_resource(target, **kwargs):
         targets.append(target)
         return SimpleNamespace(success=True, message='running', error=None, data={'verification': {'running': True}})
-    brain.capabilities = SimpleNamespace(open_resource=open_resource)
+    brain.capabilities = SimpleNamespace(open_resource=open_resource, resources=SimpleNamespace(resolve=lambda target: SimpleNamespace(kind="application")))
     async def run():
         _, actions = await brain.process_intent('Open calculator.', 'task')
         assert not targets
@@ -364,3 +364,33 @@ def test_model_can_request_uptime_only(tmp_path, monkeypatch):
     monkeypatch.setattr('brain_agent.collect_telemetry', lambda: {'uptime_seconds': 60, 'cpu_percent': 5})
     reply, actions = asyncio.run(brain.process_intent('How long has this computer been running?', 'uptime-model'))
     assert reply == 'System uptime: 1 minute.' and not actions
+
+
+def test_garbled_live_transcript_cannot_stage_hallucinated_apps(tmp_path, monkeypatch):
+    calls = [{'function': {'name': 'open_application', 'arguments': {'app_name': name}}}
+             for name in ['File Explorer', 'Calculator', 'Two things']]
+    brain = make_brain(tmp_path, monkeypatch, calls)
+    reply, actions = asyncio.run(brain.process_intent('Annual pull, file explorer, calculator and two things.', 'garbled-live'))
+    assert actions == [] and brain.last_plan_error
+    assert 'No actions were started' in reply
+
+
+def test_model_list_preflights_unknown_app_before_any_launch(tmp_path, monkeypatch):
+    calls = [{'function': {'name': 'open_application', 'arguments': {'app_name': name}}}
+             for name in ['Calculator', 'MissingApp']]
+    brain = make_brain(tmp_path, monkeypatch, calls)
+    launched = []
+    def resolve(target):
+        if target == 'MissingApp':
+            raise ValueError('not installed')
+        return SimpleNamespace(kind='application')
+    async def open_resource(target, **kwargs):
+        launched.append(target)
+    brain.capabilities = SimpleNamespace(open_resource=open_resource, resources=SimpleNamespace(resolve=resolve))
+    async def run():
+        _, actions = await brain.process_intent('Run calculator and MissingApp.', 'unknown-live')
+        assert len(actions) == 2
+        ok, error = await brain._run_pending_actions(actions, 'unknown-live')
+        assert not ok and 'No actions were started' in error
+        assert launched == []
+    asyncio.run(run())

@@ -331,3 +331,41 @@ def test_interrupted_turn_restores_previous_conversation():
             pass
         assert brain.history == [{'role': 'system', 'content': 'test'}]
     asyncio.run(run())
+
+
+def test_batch_preflight_failure_starts_no_actions(monkeypatch):
+    async def run():
+        brain = bare_brain()
+        executed = []
+        checked = []
+        async def prepare_ok():
+            checked.append('calculator')
+        async def prepare_missing():
+            checked.append('missing')
+            raise ValueError('Application not installed')
+        actions = [PendingAction('open_application:Calculator', lambda: executed.append('calculator'), preflight=prepare_ok),
+                   PendingAction('open_application:Missing', lambda: executed.append('missing'), preflight=prepare_missing)]
+        ok, error = await brain._run_pending_actions(actions, 'preflight')
+        assert not ok and 'No actions were started' in error
+        assert checked == ['calculator', 'missing'] and executed == []
+        assert brain.execution_ledger['preflight'][0]['state'] == 'preflight_failed'
+        assert 'No actions were started' in brain._compose_execution_response('preflight')
+    asyncio.run(run())
+
+
+def test_batch_preflight_completes_before_first_execution(monkeypatch):
+    async def run():
+        brain = bare_brain()
+        events = []
+        async def visual(*a, **kw):
+            pass
+        brain._publish_visual = visual
+        monkeypatch.setattr('brain_agent.update_task', lambda *a, **kw: None)
+        monkeypatch.setattr('brain_agent.EXECUTION_MIN_HOLD_SEC', 0)
+        actions = [PendingAction('open_application:' + name,
+                    lambda n=name: events.append('execute:' + n),
+                    preflight=lambda n=name: events.append('resolve:' + n)) for name in ['Calculator', 'File Explorer']]
+        ok, error = await brain._run_pending_actions(actions, 'prepared')
+        assert ok and error is None
+        assert events == ['resolve:Calculator', 'resolve:File Explorer', 'execute:Calculator', 'execute:File Explorer']
+    asyncio.run(run())

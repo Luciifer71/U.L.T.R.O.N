@@ -265,11 +265,11 @@ def main():
         with startup_lock():
             ensure_nats(os.getenv('NATS_URL', 'nats://127.0.0.1:4222'))
             ensure_ollama(os.getenv('OLLAMA_HOST', 'http://127.0.0.1:11434'),
-                          os.getenv('LLM_MODEL', 'qwen2.5:7b'))
+                          os.getenv('LLM_MODEL', 'qwen3:8b'))
             existing = running_components(ROOT, psutil.process_iter(['cmdline', 'cwd']))
             if not existing:
                 warm_ollama(os.getenv('OLLAMA_HOST', 'http://127.0.0.1:11434'),
-                            os.getenv('LLM_MODEL', 'qwen2.5:7b'))
+                            os.getenv('LLM_MODEL', 'qwen3:8b'))
             else:
                 print('Existing components detected; warmup skipped. Stop all components for a fresh model trial.', flush=True)
             for component in COMPONENTS:

@@ -122,7 +122,7 @@ def main():
         load_dotenv(ROOT / ".env", override=False)
     except ImportError:
         pass
-    report = build_report(args.model or os.getenv("LLM_MODEL", "qwen2.5:7b"))
+    report = build_report(args.model or os.getenv("LLM_MODEL", "qwen3:8b"))
     if args.tests:
         started = time.monotonic()
         try:

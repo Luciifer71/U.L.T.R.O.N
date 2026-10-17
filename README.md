@@ -77,7 +77,7 @@ Current responsibilities include:
 - Intent processing
 - Structured tool-call parsing
 - Fallback parsing for raw `<tool_call>` output
-- Persistent conversation context
+- Bounded session conversation context; persistent facts and task audit records
 - Personal-memory integration
 - Tool/action staging
 - Typed action execution lifecycle
@@ -86,7 +86,7 @@ Current responsibilities include:
 The current default model is:
 
 ```text
-qwen2.5:7b
+qwen3:8b
 ```
 
 The model can be overridden through the `LLM_MODEL` environment variable.
@@ -398,7 +398,7 @@ Install:
 ## 2. Clone
 
 ```powershell
-git clone https://github.com/Luciifer71/Ultron-AI-Entity.git
+git clone https://github.com/Luciifer71/U.L.T.R.O.N.git Ultron-core
 cd Ultron-core
 ```
 
@@ -446,6 +446,20 @@ python -m pip install keyboard psutil pyperclip duckduckgo-search
 
 ---
 
+### Windows CUDA speech dependencies
+
+For NVIDIA GPU speech recognition on x64 Windows, install the speech requirements
+into the same environment used by the listener:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-speech-windows.txt
+```
+
+This does not install or update the NVIDIA driver. Follow the
+[speech runtime guide](docs/voice-runtime.md) for CUDA validation and microphone checks.
+
+---
+
 ## 5. Configure Environment Variables
 
 Create the local environment file:
@@ -471,7 +485,7 @@ Current defaults:
 ```text
 NATS_URL = nats://127.0.0.1:4222
 OLLAMA_HOST = http://127.0.0.1:11434
-LLM_MODEL = qwen2.5:7b
+LLM_MODEL = qwen3:8b
 ULTRON_EXECUTION_MIN_HOLD_SEC = 1.20
 ULTRON_EXECUTION_ACTION_ACK_SEC = 0.20
 ```
@@ -491,7 +505,7 @@ ollama list
 Pull the default model when needed:
 
 ```powershell
-ollama pull qwen2.5:7b
+ollama pull qwen3:8b
 ```
 
 The Brain performs a runtime readiness check before accepting intent processing.
@@ -499,6 +513,19 @@ The Brain performs a runtime readiness check before accepting intent processing.
 ---
 
 # ▶️ Running Ultron-AI
+
+### Windows launcher
+
+After completing setup, run from the repository root:
+
+```powershell
+.\start-ultron.cmd
+```
+
+The launcher prepares Docker/NATS and Ollama, then opens the action daemon,
+brain, and voice listener in separate terminals. Check each terminal for
+readiness; wait for `STANDBY MODE` before speaking. The visual frontend is
+started separately using the instructions below.
 
 Run the PowerShell commands below from the repository root unless a different
 directory is specified. The Python commands use the project’s `.venv` interpreter.
@@ -524,7 +551,15 @@ docker compose up -d
 Wait for microphone calibration to finish and `STANDBY MODE` to appear before
 saying **“Hey Ultron”** and giving your command.
 
-## Terminal 4 — Frontend
+## Terminal 4 — Voice Output
+
+```powershell
+.\.venv\Scripts\python.exe .\action_daemon.py
+```
+
+This component handles spoken replies. Start it before giving voice commands.
+
+## Terminal 5 — Frontend
 
 From the UI directory:
 
@@ -542,9 +577,33 @@ http://localhost:5173
 
 Additional perception, messaging, ingestion, and development utilities can be started independently as required.
 
+### Stop or restart
+
+Press **Ctrl+C** in each component terminal and wait for shutdown to finish.
+Stop the frontend separately in its terminal if it is running. Stop existing
+components before restarting or switching launch configurations.
+
+Docker and Ollama remain running after the launcher’s component windows stop.
+
+
 ---
 
 # 🧪 Current Development Status
+
+### Run regression checks
+
+```powershell
+.\.venv\Scripts\python.exe .\verify_ultron.py
+```
+
+To also probe the configured speech runtime and microphone inventory:
+
+```powershell
+.\.venv\Scripts\python.exe .\verify_ultron.py --speech
+```
+
+Passing automated checks does not prove live microphone recognition, audible
+speech, or successful desktop actions. Validate those separately on your machine.
 
 ## Implemented
 
@@ -703,24 +762,54 @@ These represent the architectural direction of the project; not every component 
 
 # 🛠️ Technology Stack
 
-| Layer | Technology |
-|---|---|
-| Primary Language | Python |
-| Frontend | React / TypeScript |
-| 3D / Rendering | React Three Fiber / Three.js |
-| GPU Visualization | WebGPU / TSL |
-| Local LLM Runtime | Ollama |
-| Default Model | Qwen 2.5 7B |
-| Event Bus | NATS |
-| Browser Event Transport | NATS WebSocket |
-| Relational Memory | SQLite |
-| Vector Database | ChromaDB |
-| Speech Recognition | Faster-Whisper |
-| Vision | MediaPipe / OpenCV |
-| Audio Processing | NumPy / SciPy |
-| Automation | Python system APIs |
-| Infrastructure | Docker |
-| Development | VS Code / Git |
+Ultron combines local AI reasoning, voice interaction, persistent memory, controlled
+computer actions, and an event-driven visual interface. The overview below preserves
+the core technologies and names the supporting libraries without describing internal
+prompts or implementation algorithms.
+
+| Layer | Technologies / libraries | Role |
+|---|---|---|
+| Primary language | Python | Backend components, task orchestration, and system integration |
+| Local LLM runtime | Ollama; `ollama` Python client | Local model inference and tool-call planning |
+| Default model | Qwen3:8b | Local planner; thinking off, context 4096, temperature 0, seed 42 |
+| Model evaluation | Offline-action Ollama benchmark | Compare configurable local models without executing proposed tools |
+| Event bus | NATS; `nats-py` | Asynchronous communication between components |
+| Browser event transport | NATS WebSocket | Delivers visual-state events to the frontend |
+| Relational memory | SQLite; Python `sqlite3` | Persistent facts, conversation history, and task records |
+| Vector database / RAG | ChromaDB; `chromadb` | Retrieval from indexed local knowledge |
+| Speech recognition | Faster-Whisper; `faster-whisper`, `ctranslate2` | Converts captured speech into text |
+| Microphone capture | `sounddevice` | Microphone input for the voice listener |
+| Audio processing | NumPy; SciPy | Audio arrays and signal-processing support |
+| GPU speech acceleration | NVIDIA CUDA; `nvidia-cublas-cu12`, `nvidia-cudnn-cu12` | GPU speech inference on supported Windows systems |
+| Spoken replies | `edge-tts`; `pygame` | Speech generation and audio playback |
+| Vision / gestures | MediaPipe; `opencv-python` | Camera-based perception and hand-gesture processing |
+| System telemetry | `psutil` | Operating-system resource measurements |
+| Computer automation | Python system APIs; `keyboard`, `ctypes`, `subprocess`, `pathlib` | Keyboard integration, native Windows calls, processes, and resource paths |
+| Clipboard integration | Optional `pyperclip` | Clipboard access when installed |
+| Web lookup | Optional `duckduckgo_search` / DDGS | Search integration; distinct from browser automation |
+| Configuration | `python-dotenv` | Loads local environment configuration |
+| Async runtime | Python `asyncio` | Coordinates asynchronous component work |
+| Supporting declared dependencies | `pydantic`, `requests`, `aiosqlite`, `pyttsx3` | Listed in the Python manifest; not all are active in every runtime path |
+| Frontend | React; React DOM; TypeScript | Visual interface and typed frontend code |
+| 3D / rendering | Three.js; React Three Fiber | Scene rendering and React integration |
+| Visual helpers / effects | Drei; React Three Postprocessing | Scene utilities and visual effects |
+| GPU visualization | WebGPU; Three.js Shading Language (TSL) | GPU rendering and procedural shader work |
+| Frontend build / lint | Vite; React Vite plugin; Oxlint; TypeScript type packages | Development server, builds, static typing, and linting |
+| Infrastructure | Docker; Docker Compose | Local NATS deployment |
+| Development | VS Code; Git; Node.js; npm | Editing, version control, and frontend dependency management |
+| Testing / CI | pytest; verification scripts; GitHub Actions | Regression checks and automated validation |
+
+**Scope:** This is a technology inventory, not a claim that every integration is
+complete or production-ready. Trial-branch work is identified separately.
+Broader browser and desktop automation remain under development.
+
+**Dependency references:** [Python](requirements.txt),
+[Windows GPU speech](requirements-speech-windows.txt), and
+[frontend](ultron-ui/package.json) contain the declared packages and version constraints.
+
+This overview is provided for technical review. See **License & Ownership** below
+for the project's stated usage restrictions; listing third-party technologies does
+not grant permission to reuse Ultron's implementation.
 
 ---
 
@@ -736,7 +825,7 @@ No part of this software may be reproduced, distributed, modified, or used in co
 
 ### One diagnostic report (no paid APIs)
 
-With the normal services running, check the Qwen3 trial configuration and regression suite:
+With the normal services running, check the configured Qwen3 model and regression suite:
 
 ```powershell
 .\.venv\Scripts\python.exe .\ultron_diagnostics.py --model qwen3:8b --tests
@@ -757,3 +846,16 @@ Ask "What is my uptime?" or "What are my system statistics?" for measured local
 readings. Battery percentage and plugged-in status are reported separately.
 "Okay, are there any errors?" reports the latest recorded task and explicitly
 states that a full system health check has not been performed.
+
+
+### Automated acceptance
+
+Run `accept-ultron.cmd` for regression tests, deterministic request checks and a
+single support ZIP. It does not launch applications or certify microphone audio.
+GitHub Actions runs this acceptance suite on Windows and stores the ZIP as a
+workflow artifact. Optional `accept-ultron.cmd --live-apps` checks the running
+brain and opens Calculator and File Explorer after offline checks pass.
+
+See [acceptance and release scope](docs/acceptance.md). Qwen3:8b is now the
+configurable default; existing `.env` and process overrides are respected.
+The earlier `start-qwen3-trial.cmd` remains a compatible explicit Qwen3 profile.

@@ -11,14 +11,14 @@ def clean_profile(monkeypatch):
         monkeypatch.delenv(key, raising=False)
 
 
-def test_default_profile_preserves_existing_request(monkeypatch):
+def test_explicit_legacy_model_preserves_existing_request(monkeypatch):
     received = []
     class Client:
         async def chat(self, **kwargs):
             received.append(kwargs)
             return {'message': {'content': 'ok'}}
     monkeypatch.setattr('ollama_runtime.AsyncClient', lambda **kwargs: Client())
-    runtime = OllamaRuntime(OllamaRuntimeConfig.from_env())
+    runtime = OllamaRuntime(OllamaRuntimeConfig.from_env(model="qwen2.5:7b"))
     runtime._ready = True
     request = {'model': 'qwen2.5:7b', 'messages': [], 'options': {'temperature': 0.2}}
     asyncio.run(runtime.chat(**request))
@@ -125,3 +125,17 @@ def test_timing_reports_failed_attempt_and_recovery(monkeypatch, capsys):
     rows = [json.loads(line.split('[OLLAMA TIMING] ')[1])
             for line in capsys.readouterr().out.splitlines()]
     assert [(row['attempt'], row['outcome']) for row in rows] == [(1, 'OSError'), (2, 'ok')]
+
+
+def test_qwen3_default_profile_and_explicit_override(monkeypatch):
+    monkeypatch.delenv('LLM_MODEL', raising=False)
+    config = OllamaRuntimeConfig.from_env()
+    assert (config.model, config.think, config.num_ctx, config.temperature, config.seed) == ('qwen3:8b', False, 4096, 0, 42)
+    monkeypatch.setenv('LLM_MODEL', 'another-model')
+    config = OllamaRuntimeConfig.from_env()
+    assert config.model == 'another-model' and config.think is None
+    monkeypatch.setenv('LLM_MODEL', 'qwen3:8b')
+    monkeypatch.setenv('LLM_THINKING', 'on')
+    monkeypatch.setenv('LLM_CONTEXT', '8192')
+    config = OllamaRuntimeConfig.from_env()
+    assert config.think is True and config.num_ctx == 8192

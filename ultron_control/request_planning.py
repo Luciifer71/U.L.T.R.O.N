@@ -67,7 +67,7 @@ def _mentions_target(text: str, target: str) -> bool:
 
 
 def _launch_clauses(prompt: str) -> list[str]:
-    pattern = r"\b(?:open|launch)\s+(.+?)(?=\b(?:search|close|terminate|kill|delete|run|execute|type|click|press|download|upload|organize)\b|$)"
+    pattern = r"\b(?:open|launch|start|run|execute)\s+(.+?)(?=\b(?:search|close|terminate|kill|delete|run|execute|type|click|press|download|upload|organize)\b|$)"
     clauses = []
     for match in re.finditer(pattern, prompt, re.I):
         prefix = prompt[:match.start()]
@@ -90,10 +90,10 @@ def validate_application_targets(prompt: str, calls: list[dict]) -> str | None:
     clauses = _launch_clauses(prompt)
     if clauses:
         grounding_text = " ".join(clauses)
-    elif re.search(r"\b(?:search|open|launch)\b", prompt, re.I):
+    elif re.search(r"\b(?:search|open|launch|start|run)\b", prompt, re.I):
         grounding_text = ""
     else:
-        grounding_text = prompt
+        grounding_text = ""
     current = " " + _words(grounding_text) + " "
     planned = set()
     for call in calls:
@@ -121,6 +121,10 @@ def validate_application_targets(prompt: str, calls: list[dict]) -> str | None:
                 return "You did not request that protocol activation. Please state the action you want. No actions were started."
         if function.get("name") != "open_application":
             continue
+        if (not clauses or re.search(r"\b(?:if|unless|don't|do not|never)\b", prompt, re.I)
+                or re.search(r"\b(?:why|how|explain|discuss)\b", re.split(r"\b(?:open|launch|start|run|execute)\b", prompt, maxsplit=1, flags=re.I)[0], re.I)
+                or prompt.lstrip().startswith(('"', "'", '“'))):
+            return "Please state a direct application launch request with the complete app names. No actions were started."
         target = str(function.get("arguments", {}).get("app_name", ""))
         canonical = APPLICATION_ALIASES.get(target.casefold().strip(), target)
         planned.add(canonical.casefold())

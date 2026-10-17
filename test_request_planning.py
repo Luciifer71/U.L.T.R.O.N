@@ -255,3 +255,23 @@ def test_alias_comma_keeps_unknown_or_incomplete_list_rejected(prompt):
 
 def test_alias_comma_preserves_negation_guard():
     assert explicit_launch_plan('Open file, explorer but do not open calculator.') is None
+
+
+@pytest.mark.parametrize('prompt', [
+    'Annual pull, file explorer, calculator and two things.',
+    'I like Calculator.',
+    'If I finish studying, open Calculator.',
+    'Explain how to open Calculator.',
+    '"Open Calculator."',
+])
+def test_application_mentions_are_not_launch_authorization(prompt):
+    from ultron_control.request_planning import validate_application_targets
+    calls = [{'function': {'name': 'open_application', 'arguments': {'app_name': 'Calculator'}}}]
+    assert validate_application_targets(prompt, calls)
+
+
+def test_run_application_list_has_explicit_launch_intent():
+    from ultron_control.request_planning import validate_application_targets
+    calls = [{'function': {'name': 'open_application', 'arguments': {'app_name': name}}}
+             for name in ['Calculator', 'File Explorer']]
+    assert validate_application_targets('Run calculator and file explorer for me.', calls) is None

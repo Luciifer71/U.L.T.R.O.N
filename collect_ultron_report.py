@@ -24,11 +24,14 @@ def redact(text):
     return text
 
 
-def make_bundle(root, report, output, diagnostic_output=""):
+def make_bundle(root, report, output, diagnostic_output="", acceptance=None):
     manifest = {'created_at': datetime.now(timezone.utc).isoformat(), 'files': [], 'missing': [],
                 'privacy': 'Contains transcripts, responses and resource names. Redaction is best effort; review before sharing.',
                 'scope': 'Launcher-managed Python logs only. Ollama/Docker native logs and audio recordings are not captured.'}
     paths = [report]
+    acceptance = acceptance or root / 'runtime' / 'acceptance' / 'latest.json'
+    if acceptance.is_file() and not acceptance.is_symlink():
+        paths.append(acceptance)
     for component in COMPONENTS:
         current = root / 'runtime' / 'logs' / f'{component}.log'
         if not current.is_file():
@@ -47,7 +50,7 @@ def make_bundle(root, report, output, diagnostic_output=""):
                 size = stream.tell()
                 stream.seek(max(0, size - LIMIT))
                 data = stream.read(LIMIT).decode('utf-8', errors='replace')
-            name = 'diagnostics.json' if path == report else 'logs/' + path.name
+            name = 'diagnostics.json' if path == report else 'acceptance.json' if path == acceptance else 'logs/' + path.name
             archive.writestr(name, redact(data))
             manifest['files'].append({'name': name, 'modified_at': datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(), 'truncated': size > LIMIT})
         if diagnostic_output:

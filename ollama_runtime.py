@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import logging
@@ -16,7 +16,7 @@ logger = logging.getLogger("ultron.ollama")
 @dataclass(frozen=True, slots=True)
 class OllamaRuntimeConfig:
     host: str = "http://127.0.0.1:11434"
-    model: str = "qwen2.5:7b"
+    model: str = "qwen3:8b"
     startup_retry_sec: float = 3.0
     request_timeout_sec: float = 90.0
     retry_attempts: int = 3
@@ -34,12 +34,14 @@ class OllamaRuntimeConfig:
 
     @classmethod
     def from_env(cls, **kwargs):
-        thinking = os.getenv('LLM_THINKING', 'default').strip().lower()
+        kwargs.setdefault('model', os.getenv('LLM_MODEL', 'qwen3:8b'))
+        qwen3 = kwargs['model'] == 'qwen3:8b'
+        thinking = os.getenv('LLM_THINKING', 'off' if qwen3 else 'default').strip().lower()
         if thinking not in {'default', 'off', 'on'}:
             raise ValueError('LLM_THINKING must be default, off, or on')
-        context = os.getenv('LLM_CONTEXT', '').strip()
-        temperature = os.getenv('LLM_TEMPERATURE', '').strip()
-        seed = os.getenv('LLM_SEED', '').strip()
+        context = os.getenv('LLM_CONTEXT', '4096' if qwen3 else '').strip()
+        temperature = os.getenv('LLM_TEMPERATURE', '0' if qwen3 else '').strip()
+        seed = os.getenv('LLM_SEED', '42' if qwen3 else '').strip()
         return cls(**kwargs, think={'default': None, 'off': False, 'on': True}[thinking],
                    num_ctx=int(context) if context else None,
                    temperature=float(temperature) if temperature else None,

@@ -148,7 +148,7 @@ MODEL_NAME = os.getenv(
 
     "LLM_MODEL",
 
-    "qwen2.5:7b",
+    "qwen3:8b",
 
 )
 
@@ -193,6 +193,8 @@ class PendingAction:
     execute: Callable[[], Any]
 
     completion: Literal["dispatch", "wait"] = "dispatch"
+
+    preflight: Callable[[], Any] | None = None
 
 
 
@@ -1179,6 +1181,25 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
             self.execution_ledger[task_id] = []
             return True, None
 
+        # Resolve every application before starting any action in this batch.
+        # This prevents resolution failures causing avoidable partial launches;
+        # runtime failures after successful preflight still cannot be rolled back.
+        try:
+            for action in actions:
+                if action.preflight is not None:
+                    if inspect.iscoroutinefunction(action.preflight):
+                        await action.preflight()
+                    else:
+                        await asyncio.to_thread(action.preflight)
+        except Exception as exc:
+            error = f"Could not prepare {self._friendly_action_name(action.name)}: {exc}. No actions were started."
+            self.execution_ledger[task_id] = [{
+                "name": action.name, "success": False, "state": "preflight_failed",
+                "error": error, "message": error,
+            }]
+            print(f"[PREFLIGHT REJECTED] [task={task_id}]: {error}")
+            return False, error
+
         execution_started = asyncio.get_running_loop().time()
         update_task(
             task_id,
@@ -1840,6 +1861,21 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
                     if not app_name:
                         res = "No application name was provided."
                     else:
+                        async def preflight_app(target_app: str = app_name) -> None:
+                            service = await asyncio.to_thread(self._get_resource_service)
+                            try:
+                                resource = await asyncio.to_thread(service.catalog.resolve, target_app, suffixes={'.exe', '.app'})
+                            except (AmbiguousResource, AccessDenied):
+                                raise
+                            except ResourceError:
+                                resource = None
+                            if resource is not None and os.path.splitext(resource.path)[1].casefold() in {'.exe', '.app'}:
+                                return
+                            # Read-only resolution, using the same resolver as execution.
+                            resolved = await asyncio.to_thread(self.capabilities.resources.resolve, target_app)
+                            if resolved is None:
+                                raise ValueError(f"Application '{target_app}' could not be resolved")
+
                         async def open_app(
                             target_app: str = app_name,
                         ) -> Any:
@@ -1866,6 +1902,7 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
                                 ),
                                 execute=open_app,
                                 completion="dispatch",
+                                preflight=preflight_app,
                             )
                         )
 
