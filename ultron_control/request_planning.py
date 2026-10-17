@@ -25,6 +25,22 @@ APPLICATION_ALIASES = {
     "terminal": "Windows Terminal", "firefox": "Firefox", "brave": "Brave",
 }
 SEARCH_SITES = {"youtube", "google", "bing", "github", "reddit", "duckduckgo"}
+REQUEST_PREFIX = (
+    r"(?:(?:ok|okay)[, ]+(?:(?:then|and)[, ]+)?)?(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?"
+    r"(?:do\s+me\s+a\s+favor\s+and\s+)?(?:please\s+)?"
+)
+
+
+def _mentions_resource(text: str, target: str) -> bool:
+    """Preserve filename/path punctuation; app alias matching is too loose here."""
+    text = unicodedata.normalize('NFC', text).casefold()
+    target = unicodedata.normalize('NFC', target.strip()).casefold()
+    if not target:
+        return False
+    return re.search(
+        r"(?<![\w./\\:-])" + re.escape(target) + r"(?![\w/\\:-]|\.(?=\S))",
+        text,
+    ) is not None
 
 
 def _words(text: str) -> str:
@@ -51,7 +67,7 @@ def _mentions_target(text: str, target: str) -> bool:
 
 
 def _launch_clauses(prompt: str) -> list[str]:
-    pattern = r"\b(?:open|launch)\s+(.+?)(?=\b(?:search|close|terminate|kill|delete|run|execute|type|click|press|download|upload|organize)\b|$)"
+    pattern = r"\b(?:open|launch|start|run|execute)\s+(.+?)(?=\b(?:search|close|terminate|kill|delete|run|execute|type|click|press|download|upload|organize)\b|$)"
     clauses = []
     for match in re.finditer(pattern, prompt, re.I):
         prefix = prompt[:match.start()]
@@ -74,10 +90,10 @@ def validate_application_targets(prompt: str, calls: list[dict]) -> str | None:
     clauses = _launch_clauses(prompt)
     if clauses:
         grounding_text = " ".join(clauses)
-    elif re.search(r"\b(?:search|open|launch)\b", prompt, re.I):
+    elif re.search(r"\b(?:search|open|launch|start|run)\b", prompt, re.I):
         grounding_text = ""
     else:
-        grounding_text = prompt
+        grounding_text = ""
     current = " " + _words(grounding_text) + " "
     planned = set()
     for call in calls:
@@ -105,6 +121,10 @@ def validate_application_targets(prompt: str, calls: list[dict]) -> str | None:
                 return "You did not request that protocol activation. Please state the action you want. No actions were started."
         if function.get("name") != "open_application":
             continue
+        if (not clauses or re.search(r"\b(?:if|unless|don't|do not|never)\b", prompt, re.I)
+                or re.search(r"\b(?:why|how|explain|discuss)\b", re.split(r"\b(?:open|launch|start|run|execute)\b", prompt, maxsplit=1, flags=re.I)[0], re.I)
+                or prompt.lstrip().startswith(('"', "'", '“'))):
+            return "Please state a direct application launch request with the complete app names. No actions were started."
         target = str(function.get("arguments", {}).get("app_name", ""))
         canonical = APPLICATION_ALIASES.get(target.casefold().strip(), target)
         planned.add(canonical.casefold())
@@ -162,7 +182,11 @@ def validate_resource_target(prompt: str, function: dict) -> str | None:
         if re.search(r'\b(?:search|find|explain|tell|discuss)\b', prefix, re.I) and not re.search(r'\b(?:and|then|also)\s+(?:(?:then|also)\s+)?$', prefix, re.I):
             continue
         end = verbs[index + 1].start() if index + 1 < len(verbs) else len(prompt)
-        if _mentions_target(prompt[match.end():end], target):
+        clause = prompt[match.end():end]
+        # Preserve the existing cosmetic matching for native app catalog names,
+        # but never apply it to filenames, paths, or script operations.
+        native_name = operation == 'launch' and re.fullmatch(r'[\w ]+', target)
+        if (_mentions_target(clause, target) if native_name else _mentions_resource(clause, target)):
             grounded = True
     if not grounded:
         return f"The resource operation or target '{target}' was not explicitly requested. No actions were started."
@@ -187,7 +211,7 @@ class PlanClarification(ValueError):
 def explicit_resource_plan(prompt: str) -> list[dict] | None:
     """Single literal resource requests; resolution stays in the catalog."""
     text = prompt.strip().rstrip('.!?')
-    match = re.fullmatch(r'(?:please\s+)?(?:(?:can|could|would) you\s+)?(run|execute|read|open)\s+(.+)', text, re.I)
+    match = re.fullmatch(REQUEST_PREFIX + r'(run|execute|read|open)\s+(.+)', text, re.I)
     if not match:
         return None
     verb, target = match.groups()
@@ -229,13 +253,18 @@ def explicit_launch_plan(prompt: str) -> list[dict] | None:
     """
     text = re.sub(r"\s+", " ", prompt.strip())
     prefix = re.fullmatch(
-        r"(?:(?:ok|okay)[, ]+)?(?:please )?(?:(?:can|could|would) you )?"
-        r"(?:do me a favor and )?(?:please )?(?:open|launch) (.+?)[.!?]*",
+        REQUEST_PREFIX + r"(?:open|launch) (.+?)[.!?]*",
         text, re.IGNORECASE,
     )
     if not prefix:
         return None
     remainder = prefix.group(1).strip()
+    # ASR may add a terminal comma to a complete one-app utterance. Accept
+    # exactly one known alias here; dangling multi-app lists still clarify.
+    if remainder.endswith(','):
+        single_target = remainder[:-1].strip().casefold()
+        if single_target in APPLICATION_ALIASES:
+            return [_call('open_application', app_name=APPLICATION_ALIASES[single_target])]
     # File/editor requests belong to the resource planner, not the application
     # alias list. A named editor is not another application launch target.
     if re.search(r'[\\/]|\.(?:txt|md|pdf|docx?|xlsx?|exe|app|py|ps1|sh)\b|\bin (?:notepad|textedit)\b', remainder, re.I):
@@ -260,7 +289,15 @@ def explicit_launch_plan(prompt: str) -> list[dict] | None:
     calls = []
     remaining = remainder.lower()
     while remaining:
-        alias = next((name for name in aliases if remaining == name or remaining.startswith(name + " ") or remaining.startswith(name + ",")), None)
+        # Permit an ASR comma only between words of a known alias. Keep
+        # application-list commas, file paths and search queries untouched.
+        candidate = remaining[4:] if remaining.startswith("the ") else remaining
+        matches = [(name, re.match(
+            r"\s*,?\s+".join(re.escape(word) for word in name.split()) + r"(?=$|[ ,])",
+            candidate,
+        )) for name in aliases]
+        matched = next(((name, match) for name, match in matches if match), None)
+        alias = matched[0] if matched else None
         if alias is None:
             if not calls:
                 # A garbled first name must not hide later explicit app names
@@ -283,7 +320,7 @@ def explicit_launch_plan(prompt: str) -> list[dict] | None:
                 f"Please clarify this part: '{remaining}'. No actions were started."
             )
         calls.append(_call("open_application", app_name=APPLICATION_ALIASES[alias]))
-        remaining = remaining[len(alias):].lstrip()
+        remaining = candidate[matched[1].end():].lstrip()
         if remaining.startswith(","):
             remaining = remaining[1:].lstrip()
             if not remaining:

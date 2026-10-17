@@ -53,3 +53,13 @@ def test_latest_task_is_most_recently_updated(tmp_path, monkeypatch) -> None:
     latest = memory_db.get_latest_task()
     assert latest is not None
     assert latest["task_id"] == "task-2"
+
+
+def test_latest_task_excludes_health_request(tmp_path, monkeypatch):
+    monkeypatch.setattr(memory_db, 'DB_PATH', tmp_path / 'memory.db')
+    memory_db.init_memory_db()
+    memory_db.create_task('previous', 'Open note')
+    memory_db.update_task('previous', 'failed', error_text='Missing file')
+    memory_db.create_task('health', 'Any problems?')
+    assert memory_db.get_latest_task()['task_id'] == 'health'
+    assert memory_db.get_latest_task(exclude_task_id='health')['task_id'] == 'previous'

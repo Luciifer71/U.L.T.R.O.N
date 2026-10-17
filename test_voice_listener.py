@@ -161,12 +161,32 @@ def test_calibration_is_bounded_even_if_tts_never_releases_gate(listener, monkey
     asyncio.run(run())
 
 
-def test_main_routes_complete_utterance_and_cleans_up_on_cancel(listener, monkeypatch):
+@pytest.mark.parametrize('slow_inference', [False, True])
+def test_main_routes_complete_utterance_and_cleans_up_on_cancel(listener, monkeypatch, slow_inference):
     import json
+    from threading import Event
     calls = []
     streams = []
+    mailboxes = []
+    captured_while_transcribing = Event()
+    mailbox_type = listener.AudioMailbox
+    class ObservedMailbox(mailbox_type):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.consumed = asyncio.Queue()
+        async def get(self):
+            frame = await super().get()
+            self.consumed.put_nowait(frame.sequence)
+            return frame
+    def mailbox(*args, **kwargs):
+        result = ObservedMailbox(*args, **kwargs)
+        mailboxes.append(result)
+        return result
+    monkeypatch.setattr(listener, 'AudioMailbox', mailbox)
     async def run():
         intent_received = asyncio.Event()
+        inference_started = asyncio.Event()
+        loop = asyncio.get_running_loop()
         class Nats:
             is_connected = True
             async def connect(self, *args, **kwargs):
@@ -186,6 +206,9 @@ def test_main_routes_complete_utterance_and_cleans_up_on_cancel(listener, monkey
         class Whisper:
             def transcribe(self, samples):
                 assert len(samples) == 38 * 1024
+                if slow_inference:
+                    loop.call_soon_threadsafe(inference_started.set)
+                    assert captured_while_transcribing.wait(15)
                 return "Hey Ultron, open calculator."
         class Stream:
             def __init__(self, **kwargs):
@@ -197,7 +220,15 @@ def test_main_routes_complete_utterance_and_cleans_up_on_cancel(listener, monkey
                     for index in range(38):
                         data = np.full((1024, 1), 0.1 if 8 <= index < 16 else 0.0, dtype=np.float32)
                         self.callback(data, 1024, None, False)
-                        await asyncio.sleep(0.002)
+                        await mailboxes[0].consumed.get()
+                    if slow_inference:
+                        await inference_started.wait()
+                        for _ in range(100):
+                            self.callback(np.zeros((1024, 1), dtype=np.float32), 1024, None, False)
+                            # Inference remains blocked until the consumer has
+                            # drained more than a mailbox capacity of frames.
+                            await mailboxes[0].consumed.get()
+                        captured_while_transcribing.set()
                 self.producer = asyncio.create_task(produce())
             def stop(self):
                 self.producer.cancel()
@@ -214,10 +245,12 @@ def test_main_routes_complete_utterance_and_cleans_up_on_cancel(listener, monkey
         monkeypatch.setattr(listener.sd, "InputStream", Stream)
         task = asyncio.create_task(listener.main())
         try:
-            await asyncio.wait_for(intent_received.wait(), 2)
+            await asyncio.wait_for(intent_received.wait(), 10)
         finally:
+            captured_while_transcribing.set()
             task.cancel()
             await task
         assert streams[0].closed
+        assert mailboxes[0].dropped_frames == 0
     asyncio.run(run())
     assert calls == [{"prompt": "open calculator."}]

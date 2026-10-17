@@ -1,5 +1,8 @@
 """Launcher regressions without starting services or opening terminals."""
 import unittest
+import io
+import json
+import pytest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -8,6 +11,42 @@ import start_ultron as launcher
 
 
 class LauncherTests(unittest.TestCase):
+    def test_warmup_uses_selected_trial_profile_without_tools(self):
+        opener = MagicMock()
+        opener.open.return_value = io.StringIO('{"done": true}')
+        settings = {'LLM_THINKING': 'off', 'LLM_CONTEXT': '4096',
+                    'LLM_TEMPERATURE': '0', 'LLM_SEED': '42'}
+        with patch.dict(launcher.os.environ, settings), patch.object(launcher, 'build_opener', return_value=opener):
+            launcher.warm_ollama('http://127.0.0.1:11434', 'qwen3:8b')
+        request = opener.open.call_args.args[0]
+        payload = json.loads(request.data)
+        self.assertEqual(payload['model'], 'qwen3:8b')
+        self.assertIs(payload['think'], False)
+        self.assertEqual(payload['options'], {'num_predict': 1, 'temperature': 0,
+                                              'num_ctx': 4096, 'seed': 42})
+        self.assertNotIn('tools', payload)
+        self.assertEqual(opener.open.call_args.kwargs['timeout'], 300)
+
+    def test_default_warmup_does_not_send_thinking_option(self):
+        opener = MagicMock()
+        opener.open.return_value = io.StringIO('{"done": true}')
+        with patch.dict(launcher.os.environ, {}, clear=True), patch.object(launcher, 'build_opener', return_value=opener):
+            launcher.warm_ollama('http://127.0.0.1:11434', 'qwen2.5:7b')
+        self.assertNotIn('think', json.loads(opener.open.call_args.args[0].data))
+
+    def test_warmup_errors_and_incomplete_responses_fail_readiness(self):
+        for data in ('{"done": false}', '{"error": "out of memory"}', 'not json', '[]'):
+            with self.subTest(data=data):
+                opener = MagicMock()
+                opener.open.return_value = io.StringIO(data)
+                with patch.object(launcher, 'build_opener', return_value=opener):
+                    with self.assertRaisesRegex(launcher.StartupError, 'warmup failed'):
+                        launcher.warm_ollama('http://127.0.0.1:11434', 'qwen3:8b')
+        with patch.object(launcher, 'build_opener') as build:
+            build.return_value.open.side_effect = TimeoutError('timeout')
+            with self.assertRaises(launcher.StartupError):
+                launcher.warm_ollama('http://127.0.0.1:11434', 'qwen3:8b')
+
     def test_existing_nats_is_reused(self):
         with patch.object(launcher, 'nats_ready', return_value=True), patch.object(launcher, 'find_executable') as find:
             launcher.ensure_nats('nats://127.0.0.1:4222')
@@ -68,6 +107,38 @@ class LauncherTests(unittest.TestCase):
         connection.recv.return_value = b'HTTP '
         with patch.object(launcher.socket, 'create_connection', return_value=connection):
             self.assertFalse(launcher.nats_ready('nats://127.0.0.1:4222'))
+
+
+@pytest.mark.parametrize('warmup_fails', [False, True])
+def test_main_warms_before_any_component_and_stops_on_failure(monkeypatch, tmp_path, warmup_fails):
+    from contextlib import nullcontext
+    import sys
+    import dotenv
+    import psutil
+    executable = tmp_path / '.venv' / 'Scripts' / 'python.exe'
+    executable.parent.mkdir(parents=True)
+    executable.touch()
+    for component in launcher.COMPONENTS:
+        (tmp_path / (component + '.py')).touch()
+    events = []
+    monkeypatch.setattr(sys, 'argv', ['start_ultron.py'])
+    monkeypatch.setattr(launcher, 'ROOT', tmp_path)
+    monkeypatch.setattr(launcher, 'os', SimpleNamespace(name='nt', getenv=lambda key, default: default))
+    monkeypatch.setattr(launcher, 'sys', SimpleNamespace(executable=str(executable), argv=['start_ultron.py']))
+    monkeypatch.setattr(launcher.importlib.util, 'find_spec', lambda name: object())
+    monkeypatch.setattr(dotenv, 'load_dotenv', lambda *args, **kwargs: None)
+    monkeypatch.setattr(psutil, 'process_iter', lambda attrs: [])
+    monkeypatch.setattr(launcher, 'startup_lock', nullcontext)
+    monkeypatch.setattr(launcher, 'ensure_nats', lambda url: None)
+    monkeypatch.setattr(launcher, 'ensure_ollama', lambda *args: None)
+    def warm(*args):
+        events.append('warm')
+        if warmup_fails:
+            raise launcher.StartupError('test warmup failed')
+    monkeypatch.setattr(launcher, 'warm_ollama', warm)
+    monkeypatch.setattr(launcher, 'start_console', lambda command: events.append(command[-1]))
+    assert launcher.main() == (1 if warmup_fails else 0)
+    assert events == (['warm'] if warmup_fails else ['warm', *launcher.COMPONENTS])
 
 
 if __name__ == '__main__':

@@ -1,0 +1,219 @@
+[
+  {
+    "id": "calculator",
+    "prompt": "Can you open calculator?",
+    "acceptable_calls": [
+      [
+        {
+          "function": {
+            "name": "open_application",
+            "arguments": {
+              "app_name": "Calculator"
+            }
+          }
+        }
+      ],
+      [
+        {
+          "function": {
+            "name": "open_application",
+            "arguments": {
+              "app_name": "calc"
+            }
+          }
+        }
+      ]
+    ]
+  },
+  {
+    "id": "multi_app",
+    "prompt": "Open Notion and Notepad.",
+    "acceptable_calls": [
+      [
+        {
+          "function": {
+            "name": "open_application",
+            "arguments": {
+              "app_name": "Notion"
+            }
+          }
+        },
+        {
+          "function": {
+            "name": "open_application",
+            "arguments": {
+              "app_name": "Notepad"
+            }
+          }
+        }
+      ]
+    ]
+  },
+  {
+    "id": "youtube",
+    "prompt": "Search YouTube for quantum computers.",
+    "acceptable_calls": [
+      [
+        {
+          "function": {
+            "name": "open_website",
+            "arguments": {
+              "target": "youtube",
+              "query": "quantum computers",
+              "count": 1
+            }
+          }
+        }
+      ],
+      [
+        {
+          "function": {
+            "name": "open_website",
+            "arguments": {
+              "target": "youtube",
+              "query": "quantum computers"
+            }
+          }
+        }
+      ]
+    ]
+  },
+  {
+    "id": "script_direct",
+    "prompt": "Run ultron smoke script.",
+    "acceptable_calls": [
+      [
+        {
+          "function": {
+            "name": "operate_resource",
+            "arguments": {
+              "operation": "run_script",
+              "target": "ultron smoke script"
+            }
+          }
+        }
+      ]
+    ]
+  },
+  {
+    "id": "script_polite",
+    "prompt": "Okay, can you run Ultron smoke script?",
+    "acceptable_calls": [
+      [
+        {
+          "function": {
+            "name": "operate_resource",
+            "arguments": {
+              "operation": "run_script",
+              "target": "Ultron smoke script"
+            }
+          }
+        }
+      ]
+    ]
+  },
+  {
+    "id": "editor",
+    "prompt": "Open report in Notepad.",
+    "acceptable_calls": [
+      [
+        {
+          "function": {
+            "name": "operate_resource",
+            "arguments": {
+              "operation": "open",
+              "target": "report",
+              "editor": "Notepad"
+            }
+          }
+        }
+      ]
+    ]
+  },
+  {
+    "id": "literal_extension",
+    "prompt": "Run report.py5.",
+    "acceptable_calls": [
+      [
+        {
+          "function": {
+            "name": "operate_resource",
+            "arguments": {
+              "operation": "run_script",
+              "target": "report.py5"
+            }
+          }
+        }
+      ],
+      []
+    ]
+  },
+  {
+    "id": "negation",
+    "prompt": "Do not open Calculator.",
+    "acceptable_calls": [
+      []
+    ]
+  },
+  {
+    "id": "quoted_command",
+    "prompt": "Explain the sentence \"run ultron smoke script\". Do not execute it.",
+    "acceptable_calls": [
+      []
+    ]
+  },
+  {
+    "id": "hypothetical",
+    "prompt": "If I asked you to open Notion, what would happen? Do not open anything.",
+    "acceptable_calls": [
+      []
+    ]
+  },
+  {
+    "id": "missing_target",
+    "prompt": "Open the file.",
+    "acceptable_calls": [
+      []
+    ]
+  },
+  {
+    "id": "greeting",
+    "prompt": "How are you doing?",
+    "acceptable_calls": [
+      []
+    ]
+  },
+  {
+    "id": "stale_context",
+    "prompt": "Can you hear me?",
+    "acceptable_calls": [
+      []
+    ],
+    "history": [
+      {
+        "role": "user",
+        "content": "Open Calculator."
+      },
+      {
+        "role": "assistant",
+        "content": "Calculator was opened in the previous task."
+      }
+    ]
+  },
+  {
+    "id": "unknown_lookup",
+    "prompt": "Find a resource named zorblax987.",
+    "acceptable_calls": [
+      [
+        {
+          "function": {
+            "name": "find_resources",
+            "arguments": {
+              "query": "zorblax987"
+            }
+          }
+        }
+      ]
+    ]
+  }
+]

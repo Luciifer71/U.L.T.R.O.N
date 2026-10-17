@@ -77,7 +77,7 @@ Current responsibilities include:
 - Intent processing
 - Structured tool-call parsing
 - Fallback parsing for raw `<tool_call>` output
-- Persistent conversation context
+- Bounded session conversation context; persistent facts and task audit records
 - Personal-memory integration
 - Tool/action staging
 - Typed action execution lifecycle
@@ -86,7 +86,7 @@ Current responsibilities include:
 The current default model is:
 
 ```text
-qwen2.5:7b
+qwen3:8b
 ```
 
 The model can be overridden through the `LLM_MODEL` environment variable.
@@ -485,7 +485,7 @@ Current defaults:
 ```text
 NATS_URL = nats://127.0.0.1:4222
 OLLAMA_HOST = http://127.0.0.1:11434
-LLM_MODEL = qwen2.5:7b
+LLM_MODEL = qwen3:8b
 ULTRON_EXECUTION_MIN_HOLD_SEC = 1.20
 ULTRON_EXECUTION_ACTION_ACK_SEC = 0.20
 ```
@@ -505,7 +505,7 @@ ollama list
 Pull the default model when needed:
 
 ```powershell
-ollama pull qwen2.5:7b
+ollama pull qwen3:8b
 ```
 
 The Brain performs a runtime readiness check before accepting intent processing.
@@ -771,8 +771,8 @@ prompts or implementation algorithms.
 |---|---|---|
 | Primary language | Python | Backend components, task orchestration, and system integration |
 | Local LLM runtime | Ollama; `ollama` Python client | Local model inference and tool-call planning |
-| Default model | Qwen2.5:7b | Default configured language model on `main` |
-| Model evaluation | Qwen3:8b on the trial branch | Evaluated alternative; not the default on `main` |
+| Default model | Qwen3:8b | Local planner; thinking off, context 4096, temperature 0, seed 42 |
+| Model evaluation | Offline-action Ollama benchmark | Compare configurable local models without executing proposed tools |
 | Event bus | NATS; `nats-py` | Asynchronous communication between components |
 | Browser event transport | NATS WebSocket | Delivers visual-state events to the frontend |
 | Relational memory | SQLite; Python `sqlite3` | Persistent facts, conversation history, and task records |
@@ -822,3 +822,40 @@ This repository and its source code are **proprietary**.
 Permission is granted solely to view the code for educational and demonstration purposes.
 
 No part of this software may be reproduced, distributed, modified, or used in commercial applications without explicit prior written consent from the owner.
+
+### One diagnostic report (no paid APIs)
+
+With the normal services running, check the configured Qwen3 model and regression suite:
+
+```powershell
+.\.venv\Scripts\python.exe .\ultron_diagnostics.py --model qwen3:8b --tests
+```
+
+The report is saved under `runtime/diagnostics/`. It includes dependency versions,
+CPU/RAM/battery/uptime readings, local Ollama model inventory, the NATS greeting,
+and regression status. Omit `--tests` for a quick read-only report. Without
+`--model`, the command uses `LLM_MODEL` from the environment or `.env`.
+It does not start services, load models, record audio, or launch applications.
+Service reachability does not prove that brain/listener/daemon subscribers are
+healthy. Missing readings and untested microphone/speaker/desktop checks remain
+explicit. The report excludes environment dumps, credentials, transcripts, and
+raw test output. Exit status reports regression failure; inspect service statuses
+in the report separately.
+
+Ask "What is my uptime?" or "What are my system statistics?" for measured local
+readings. Battery percentage and plugged-in status are reported separately.
+"Okay, are there any errors?" reports the latest recorded task and explicitly
+states that a full system health check has not been performed.
+
+
+### Automated acceptance
+
+Run `accept-ultron.cmd` for regression tests, deterministic request checks and a
+single support ZIP. It does not launch applications or certify microphone audio.
+GitHub Actions runs this acceptance suite on Windows and stores the ZIP as a
+workflow artifact. Optional `accept-ultron.cmd --live-apps` checks the running
+brain and opens Calculator and File Explorer after offline checks pass.
+
+See [acceptance and release scope](docs/acceptance.md). Qwen3:8b is now the
+configurable default; existing `.env` and process overrides are respected.
+The earlier `start-qwen3-trial.cmd` remains a compatible explicit Qwen3 profile.

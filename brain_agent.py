@@ -38,6 +38,8 @@ import inspect
 
 import uuid
 
+import time
+
 from dataclasses import dataclass
 
 from typing import Any, Callable, Literal
@@ -56,6 +58,7 @@ import psutil
 
 from visual_events import publish_visual_event
 
+from ultron_control.system_info import collect_telemetry, format_telemetry, format_uptime, format_runtime_status
 from ultron_control.capability_broker import CapabilityBroker
 from ultron_control.request_planning import explicit_launch_plan, explicit_resource_plan, PlanClarification, validate_application_targets
 from ultron_resources.config import create_service as create_resource_service
@@ -66,6 +69,7 @@ from ultron_control.intent_guard import (
     contains_physical_action_request,
     extract_replay_plan,
     is_conversational_only,
+    local_information_kind,
     is_replay_request,
     is_task_status_request,
     looks_incomplete_request,
@@ -87,7 +91,6 @@ from memory_db import (
 
     log_chat,
 
-    get_recent_chat_history,
 
     create_task,
 
@@ -145,7 +148,7 @@ MODEL_NAME = os.getenv(
 
     "LLM_MODEL",
 
-    "qwen2.5:7b",
+    "qwen3:8b",
 
 )
 
@@ -191,6 +194,8 @@ class PendingAction:
 
     completion: Literal["dispatch", "wait"] = "dispatch"
 
+    preflight: Callable[[], Any] | None = None
+
 
 
 
@@ -198,6 +203,14 @@ class PendingAction:
 # --- ALL AGENTIC TOOLS DEFINITION ---
 
 TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_runtime_status",
+            "description": "Check Ultron status/errors using the responding brain, its NATS connection, and the latest recorded task. Does not diagnose the whole OS, microphone or speaker. Use for health/error questions; never offer an unspecified alternate check.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 
     {
 
@@ -209,13 +222,12 @@ TOOLS = [
 
             "description": (
 
-                "Get real-time CPU utilization %, RAM usage %, battery status,"
-
-                " and storage details."
+                "Read current CPU and RAM usage, battery percentage, plugged-in status, "
+                "and system uptime since boot. Not a full health check; unavailable readings are explicit."
 
             ),
 
-            "parameters": {"type": "object", "properties": {}, "required": []},
+            "parameters": {"type": "object", "properties": {"metric": {"type": "string", "enum": ["all", "uptime"], "description": "Choose uptime when only time since boot is requested; otherwise all."}}, "required": []},
 
         },
 
@@ -303,9 +315,10 @@ TOOLS = [
 
             "description": (
 
-                "Execute a local Python (.py) file in the system or project"
-
-                " workspace."
+                "Legacy Python-only execution tool. Prefer operate_resource with operation=run_script. "
+                "Use this only when the user explicitly supplies a literal .py filename or path. "
+                "Copy that target exactly; never derive a filename from a spoken name, "
+                "append an extension, or correct an extension such as .py5."
 
             ),
 
@@ -972,7 +985,7 @@ class UltronBrain:
 
         self.ollama = OllamaRuntime(
 
-            OllamaRuntimeConfig(
+            OllamaRuntimeConfig.from_env(
 
                 host=OLLAMA_HOST,
 
@@ -1053,6 +1066,10 @@ class UltronBrain:
         self.system_prompt = (
             f"""You are Ultron, an advanced AI assistant. Keep all spoken responses concise and direct.{facts_summary}
 
+CONFIGURED ARCHITECTURE: Python, an Ollama local model, NATS component messaging, SQLite task memory, Faster-Whisper speech recognition and Edge TTS speech output. These are configuration facts, not evidence that every component is healthy. Never describe this as a secret proprietary stack.
+
+GROUNDING: For Ultron health or error questions, call get_runtime_status and report its evidence without offering another unspecified method. For current system usage, battery or uptime call get_system_telemetry. Battery percentage is not a power source. A successful task does not prove the whole system has no errors. State the scope of available evidence. If no available tool can retrieve a fact, say so; do not offer an unspecified alternate method or search the web for this computer's live state. Ambiguous speech needs a brief clarification, not a reprimand. Interpret the current request independently of unrelated previous answers.
+
 CRITICAL RULES:
 
 1. MEMORY STORAGE: If the user states a fact, preference, or detail about themselves (e.g., favorite game, name, movie list), you MUST execute `remember_fact`.
@@ -1065,20 +1082,21 @@ CRITICAL RULES:
 
 5. WEBSITE SEARCH: To search inside a website, use ONE `open_website` call with both `target` and `query` whenever supported. Example: target=`youtube`, query=`quantum computers`. Do NOT use `query_knowledge_base` or `live_web_search` for an on-site search requested by the user.
 
-6. INCOMPLETE REQUESTS: Never invent missing targets, application names, search destinations, or arguments. Ask the user for the missing information.
+6. INCOMPLETE REQUESTS: Never invent missing targets, application names, search destinations, or arguments. Ask the user for the missing information. 'Open the file' requires clarification; 'file' is not a supplied filename.
 
 7. EXECUTION TRUTH: Tool calls are only a plan. Never claim a physical action happened merely because a tool call was produced. The execution layer is authoritative.
 
-8. REPEAT REQUESTS: When the user asks to repeat or redo a previous task, use the stored replay plan supplied by the execution system. Never invent a previous task from conversational wording alone.
+8. REPEAT REQUESTS: When the user asks to repeat or redo a previous task, use the stored replay plan supplied by the execution system. Never invent a previous task from conversational wording alone. Negated, quoted, hypothetical, and explanatory requests do not authorize execution. A conversational check such as 'Can you hear me?' does not authorize running a listener or repeating a previous task. Do not turn these requests into unrelated memory lookups.
+
+TARGET FIDELITY: Copy resource names and paths from the current request, preserving spaces, punctuation and extensions. Never convert a spoken script name to an invented filename. Never change report.py5 to report.py. For 'run Ultron smoke script', use operate_resource(operation='run_script', target='Ultron smoke script'). For 'open report in Notepad', use operate_resource(operation='open', target='report', editor='Notepad'); opening only Notepad omits the requested document. Unknown extensions or uncertain targets require clarification, not correction. These examples illustrate the rule; they do not authorize actions unless requested in the current turn.
 
 9. LOCAL RESOURCES: Use operate_resource for explicitly requested files, folders, games, or scripts. Preserve the user's literal target name; exact paths or unique exact catalog names are resolved by the service. Use launch for native executables, run_script for scripts, open for documents/folders or a requested editor, and read for UTF-8 text. find_resources searches metadata only. Do not invent paths, executable names, arguments, permissions, security restrictions, or success. Report the actual tool error and ask for a folder/path when a target is missing or ambiguous. Scripts execute as the current user; resource scope is not a script sandbox."""
         )
 
-        recent_history = get_recent_chat_history(limit=10)
-        self.history = [
-            {"role": "system", "content": self.system_prompt},
-            *recent_history,
-        ]
+        # Legacy chat rows mix conversation with task failures and staging text.
+        # Keep the audit log in SQLite, but do not replay it as model dialogue.
+        conversation = getattr(self, "history", [])[1:]
+        self.history = [{"role": "system", "content": self.system_prompt}, *conversation]
 
 
 
@@ -1109,6 +1127,49 @@ CRITICAL RULES:
 
 
 
+    def _runtime_status(self, exclude_task_id=None):
+        snapshot = {
+            "observed_at": time.time(),
+            "brain_responding": True,
+            "nats_connected": getattr(getattr(self, "nc", None), "is_connected", None),
+            "scope": "Brain connection and latest recorded task only; OS, microphone, speaker and other component health unverified",
+        }
+        try:
+            task = get_latest_task(exclude_task_id=exclude_task_id) if exclude_task_id else get_latest_task()
+            snapshot["latest_task"] = ({
+                "task_id": task.get("task_id"), "status": task.get("status"),
+                "updated_at": task.get("updated_at"), "error": task.get("error_text"),
+            } if task else None)
+        except Exception as exc:
+            snapshot["task_lookup_error"] = type(exc).__name__
+        return snapshot
+
+    def _compose_local_reply(self, prompt: str) -> str | None:
+        kind = local_information_kind(prompt)
+        if kind == "telemetry":
+            return format_telemetry(collect_telemetry())
+        if kind == "uptime":
+            return format_uptime(collect_telemetry())
+        if kind == "health":
+            return format_runtime_status(self._runtime_status())
+        if kind == "stack":
+            return (
+                f"My brain runs in Python using Ollama with {MODEL_NAME}. "
+                "NATS connects my components, SQLite stores task memory, "
+                "Faster-Whisper handles speech recognition and Edge TTS generates spoken replies. "
+                "That describes my configured architecture, not a live health check."
+            )
+        if is_task_status_request(prompt):
+            return self._compose_latest_task_status()
+        if is_conversational_only(prompt):
+            text = re.sub(r"[^a-z0-9']+", " ", prompt.lower()).strip()
+            if text in {"do you hear me", "can you hear me", "are you listening"}:
+                return "Yes, I received your message. I'm listening."
+            if "thank" in text.split() or "thanks" in text.split():
+                return "You're welcome."
+            return "Understood. Please state the action you want me to perform."
+        return None
+
     async def _run_pending_actions(
         self,
         actions: list[PendingAction],
@@ -1119,6 +1180,25 @@ CRITICAL RULES:
         if not actions:
             self.execution_ledger[task_id] = []
             return True, None
+
+        # Resolve every application before starting any action in this batch.
+        # This prevents resolution failures causing avoidable partial launches;
+        # runtime failures after successful preflight still cannot be rolled back.
+        try:
+            for action in actions:
+                if action.preflight is not None:
+                    if inspect.iscoroutinefunction(action.preflight):
+                        await action.preflight()
+                    else:
+                        await asyncio.to_thread(action.preflight)
+        except Exception as exc:
+            error = f"Could not prepare {self._friendly_action_name(action.name)}: {exc}. No actions were started."
+            self.execution_ledger[task_id] = [{
+                "name": action.name, "success": False, "state": "preflight_failed",
+                "error": error, "message": error,
+            }]
+            print(f"[PREFLIGHT REJECTED] [task={task_id}]: {error}")
+            return False, error
 
         execution_started = asyncio.get_running_loop().time()
         update_task(
@@ -1392,8 +1472,33 @@ CRITICAL RULES:
         prompt: str,
         task_id: str,
     ) -> tuple[str, list]:
+        previous = list(self.history)
+        try:
+            reply, actions = await self._process_intent(prompt, task_id)
+            # Only complete, ordinary conversation belongs in future dialogue.
+            # Tool traces remain available within this turn; task outcomes and
+            # replay plans have their own authoritative stores.
+            new_messages = self.history[len(previous):]
+            conversation_only = (
+                not actions
+                and not self.last_plan_error
+                and not contains_physical_action_request(prompt)
+                and len(new_messages) == 2
+                and [m.get("role") for m in new_messages] == ["user", "assistant"]
+                and not any(m.get("tool_calls") for m in new_messages)
+            )
+            if conversation_only:
+                previous = [previous[0], *(previous[1:] + new_messages)[-10:]]
+            return reply, actions
+        finally:
+            self.history = previous
+
+    async def _process_intent(self, prompt: str, task_id: str) -> tuple[str, list]:
         self.current_task_id = task_id
         self.last_plan_error = None
+        local_reply = self._compose_local_reply(prompt)
+        if local_reply is not None:
+            return local_reply, []
         await self._publish_visual("thinking", task_id=task_id)
 
         self.history.append(
@@ -1450,6 +1555,7 @@ CRITICAL RULES:
             }
             try:
                 response = await self.ollama.chat(
+                    diagnostic_task_id=task_id, diagnostic_phase="plan",
                     model=MODEL_NAME,
                     messages=self.history,
                     tools=TOOLS,
@@ -1531,6 +1637,7 @@ CRITICAL RULES:
             ]
             try:
                 retry = await self.ollama.chat(
+                    diagnostic_task_id=task_id, diagnostic_phase="plan_retry",
                     model=MODEL_NAME, messages=retry_messages, tools=TOOLS,
                     options={"num_predict": 256, "temperature": 0},
                 )
@@ -1616,11 +1723,11 @@ CRITICAL RULES:
             # Do not ask a tools-disabled synthesis pass to invent an outcome.
             reply = "I could not produce a validated execution plan. Please restate the action and its target."
             self.history.append({"role": "assistant", "content": reply})
-            if len(self.history) > 11:
-                self.history = [self.history[0], *self.history[-10:]]
             return reply, []
 
         pending_actions: list[PendingAction] = []
+        telemetry_reply = None
+        runtime_reply = None
 
         if tool_calls:
             self.history.append(message)
@@ -1691,19 +1798,15 @@ CRITICAL RULES:
                         ))
                         res = f"Resource operation '{operation}' staged for '{target}'."
 
+                elif func_name == "get_runtime_status":
+                    snapshot = self._runtime_status(exclude_task_id=task_id)
+                    res = json.dumps(snapshot)
+                    runtime_reply = format_runtime_status(snapshot)
+
                 elif func_name == "get_system_telemetry":
-                    cpu = psutil.cpu_percent(interval=0.1)
-                    ram = psutil.virtual_memory().percent
-                    battery = psutil.sensors_battery()
-                    bat_str = (
-                        f"{battery.percent}%"
-                        if battery
-                        else "AC Power"
-                    )
-                    res = (
-                        f"System Metrics: CPU at {cpu}%, "
-                        f"RAM at {ram}%, Power Source: {bat_str}."
-                    )
+                    metrics = await asyncio.to_thread(collect_telemetry)
+                    res = json.dumps(metrics)
+                    telemetry_reply = format_uptime(metrics) if args.get("metric") == "uptime" else format_telemetry(metrics)
 
                 elif func_name == "run_python_script":
                     raw_path = str(args.get('script_path', '')).strip()
@@ -1758,6 +1861,21 @@ CRITICAL RULES:
                     if not app_name:
                         res = "No application name was provided."
                     else:
+                        async def preflight_app(target_app: str = app_name) -> None:
+                            service = await asyncio.to_thread(self._get_resource_service)
+                            try:
+                                resource = await asyncio.to_thread(service.catalog.resolve, target_app, suffixes={'.exe', '.app'})
+                            except (AmbiguousResource, AccessDenied):
+                                raise
+                            except ResourceError:
+                                resource = None
+                            if resource is not None and os.path.splitext(resource.path)[1].casefold() in {'.exe', '.app'}:
+                                return
+                            # Read-only resolution, using the same resolver as execution.
+                            resolved = await asyncio.to_thread(self.capabilities.resources.resolve, target_app)
+                            if resolved is None:
+                                raise ValueError(f"Application '{target_app}' could not be resolved")
+
                         async def open_app(
                             target_app: str = app_name,
                         ) -> Any:
@@ -1784,6 +1902,7 @@ CRITICAL RULES:
                                 ),
                                 execute=open_app,
                                 completion="dispatch",
+                                preflight=preflight_app,
                             )
                         )
 
@@ -2339,9 +2458,18 @@ CRITICAL RULES:
 
         # For physical actions the final response is deliberately deferred
         # to the authoritative execution ledger in main().
-        if not pending_actions:
+        if not tool_calls:
+            # The initial response already answers a conversational request.
+            # A second tools-disabled call has no new evidence to summarize.
+            final_text = content_text or "Could you clarify your question?"
+        elif len(tool_calls) == 1 and runtime_reply is not None:
+            final_text = runtime_reply
+        elif len(tool_calls) == 1 and telemetry_reply is not None:
+            final_text = telemetry_reply
+        elif not pending_actions:
             try:
                 final_response = await self.ollama.chat(
+                    diagnostic_task_id=task_id, diagnostic_phase="followup",
                     model=MODEL_NAME,
                     messages=self.history,
                     options={
@@ -2396,11 +2524,6 @@ CRITICAL RULES:
             }
         )
 
-        if len(self.history) > 11:
-            self.history = (
-                [self.history[0]]
-                + self.history[-10:]
-            )
 
         return final_text, pending_actions
 
@@ -2474,8 +2597,10 @@ async def main():
 
 
     async def intent_handler(msg):
+        received_at = time.perf_counter()
         async with brain.task_lock:
             task_id = str(uuid.uuid4())
+            print(f"[BRAIN TIMING] [task={task_id}] handler_lock_wait_seconds={time.perf_counter() - received_at:.3f}", flush=True)
 
             try:
                 data = json.loads(msg.data.decode())
@@ -2494,27 +2619,16 @@ async def main():
                 # Status and courtesy messages must never be handed to the LLM
                 # as fresh physical-action decisions. These are deterministic
                 # conversational paths.
-                if is_task_status_request(prompt):
+                local_reply = brain._compose_local_reply(prompt)
+                if local_reply is not None:
                     await brain._publish_visual("thinking", task_id=task_id)
-                    reply_text = brain._compose_latest_task_status()
-                    pending_actions = []
-                    action_ok = True
-                    action_error = None
-
-                elif is_conversational_only(prompt):
-                    await brain._publish_visual("thinking", task_id=task_id)
-                    conversational_text = re.sub(r"[^a-z0-9']+", " ", prompt.lower()).strip()
-                    if conversational_text in {"do you hear me", "can you hear me", "are you listening"}:
-                        reply_text = "Yes, I received your message. I'm listening."
-                    elif conversational_text in {"yes", "yes please", "yeah", "yep", "sure"}:
-                        reply_text = "Understood. Please state the action you want me to perform."
-                    else:
-                        reply_text = "Understood. I'm ready for your next command."
+                    reply_text = local_reply
                     pending_actions = []
                     action_ok = True
                     action_error = None
 
                 else:
+                    planning_started = time.perf_counter()
                     reply_text, pending_actions = await brain.process_intent(
                         prompt,
                         task_id,
@@ -2524,10 +2638,13 @@ async def main():
                     # PHYSICAL ACTION EXECUTION
                     # -------------------------------------------------
 
+                    print(f"[BRAIN TIMING] [task={task_id}] plan_and_prepare_seconds={time.perf_counter() - planning_started:.3f}", flush=True)
+                    execution_started = time.perf_counter()
                     action_ok, action_error = await brain._run_pending_actions(
                         pending_actions,
                         task_id,
                     )
+                    print(f"[BRAIN TIMING] [task={task_id}] execution_seconds={time.perf_counter() - execution_started:.3f}", flush=True)
                     if brain.last_plan_error:
                         action_ok = False
                         action_error = brain.last_plan_error
@@ -2573,7 +2690,7 @@ async def main():
 
                 log_chat("assistant", reply_text)
 
-                if not is_task_status_request(prompt) and not is_conversational_only(prompt):
+                if local_reply is None:
                     final_status = "completed" if action_ok else "failed"
                     update_task(
                         task_id,
@@ -2597,6 +2714,7 @@ async def main():
                         "text": reply_text,
                         "speech": reply_text,
                         "taskId": task_id,
+                        "requestId": data.get("requestId") if isinstance(data.get("requestId"), str) else None,
                         "execution": {
                             "success": action_ok,
                             "error": action_error,

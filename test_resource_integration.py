@@ -65,6 +65,26 @@ def make_brain(tmp_path, monkeypatch, model_calls):
     return brain
 
 
+def test_polite_script_bypasses_model_and_preserves_target(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    async def forbidden_model(**kwargs):
+        pytest.fail('Explicit polite script request must not reach the model')
+    brain.ollama.chat = forbidden_model
+    async def run():
+        _, actions = await brain.process_intent('Okay, can you run Ultron smoke script?', 'polite')
+        assert len(actions) == 1
+        assert actions[0].name == 'operate_resource:run_script:Ultron smoke script'
+    asyncio.run(run())
+
+
+def test_model_extension_correction_never_stages_execution(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [call('run_script', 'report.py')])
+    async def run():
+        _, actions = await brain.process_intent('Run report.py5.', 'extension')
+        assert actions == []
+    asyncio.run(run())
+
+
 def test_script_is_staged_then_completed_from_real_exit_code(tmp_path, monkeypatch):
     script = tmp_path / 'sample.py'
     marker = tmp_path / 'ran.txt'
@@ -132,7 +152,7 @@ def test_known_application_plan_still_uses_existing_broker(tmp_path, monkeypatch
     async def open_resource(target, **kwargs):
         targets.append(target)
         return SimpleNamespace(success=True, message='running', error=None, data={'verification': {'running': True}})
-    brain.capabilities = SimpleNamespace(open_resource=open_resource)
+    brain.capabilities = SimpleNamespace(open_resource=open_resource, resources=SimpleNamespace(resolve=lambda target: SimpleNamespace(kind="application")))
     async def run():
         _, actions = await brain.process_intent('Open calculator.', 'task')
         assert not targets
@@ -168,4 +188,209 @@ def test_actual_misheard_editor_request_never_reaches_model(tmp_path, monkeypatc
         reply, actions = await brain.process_intent('Open Ultron smoke note and not pad.', 'task')
         assert not actions and brain.last_plan_error
         assert 'Notepad' in reply and 'Forza' not in reply
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('prompt', ['Okay, sure. Thank you.', 'Yes, thanks.',
+    'Are there any errors?', 'How is your technology stack that you are built on?'])
+def test_local_replies_do_not_infer_or_create_tasks(tmp_path, monkeypatch, prompt):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    async def forbidden(**kwargs):
+        pytest.fail('Local replies must not call the model')
+    def forbidden_task(*args, **kwargs):
+        pytest.fail('Local replies must not overwrite task evidence')
+    brain.ollama.chat = forbidden
+    monkeypatch.setattr('brain_agent.create_task', forbidden_task)
+    monkeypatch.setattr('brain_agent.get_latest_task', lambda: None)
+    reply, actions = asyncio.run(brain.process_intent(prompt, 'local'))
+    assert reply and actions == []
+    assert brain.last_replay_plan is None
+
+
+def test_health_reply_reports_failure_without_global_health_claim(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    monkeypatch.setattr('brain_agent.get_latest_task', lambda: {
+        'status': 'failed', 'prompt': 'Open example', 'error_text': 'Application missing'})
+    reply = brain._compose_local_reply('Are there any errors?')
+    assert 'not run a full system health check' in reply
+    assert 'failed' in reply and 'Application missing' in reply
+    assert 'No errors detected' not in reply
+
+
+def test_stack_reply_uses_configured_model(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    monkeypatch.setattr('brain_agent.MODEL_NAME', 'test-model')
+    reply = brain._compose_local_reply('What model are you using?')
+    assert 'test-model' in reply and 'Ollama' in reply and 'NATS' in reply
+    assert 'not disclosed' not in reply
+
+
+def test_plain_answer_uses_one_model_call_and_retains_history(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    calls = []
+    async def chat(**kwargs):
+        calls.append(kwargs)
+        return {'message': {'content': 'A queue stores items for processing.', 'tool_calls': []}}
+    brain.ollama.chat = chat
+    reply, actions = asyncio.run(brain.process_intent('What is a queue?', 'question'))
+    assert len(calls) == 1 and actions == []
+    assert reply == 'A queue stores items for processing.'
+    assert brain.history[-1] == {'role': 'assistant', 'content': reply}
+
+
+def test_read_tool_still_gets_followup_with_evidence(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    calls = []
+    (tmp_path / 'note.txt').write_text('Actual note contents')
+    async def chat(**kwargs):
+        calls.append(kwargs)
+        assert kwargs['diagnostic_phase'] == 'followup'
+        assert any(m['role'] == 'tool' and 'Actual note contents' in m['content']
+                   for m in kwargs['messages'])
+        return {'message': {'content': 'The note says: Actual note contents'}}
+    brain.ollama.chat = chat
+    reply, actions = asyncio.run(brain.process_intent(f'Read {tmp_path / "note.txt"}', 'read'))
+    assert len(calls) == 1 and actions == []
+    assert 'Actual note contents' in reply
+
+
+@pytest.mark.parametrize('prompt', ['Okay, are there any errors?', 'technology stack.',
+                                   'What is my uptime?'])
+def test_grounded_variants_do_not_call_model(tmp_path, monkeypatch, prompt):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    async def forbidden(**kwargs):
+        pytest.fail('Grounded requests must not call a model')
+    brain.ollama.chat = forbidden
+    monkeypatch.setattr('brain_agent.get_latest_task', lambda: None)
+    reply, actions = asyncio.run(brain.process_intent(prompt, 'grounded'))
+    assert reply and not actions
+    assert 'proprietary' not in reply and 'No errors detected' not in reply
+
+
+def test_model_selected_telemetry_is_reported_without_invented_followup(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    calls = []
+    async def chat(**kwargs):
+        calls.append(kwargs)
+        assert len(calls) == 1
+        return {'message': {'content': '', 'tool_calls': [
+            {'function': {'name': 'get_system_telemetry', 'arguments': {}}}]}}
+    brain.ollama.chat = chat
+    monkeypatch.setattr('brain_agent.collect_telemetry', lambda: {
+        'cpu_percent': 5, 'memory_percent': 90, 'uptime_seconds': 3600,
+        'battery_percent': 80, 'power_plugged': True})
+    reply, actions = asyncio.run(brain.process_intent('How long has this computer been running?', 'telemetry'))
+    assert '1 hour' in reply and 'Battery: 80%' in reply and 'Power: plugged in' in reply
+    assert len(calls) == 1 and not actions
+
+
+@pytest.mark.parametrize('connected', [True, False, None])
+def test_live_error_phrase_uses_status_evidence_without_model(tmp_path, monkeypatch, connected):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    brain.nc = SimpleNamespace(is_connected=connected)
+    monkeypatch.setattr('brain_agent.get_latest_task', lambda: {
+        'task_id': 'failed-task', 'status': 'failed', 'error_text': 'File missing'})
+    async def forbidden(**kwargs):
+        pytest.fail('Known health question should not infer')
+    brain.ollama.chat = forbidden
+    reply, actions = asyncio.run(brain.process_intent('Okay, and are there any errors?', 'health'))
+    assert 'File missing' in reply and 'failed' in reply and not actions
+    expected = 'connected' if connected is True else 'disconnected' if connected is False else 'unknown'
+    assert f'NATS connection is {expected}' in reply
+    assert 'microphone and speaker health are unverified' in reply
+
+
+def test_model_health_tool_excludes_current_request_and_skips_synthesis(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    calls = []
+    async def chat(**kwargs):
+        calls.append(kwargs)
+        assert len(calls) == 1
+        return {'message': {'content': '', 'tool_calls': [
+            {'function': {'name': 'get_runtime_status', 'arguments': {}}}]}}
+    def latest(exclude_task_id=None):
+        assert exclude_task_id == 'health-question'
+        return {'status': 'failed', 'error_text': 'Previous execution failed'}
+    monkeypatch.setattr('brain_agent.get_latest_task', latest)
+    brain.ollama.chat = chat
+    reply, actions = asyncio.run(brain.process_intent('Check whether Ultron has a problem.', 'health-question'))
+    assert 'Previous execution failed' in reply and len(calls) == 1 and not actions
+    assert 'another method' not in reply
+
+
+def test_uptime_only_reply_omits_unrequested_metrics(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    monkeypatch.setattr('brain_agent.collect_telemetry', lambda: {
+        'uptime_seconds': 116880, 'cpu_percent': 1, 'memory_percent': 87,
+        'battery_percent': 80, 'power_plugged': True})
+    reply, actions = asyncio.run(brain.process_intent('What is my uptime?', 'uptime'))
+    assert reply == 'System uptime: 1 day, 8 hours, 28 minutes.'
+    assert not actions
+
+
+def test_health_db_failure_is_explicit(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    def fail():
+        raise OSError('private database details')
+    monkeypatch.setattr('brain_agent.get_latest_task', fail)
+    reply = brain._compose_local_reply('Are there any errors?')
+    assert 'task history is unavailable' in reply
+    assert 'private database' not in reply
+
+
+@pytest.mark.parametrize('prompt', [
+    'Okay then, can you open calculator and file explorer for me?',
+    'Can you open the calculator and file explorer?',
+    'Please open the calculator and the file explorer.',
+])
+def test_support_bundle_app_requests_bypass_model(tmp_path, monkeypatch, prompt):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    async def forbidden(**kwargs):
+        pytest.fail('Known application list must not require model inference')
+    brain.ollama.chat = forbidden
+    _, actions = asyncio.run(brain.process_intent(prompt, 'apps'))
+    assert [a.name for a in actions] == ['open_application:Calculator', 'open_application:File Explorer']
+
+
+def test_support_bundle_uptime_paraphrase_is_concise(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    monkeypatch.setattr('brain_agent.collect_telemetry', lambda: {'uptime_seconds': 3600})
+    assert brain._compose_local_reply('Where is my uptime?') == 'System uptime: 1 hour.'
+
+
+def test_model_can_request_uptime_only(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [
+        {'function': {'name': 'get_system_telemetry', 'arguments': {'metric': 'uptime'}}}])
+    monkeypatch.setattr('brain_agent.collect_telemetry', lambda: {'uptime_seconds': 60, 'cpu_percent': 5})
+    reply, actions = asyncio.run(brain.process_intent('How long has this computer been running?', 'uptime-model'))
+    assert reply == 'System uptime: 1 minute.' and not actions
+
+
+def test_garbled_live_transcript_cannot_stage_hallucinated_apps(tmp_path, monkeypatch):
+    calls = [{'function': {'name': 'open_application', 'arguments': {'app_name': name}}}
+             for name in ['File Explorer', 'Calculator', 'Two things']]
+    brain = make_brain(tmp_path, monkeypatch, calls)
+    reply, actions = asyncio.run(brain.process_intent('Annual pull, file explorer, calculator and two things.', 'garbled-live'))
+    assert actions == [] and brain.last_plan_error
+    assert 'No actions were started' in reply
+
+
+def test_model_list_preflights_unknown_app_before_any_launch(tmp_path, monkeypatch):
+    calls = [{'function': {'name': 'open_application', 'arguments': {'app_name': name}}}
+             for name in ['Calculator', 'MissingApp']]
+    brain = make_brain(tmp_path, monkeypatch, calls)
+    launched = []
+    def resolve(target):
+        if target == 'MissingApp':
+            raise ValueError('not installed')
+        return SimpleNamespace(kind='application')
+    async def open_resource(target, **kwargs):
+        launched.append(target)
+    brain.capabilities = SimpleNamespace(open_resource=open_resource, resources=SimpleNamespace(resolve=resolve))
+    async def run():
+        _, actions = await brain.process_intent('Run calculator and MissingApp.', 'unknown-live')
+        assert len(actions) == 2
+        ok, error = await brain._run_pending_actions(actions, 'unknown-live')
+        assert not ok and 'No actions were started' in error
+        assert launched == []
     asyncio.run(run())
