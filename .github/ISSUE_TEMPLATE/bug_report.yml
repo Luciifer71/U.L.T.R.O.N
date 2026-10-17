@@ -1,0 +1,26 @@
+name: Bug report
+description: Report a reproducible Ultron problem
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: "Do not attach credentials, private transcripts or unreviewed support ZIPs. Use a synthetic example where possible."
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Request, expected result and actual result
+      description: Include the exact typed request or a redacted transcription.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python, model and commit; note whether the input was typed or spoken.
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: Acceptance result or minimal reproduction
+      description: Include a concise result and steps. Review logs before sharing.

@@ -98,6 +98,10 @@ def validate_application_targets(prompt: str, calls: list[dict]) -> str | None:
     planned = set()
     for call in calls:
         function = call.get("function", {})
+        if function.get('name') == 'find_and_open_file':
+            expected = explicit_file_plan(prompt)
+            if not expected or function != expected[0]['function']:
+                return 'Please specify the file title and folder directly. No actions were started.'
         if function.get('name') in {'operate_resource', 'run_python_script'}:
             error = validate_resource_target(prompt, function)
             if error:
@@ -206,6 +210,26 @@ def validate_resource_target(prompt: str, function: dict) -> str | None:
 
 class PlanClarification(ValueError):
     """An explicit launch list could not be parsed completely."""
+
+
+def explicit_file_plan(prompt: str) -> list[dict] | None:
+    """A named file/title plus a named user folder; no inferred folder scope."""
+    text = prompt.strip().rstrip('.!?')
+    folders = r'(downloads|documents|desktop|videos|music|pictures)'
+    patterns = [
+        REQUEST_PREFIX + r'(open|play)\s+(?:the\s+)?(?:movie\s+|video\s+|song\s+|file\s+|document\s+)?(.+?)\s+(?:from|in)\s+(?:my\s+|the\s+)?' + folders + r'(?:\s+folder)?(?:\s+for me)?',
+        REQUEST_PREFIX + r'access\s+(?:my\s+|the\s+)?' + folders + r'(?:\s+folder)?\s+and\s+(open|play)\s+(?:the\s+)?(?:movie\s+|video\s+|song\s+|file\s+|document\s+)?(.+?)(?:\s+for me)?',
+    ]
+    for index, pattern in enumerate(patterns):
+        match = re.fullmatch(pattern, text, re.I)
+        if not match:
+            continue
+        verb, query, folder = match.groups() if index == 0 else (match.group(2), match.group(3), match.group(1))
+        query = query.strip().strip('"')
+        if not query or re.search(r"\b(?:if|unless|don't|do not|never)\b|\band\s+(?:open|play|run|delete|launch)\b", query, re.I):
+            return None
+        return [_call('find_and_open_file', query=query, folder=folder.casefold(), media_only=verb.casefold() == 'play')]
+    return None
 
 
 def explicit_resource_plan(prompt: str) -> list[dict] | None:

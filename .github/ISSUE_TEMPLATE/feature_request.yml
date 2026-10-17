@@ -1,0 +1,16 @@
+name: Workflow request
+description: Propose a useful local-first workflow
+title: "[Workflow]: "
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: What should the user be able to accomplish?
+      description: Give an example command and the expected observable outcome.
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Scope and constraints
+      description: Which platform, apps and files are involved? Can it work without paid APIs?
