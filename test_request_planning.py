@@ -224,3 +224,34 @@ def test_article_does_not_hide_unknown_application():
     from ultron_control.request_planning import explicit_launch_plan, PlanClarification
     with pytest.raises(PlanClarification):
         explicit_launch_plan('Open the mystery app and calculator')
+
+
+@pytest.mark.parametrize('prompt', [
+    'Open file, explorer and calculator.',
+    'Open the file, explorer and the calculator.',
+    'Open microsoft, edge, calculator and file, explorer.',
+])
+def test_comma_inside_known_application_name(prompt):
+    calls = explicit_launch_plan(prompt)
+    assert calls
+    assert calls[-1]['function']['arguments']['app_name'] in {'Calculator', 'File Explorer'}
+    assert all(call['function']['name'] == 'open_application' for call in calls)
+
+
+def test_alias_comma_does_not_consume_search_query():
+    calls = explicit_launch_plan('Open file, explorer and search on youtube cats, dogs')
+    assert calls[0]['function']['arguments']['app_name'] == 'File Explorer'
+    assert calls[1]['function']['arguments']['query'] == 'cats, dogs'
+
+
+@pytest.mark.parametrize('prompt', [
+    'Open file, mystery explorer and calculator.',
+    'Open file, explorer and calculator,',
+])
+def test_alias_comma_keeps_unknown_or_incomplete_list_rejected(prompt):
+    with pytest.raises(PlanClarification):
+        explicit_launch_plan(prompt)
+
+
+def test_alias_comma_preserves_negation_guard():
+    assert explicit_launch_plan('Open file, explorer but do not open calculator.') is None

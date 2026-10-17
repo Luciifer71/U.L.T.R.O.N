@@ -45,3 +45,15 @@ Windows user-directory names, but is best effort: spoken commands, replies,
 filenames and other personal content can remain. Inspect the archive before
 sharing. Nothing is uploaded automatically. Runtime logs and bundles stay under
 the git-ignored `runtime/` directory.
+
+The diagnostic report also includes the ten largest processes by resident memory
+(RSS), with process name, PID and bytes. It excludes command lines, executable
+paths and environment variables. Process names can still reveal running apps.
+RSS can include shared pages and is not GPU memory; do not sum these rows as an
+exact explanation of total RAM usage. Inaccessible or exited processes are skipped.
+
+Audio-discard warnings identify driver status, frame-sequence gaps or application
+mailbox overflow where known. The mailbox dropped-frame count is cumulative and
+covers only Ultron's queue: zero does not exclude loss reported by the audio driver.
+A warning pertains to the affected capture, not necessarily a complete utterance
+already submitted for transcription.

@@ -56,6 +56,30 @@ def check_nats(url):
         return {"status": "unavailable", "reason": type(exc).__name__}
 
 
+def collect_process_memory(limit=10):
+    """Read names and RSS only, never command lines, paths or environment."""
+    import psutil
+    rows = []
+    skipped = 0
+    try:
+        for process in psutil.process_iter(["pid", "name", "memory_info"], ad_value=None):
+            try:
+                info = process.info
+                memory = info.get("memory_info")
+                if memory is None:
+                    skipped += 1
+                    continue
+                rows.append({"pid": info["pid"], "name": info.get("name"),
+                             "rss_bytes": memory.rss})
+            except (psutil.Error, OSError):
+                skipped += 1
+    except (psutil.Error, OSError) as exc:
+        return {"status": "unavailable", "reason": type(exc).__name__}
+    rows.sort(key=lambda row: row["rss_bytes"], reverse=True)
+    return {"status": "ok", "top_processes": rows[:limit], "skipped": skipped,
+            "scope": "RSS snapshot; shared pages can be counted in multiple processes. Not GPU memory or total system RAM attribution. Names and PIDs only; no paths or command lines."}
+
+
 def build_report(model):
     packages = {}
     for name in ("psutil", "ollama", "nats-py", "faster-whisper", "ctranslate2", "sounddevice", "edge-tts", "pytest"):
@@ -75,6 +99,7 @@ def build_report(model):
         "configured_model": model,
         "packages": packages,
         "telemetry": telemetry,
+        "process_memory": collect_process_memory(),
         "services": {
             "ollama": check_ollama(os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434"), model),
             "nats": check_nats(os.getenv("NATS_URL", "nats://127.0.0.1:4222")),

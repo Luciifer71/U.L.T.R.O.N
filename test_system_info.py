@@ -48,3 +48,17 @@ def test_model_inventory_does_not_claim_inference(monkeypatch):
 def test_uptime_zero_and_missing_are_explicit():
     assert system_info.format_uptime({'uptime_seconds': 0}) == 'System uptime: less than a minute.'
     assert system_info.format_uptime({}) == 'System uptime: unavailable.'
+
+
+def test_process_memory_is_sorted_bounded_and_omits_sensitive_fields(monkeypatch):
+    def processes(attrs, ad_value):
+        assert attrs == ['pid', 'name', 'memory_info']
+        return [SimpleNamespace(info={'pid': i, 'name': 'app',
+                 'memory_info': SimpleNamespace(rss=i * 100), 'cmdline': 'secret'})
+                for i in range(12)] + [SimpleNamespace(info={'memory_info': None})]
+    monkeypatch.setattr(system_info.psutil, 'process_iter', processes)
+    result = diagnostics.collect_process_memory()
+    assert len(result['top_processes']) == 10
+    assert result['top_processes'][0] == {'pid': 11, 'name': 'app', 'rss_bytes': 1100}
+    assert result['skipped'] == 1
+    assert 'secret' not in str(result)

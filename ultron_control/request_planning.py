@@ -285,11 +285,15 @@ def explicit_launch_plan(prompt: str) -> list[dict] | None:
     calls = []
     remaining = remainder.lower()
     while remaining:
-        # Articles are grammar only before a known application alias.
-        article_target = remaining[4:] if remaining.startswith("the ") else remaining
-        if any(article_target == name or article_target.startswith(name + " ") or article_target.startswith(name + ",") for name in aliases):
-            remaining = article_target
-        alias = next((name for name in aliases if remaining == name or remaining.startswith(name + " ") or remaining.startswith(name + ",")), None)
+        # Permit an ASR comma only between words of a known alias. Keep
+        # application-list commas, file paths and search queries untouched.
+        candidate = remaining[4:] if remaining.startswith("the ") else remaining
+        matches = [(name, re.match(
+            r"\s*,?\s+".join(re.escape(word) for word in name.split()) + r"(?=$|[ ,])",
+            candidate,
+        )) for name in aliases]
+        matched = next(((name, match) for name, match in matches if match), None)
+        alias = matched[0] if matched else None
         if alias is None:
             if not calls:
                 # A garbled first name must not hide later explicit app names
@@ -312,7 +316,7 @@ def explicit_launch_plan(prompt: str) -> list[dict] | None:
                 f"Please clarify this part: '{remaining}'. No actions were started."
             )
         calls.append(_call("open_application", app_name=APPLICATION_ALIASES[alias]))
-        remaining = remaining[len(alias):].lstrip()
+        remaining = candidate[matched[1].end():].lstrip()
         if remaining.startswith(","):
             remaining = remaining[1:].lstrip()
             if not remaining:

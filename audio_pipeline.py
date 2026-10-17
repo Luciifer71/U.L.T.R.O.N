@@ -68,6 +68,7 @@ class AudioFrame:
     sequence: int
     muted: bool = False
     discontinuity: bool = False
+    discontinuity_reason: str | None = None
 
 
 class AudioMailbox:
@@ -95,7 +96,7 @@ class AudioMailbox:
             if len(self._frames) >= self.capacity:
                 self.dropped_frames += len(self._frames)
                 self._frames.clear()
-                frame = replace(frame, discontinuity=True)
+                frame = replace(frame, discontinuity=True, discontinuity_reason="application mailbox overflow")
             self._frames.append(frame)
             notify = not self._notified
             self._notified = True
@@ -181,7 +182,8 @@ class UtteranceSegmenter:
         if now - frame.captured_at > self.max_backlog_seconds:
             return self._reject("audio backlog exceeded the latency limit")
         if frame.discontinuity or gap:
-            return self._reject("microphone audio was lost")
+            reason = frame.discontinuity_reason or ("capture status flag" if frame.discontinuity else "frame sequence gap")
+            return self._reject(f"microphone audio was lost ({reason})")
         count = len(frame.samples)
         if self.discarding:
             self.quiet_samples = 0 if speech else self.quiet_samples + count

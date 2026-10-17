@@ -235,3 +235,12 @@ def test_cancelled_transcription_never_publishes_late_native_result():
         finally:
             release.set()
     asyncio.run(run())
+
+
+def test_audio_driver_reason_survives_segment_rejection():
+    engine = segmenter()
+    frame = AudioFrame([1, 1], 100, 1, discontinuity=True,
+                       discontinuity_reason='audio driver: input overflow')
+    result = engine.feed(frame, speech=True, now=100)
+    assert 'audio driver: input overflow' in result.discarded_reason
+    assert result.blocks is None

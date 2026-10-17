@@ -204,6 +204,7 @@ class ResilientAudioStream:
             sequence=self._sequence,
             muted=bool(self.gate and self.gate.is_speaking),
             discontinuity=bool(status),
+            discontinuity_reason=f"audio driver: {status}" if status else None,
         )
         self.queue.push(frame)
 
@@ -807,7 +808,7 @@ async def main():
             )
             if segment.discarded_reason:
                 logging.warning(
-                    "[AUDIO DISCARD]: %s; repeat the complete command. Dropped frames=%s",
+                    "[AUDIO DISCARD]: %s; affected capture discarded. Application mailbox dropped frames (cumulative)=%s",
                     segment.discarded_reason, audio_queue.dropped_frames,
                 )
                 if is_active_session:
