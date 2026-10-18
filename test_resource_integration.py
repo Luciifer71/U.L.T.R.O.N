@@ -522,6 +522,8 @@ def test_unoffered_or_compound_choice_does_not_dispatch(tmp_path, monkeypatch, c
 
 
 @pytest.mark.parametrize('prompt,expected', [
+    ('check my emails', 'Not connected'),
+    ('check my calendar', 'Not connected'),
     ('What time is it?', 'local time'),
     ("What is today's date?", 'local date'),
     ('How much disk space is free?', 'Other volumes were not checked'),
@@ -529,6 +531,8 @@ def test_unoffered_or_compound_choice_does_not_dispatch(tmp_path, monkeypatch, c
 ])
 def test_local_facts_never_call_model_or_stage_actions(tmp_path, monkeypatch, prompt, expected):
     brain = make_brain(tmp_path, monkeypatch, [])
+    from ultron_control.google_updates import GoogleUpdates
+    brain.google_updates = GoogleUpdates(tmp_path)
     async def forbidden(**kwargs):
         pytest.fail('Local facts must not invoke model')
     brain.ollama.chat = forbidden

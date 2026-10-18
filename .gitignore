@@ -41,3 +41,8 @@ test_long_action.py
 .idea/
 "@ | Set-Content .gitignore
 runtime/
+
+# Google desktop client files must stay local
+client_secret*.json
+credentials.json
+token.json

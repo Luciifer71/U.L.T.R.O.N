@@ -61,6 +61,7 @@ from visual_events import publish_visual_event
 from ultron_control.system_info import collect_telemetry, format_telemetry, format_uptime, format_runtime_status
 from ultron_control.capability_broker import CapabilityBroker
 from ultron_control.local_facts import clock_reply, disk_reply, capabilities_reply
+from ultron_control.google_updates import GoogleUpdates, request_kind as google_request_kind
 from ultron_control.request_planning import explicit_launch_plan, explicit_resource_plan, PlanClarification, validate_application_targets
 from ultron_resources.config import create_service as create_resource_service
 from ultron_resources.file_workflow import prepare_file, open_prepared_file, FileSelectionRequired, selection_number, MEDIA
@@ -991,6 +992,7 @@ class UltronBrain:
     def __init__(self, nc: NATS):
 
         self.nc = nc
+        self.google_updates = GoogleUpdates()
 
         self.ollama = OllamaRuntime(
 
@@ -1154,6 +1156,9 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
         return snapshot
 
     def _compose_local_reply(self, prompt: str) -> str | None:
+        google_kind = google_request_kind(prompt)
+        if google_kind:
+            return self.google_updates.reply(google_kind)
         kind = local_information_kind(prompt)
         if kind in {'clock', 'date'}:
             return clock_reply(kind)
@@ -2882,6 +2887,11 @@ async def main():
                     task_id=task_id,
                 )
 
+    async def google_notify(text):
+        await nc.publish("ultron.voice", json.dumps({"text": text, "speech": text}).encode())
+
+    google_worker = asyncio.create_task(brain.google_updates.run(google_notify))
+
     await nc.subscribe(
 
         "ultron.intent",
@@ -2919,8 +2929,11 @@ async def main():
 
 
     finally:
-
-
+        google_worker.cancel()
+        try:
+            await google_worker
+        except asyncio.CancelledError:
+            pass
 
         print(
 

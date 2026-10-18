@@ -1,0 +1,5 @@
+# Optional Windows Google account integration; no paid model API.
+google-api-python-client>=2.150,<3
+google-auth-oauthlib>=1.2,<2
+google-auth-httplib2>=0.2,<1
+keyring>=25,<26
