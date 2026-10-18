@@ -892,3 +892,12 @@ answers use the computer's configured timezone; disk space covers the volume
 containing your home folder. These commands do not connect email, calendars or
 reminders. See the [my-jarvis review and adopted ideas](docs/my-jarvis-review.md)
 for the comparison that motivated this addition.
+
+### Optional Google email and calendar updates
+
+Read-only Gmail scanning and primary-calendar updates can run in the background
+while Ultron is open. One-time Google consent is required; accounts are not connected
+automatically by installation. Uses optional Google API/auth libraries and Windows
+Credential Manager via keyring, without a paid model API. See
+[setup, privacy and coverage limits](docs/google-updates.md) and the
+[development to-do list](docs/development-todo.md).

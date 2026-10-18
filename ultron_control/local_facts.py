@@ -37,5 +37,5 @@ def capabilities_reply():
         'I can offer numbered file choices and run up to five explicit app/file steps separated by then. '
         'I can also report local time, date and home-volume disk space. '
         'Availability depends on this computer and its configuration. '
-        'Email access, iPhone calls, smart-home control and scheduled reminders are not connected.'
+        'Read-only email and calendar updates require optional Google setup. iPhone calls, smart-home control and scheduled reminders are not connected.'
     )
