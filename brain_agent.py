@@ -60,6 +60,7 @@ from visual_events import publish_visual_event
 
 from ultron_control.system_info import collect_telemetry, format_telemetry, format_uptime, format_runtime_status
 from ultron_control.capability_broker import CapabilityBroker
+from ultron_control.reply_delivery import IntentInbox
 from ultron_control.local_facts import clock_reply, disk_reply, capabilities_reply
 from ultron_control.google_updates import GoogleUpdates, request_kind as google_request_kind
 from ultron_control.request_planning import explicit_launch_plan, explicit_resource_plan, PlanClarification, validate_application_targets
@@ -1158,7 +1159,7 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
     def _compose_local_reply(self, prompt: str) -> str | None:
         google_kind = google_request_kind(prompt)
         if google_kind:
-            return self.google_updates.reply(google_kind)
+            return self.google_updates.spoken_reply(google_kind)
         kind = local_information_kind(prompt)
         if kind in {'clock', 'date'}:
             return clock_reply(kind)
@@ -2888,15 +2889,17 @@ async def main():
                 )
 
     async def google_notify(text):
-        await nc.publish("ultron.voice", json.dumps({"text": text, "speech": text}).encode())
+        await nc.publish("ultron.voice", json.dumps({"text": text, "speech": text, "statusKey": "google-background", "speechTtl": 20}).encode())
 
     google_worker = asyncio.create_task(brain.google_updates.run(google_notify))
 
+    inbox = IntentInbox(brain, nc, intent_handler, google_request_kind)
+    intent_worker = asyncio.create_task(inbox.run())
     await nc.subscribe(
 
         "ultron.intent",
 
-        cb=intent_handler,
+        cb=inbox.receive,
 
     )
 
@@ -2929,6 +2932,11 @@ async def main():
 
 
     finally:
+        intent_worker.cancel()
+        try:
+            await intent_worker
+        except asyncio.CancelledError:
+            pass
         google_worker.cancel()
         try:
             await google_worker
