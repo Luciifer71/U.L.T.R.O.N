@@ -193,6 +193,9 @@ def test_main_routes_complete_utterance_and_cleans_up_on_cancel(listener, monkey
                 pass
             async def subscribe(self, *args, **kwargs):
                 pass
+            async def request(self, *args, **kwargs):
+                from types import SimpleNamespace
+                return SimpleNamespace(data=b'{"speaking": false, "version": 0}')
             async def publish(self, subject, payload):
                 if subject == "ultron.intent":
                     calls.append(json.loads(payload))
@@ -269,3 +272,17 @@ def test_uncertain_segment_rejects_whole_command(listener, monkeypatch, metrics)
     model.transcribe = lambda *a, **k: (iter([SimpleNamespace(text='Open calculator.', avg_logprob=-0.2, compression_ratio=1.2)]), None)
     assert engine.transcribe(np.ones(16000)) == 'Open calculator.'
     assert engine.last_rejection is None
+
+
+def test_gate_starts_muted_and_rejects_stale_idle_snapshot(listener):
+    async def run():
+        gate = listener.AcousticGate()
+        assert gate.is_speaking
+        await gate.set_speaking(False, 10)
+        assert not gate.is_speaking
+        await gate.set_speaking(True, 12)
+        await gate.set_speaking(False, 11)
+        assert gate.is_speaking
+        await gate.set_speaking(False, 13)
+        assert not gate.is_speaking
+    asyncio.run(run())

@@ -101,11 +101,16 @@ class AcousticGate:
     """
 
     def __init__(self):
-        self._is_speaking = False
+        self._is_speaking = True
+        self._version = -1
         self._lock = asyncio.Lock()
 
-    async def set_speaking(self, status: bool):
+    async def set_speaking(self, status: bool, version=None):
         async with self._lock:
+            if version is not None and version < self._version:
+                return
+            if version is not None:
+                self._version = version
             self._is_speaking = status
 
     @property
@@ -451,47 +456,37 @@ async def main():
     # TTS SPEAKING STATE
     # =====================================================
 
+    async def apply_speaking(data):
+        state = data.get("speaking", True)
+        version = data.get("version")
+        if not state:
+            await asyncio.sleep(POST_TTS_BUFFER_PADDING)
+        await acoustic_gate.set_speaking(bool(state), version)
+
     async def status_speaking_handler(msg):
-
         try:
+            await apply_speaking(json.loads(msg.data.decode()))
+        except Exception:
+            await acoustic_gate.set_speaking(True)
 
-            data = json.loads(
-                msg.data.decode()
-            )
+    await nc.subscribe("ultron.status.speaking", cb=status_speaking_handler)
 
-            speaking_state = data.get(
-                "speaking",
-                False,
-            )
+    async def refresh_speaking():
+        try:
+            state = await nc.request("ultron.voice.state", b"{}", timeout=1)
+            await apply_speaking(json.loads(state.data.decode()))
+        except Exception:
+            # Fail muted if the speaker state is unknown; do not transcribe our TTS.
+            await acoustic_gate.set_speaking(True)
 
-            if speaking_state:
+    await refresh_speaking()
 
-                await acoustic_gate.set_speaking(
-                    True
-                )
+    async def monitor_speaker():
+        while True:
+            await asyncio.sleep(1)
+            await refresh_speaking()
 
-            else:
-
-                await asyncio.sleep(
-                    POST_TTS_BUFFER_PADDING
-                )
-
-                await acoustic_gate.set_speaking(
-                    False
-                )
-
-        except Exception as e:
-
-            logging.error(
-                f"[STATUS EVENT ERROR]: {e}"
-            )
-
-
-    await nc.subscribe(
-        "ultron.status.speaking",
-        cb=status_speaking_handler,
-    )
-
+    speaker_monitor = asyncio.create_task(monitor_speaker())
 
     # =====================================================
     # AUDIO ENGINE
@@ -507,6 +502,8 @@ async def main():
         stream_manager.start()
         silence_threshold = await calibrate_ambient_noise(audio_queue)
     except Exception:
+        speaker_monitor.cancel()
+        await asyncio.gather(speaker_monitor, return_exceptions=True)
         audio_queue.close()
         if stream_manager.stream is not None:
             stream_manager.stream.stop()
@@ -883,6 +880,8 @@ async def main():
             pass
         except Exception:
             logging.exception("[STT WORKER]: worker stopped after failure")
+        speaker_monitor.cancel()
+        await asyncio.gather(speaker_monitor, return_exceptions=True)
         audio_queue.close()
 
         if stream_manager.stream:

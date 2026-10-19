@@ -1,0 +1,72 @@
+"""Exercise actual daemon cancellation without a speaker or external TTS."""
+import asyncio
+import importlib.util
+import json
+from pathlib import Path
+import sys
+from types import SimpleNamespace
+import pytest
+
+
+@pytest.fixture
+def daemon_module(monkeypatch):
+    music = SimpleNamespace(load=lambda _: None, play=lambda: None,
+                            get_busy=lambda: True, stop=lambda: None)
+    monkeypatch.setitem(sys.modules, 'pygame', SimpleNamespace(mixer=SimpleNamespace(init=lambda **kw: None, music=music)))
+    monkeypatch.setitem(sys.modules, 'edge_tts', SimpleNamespace())
+    spec = importlib.util.spec_from_file_location('testable_action_daemon', Path(__file__).with_name('action_daemon.py'))
+    module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    return module
+
+
+def test_cancel_stops_playback_and_releases_speaking_state(daemon_module):
+    module = daemon_module
+    async def run():
+        states, stopped = [], []
+        started = asyncio.Event()
+        async def publish(subject, payload): states.append(json.loads(payload)['speaking'])
+        async def flush(): pass
+        class Communicate:
+            def __init__(self, *args, **kwargs): pass
+            async def stream(self): yield {'type':'audio','data':b'audio'}
+        module.edge_tts.Communicate = Communicate
+        module.pygame.mixer.music.play = started.set
+        module.pygame.mixer.music.stop = lambda: stopped.append(True)
+        voice = module.UltronVoiceEngine(SimpleNamespace(is_connected=True, publish=publish, flush=flush), asyncio.get_running_loop())
+        task = asyncio.create_task(voice.speak_and_wait('test'))
+        await asyncio.wait_for(started.wait(), 1)
+        assert voice.speaking and states == [True]
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError): await task
+        assert stopped and states == [True, False] and not voice.speaking
+    asyncio.run(run())
+
+
+def test_daemon_registers_snapshot_before_startup_speech(daemon_module):
+    module = daemon_module
+    async def run():
+        handlers, replies = {}, []
+        class Nats:
+            is_connected = True
+            async def connect(self, *a): pass
+            async def subscribe(self, subject, cb): handlers[subject] = cb
+            async def flush(self): pass
+            async def close(self): pass
+            async def publish(self, subject, payload): replies.append((subject,json.loads(payload)))
+        daemon = module.ActionDaemon(); daemon.nc = Nats()
+        class Voice:
+            speaking = True
+            state_version = 123
+            def __init__(self, *a, **kw): pass
+            async def speak_and_wait(self, text):
+                assert 'ultron.voice.state' in handlers
+                await asyncio.Event().wait()
+        module.UltronVoiceEngine = Voice
+        task = asyncio.create_task(daemon.start())
+        for _ in range(10): await asyncio.sleep(0)
+        await handlers['ultron.voice.state'](SimpleNamespace(reply='reply'))
+        assert replies[-1] == ('reply', {'speaking': True, 'version':123})
+        await handlers['ultron.voice.cancel'](SimpleNamespace())
+        daemon._shutdown_event.set()
+        await asyncio.wait_for(task, 1)
+    asyncio.run(run())

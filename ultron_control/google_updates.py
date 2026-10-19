@@ -73,10 +73,14 @@ def request_kind(prompt):
     text = re.sub(r'^(?:(?:hey ultron|okay|please|can you|could you) )+', '', text)
     if text in {'whats on my calendar', 'what is on my calendar', 'whats on my calendar today', 'what is on my calendar today'}:
         return 'calendar'
-    if re.fullmatch(r'(?:check|read|show|give me|what are|any)(?: my| me)? (?:email|emails|mail|gmail)(?: updates)?', text):
+    if re.fullmatch(r'(?:check|read|show|give me|what are|any)(?: my| me)? (?:(?:latest|recent|new|unread|important) )?(?:email|emails|mail|gmail)(?: updates)?', text):
         return 'mail'
-    if re.fullmatch(r'(?:check|read|show|give me|what are|any)(?: my| me)? (?:calendar|calendar updates|events|appointments)(?: today)?', text):
+    if re.fullmatch(r'(?:check|read|show|give me|what are|any)(?: my| me)? (?:(?:latest|upcoming|recent) )?(?:calendar|calendar update|calendar updates|events|appointments)(?: today| for today)?', text):
         return 'calendar'
+    if re.fullmatch(r'(?:do i have|have i got) (?:any )?(?:(?:new|important|unread) )?(?:emails|mail)', text):
+        return 'mail'
+    if re.fullmatch(r'(?:tell me|update me) (?:about|on) my (?:(?:latest|recent) )?(?:emails|email updates|mail)', text):
+        return 'mail'
     if text in {'email update', 'email updates', 'my email updates'}:
         return 'mail'
     if text in {'my updates', 'give me my updates', 'calendar update', 'calendar updates'}:
@@ -148,6 +152,29 @@ class GoogleUpdates:
                 (mail if kind != 'calendar' and self.mail_ok else '') +
                 (calendar if kind != 'mail' and self.calendar_ok else '') +
                 'Use google_connect.py review for private titles and priority reasons. Importance is a heuristic, not a guarantee.')
+
+    def spoken_reply(self, kind='all'):
+        if not self.enabled:
+            return 'Not connected to Google on this computer.'
+        if not self.checked:
+            return 'Google updates are not ready yet. ' + self.status
+        parts = []
+        if kind != 'calendar':
+            if self.mail_ok:
+                parts.append(f'{self.important} potentially important emails among {self.scanned} reviewed.'
+                             + (' The archive scan is still in progress.' if not self.complete else ''))
+            else:
+                parts.append('Email sync is unavailable. Check the connection diagnostics.')
+        if kind != 'mail':
+            if self.calendar_ok:
+                parts.append(f'{self.calendar_count} events on your primary calendar in the next 24 hours.'
+                             + (' This list is partial.' if not self.calendar_complete else ''))
+            else:
+                parts.append('Calendar sync is unavailable. Check the connection diagnostics.')
+        age = max(0, int(time.time() - self.checked))
+        if age > 600:
+            parts.append(f'This snapshot is {age // 60} minutes old.')
+        return ' '.join(parts)
 
     def sync(self, gmail=None, calendar=None):
         if gmail is None:

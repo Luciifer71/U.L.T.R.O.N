@@ -14,6 +14,7 @@ import edge_tts
 import psutil
 import pygame
 from nats.aio.client import Client as NATS
+from ultron_control.reply_delivery import SpeechQueue
 
 NATS_URL = os.getenv("NATS_URL", "nats://127.0.0.1:4222")
 SUBJECT = "ultron.>"
@@ -38,16 +39,21 @@ class UltronVoiceEngine:
         self.nc = nats_client
         self.loop = loop
         self._lock = asyncio.Lock()
+        self.speaking = False
+        self.state_version = time.time_ns()
         pygame.mixer.init(frequency=24000)
 
     async def _notify_speaking_state(self, is_speaking: bool):
         """Notifies the voice listener when Ultron is emitting sound to prevent acoustic loops."""
+        self.speaking = is_speaking
+        self.state_version = time.time_ns()
         if self.nc and self.nc.is_connected:
             try:
                 await self.nc.publish(
                     "ultron.status.speaking",
-                    json.dumps({"speaking": is_speaking}).encode(),
+                    json.dumps({"speaking": is_speaking, "version": self.state_version}).encode(),
                 )
+                await self.nc.flush()
             except Exception as e:
                 logger.error(f"[ULTRON VOICE STATUS ERROR]: {e}")
 
@@ -85,6 +91,7 @@ class UltronVoiceEngine:
                 logger.error(f"[ULTRON VOICE ERROR]: {e}")
 
             finally:
+                pygame.mixer.music.stop()
                 # Buffer gap to absorb room reverberation
                 await asyncio.sleep(0.3)
                 await self._notify_speaking_state(False)
@@ -227,11 +234,16 @@ class ActionDaemon:
         try:
             payload: Dict[str, Any] = json.loads(msg.data.decode())
 
+            if msg.subject in {"ultron.voice.cancel", "ultron.voice.state"}:
+                return
+
             # Standalone voice channel message
             if msg.subject == "ultron.voice":
                 speech_text = payload.get("text") or payload.get("speech")
-                if speech_text:
-                    await self.speak_and_wait(speech_text)
+                if speech_text and not payload.get("silent"):
+                    key = payload.get("statusKey")
+                    self.speech_queue.submit(speech_text, key=key if isinstance(key, str) else None,
+                                             ttl=20 if key else None)
                 return
 
             # Construct ordered execution pipeline
@@ -283,13 +295,35 @@ class ActionDaemon:
         loop = asyncio.get_running_loop()
         self.voice = UltronVoiceEngine(self.nc, loop=loop)
 
-        logger.info(
-            f"[ULTRON] Action daemon online. Subscribed to '{self.subject}'..."
-        )
-        await self.speak_and_wait("Ultron core action daemon online.")
+        self.speech_queue = SpeechQueue(self.speak_and_wait)
+        speech_worker = asyncio.create_task(self.speech_queue.run())
 
+        async def cancel_speech(msg):
+            await self.speech_queue.cancel()
+
+        async def voice_state(msg):
+            if msg.reply:
+                await self.nc.publish(msg.reply, json.dumps({
+                    "speaking": self.voice.speaking,
+                    "version": self.voice.state_version,
+                }).encode())
+
+        await self.nc.subscribe("ultron.voice.cancel", cb=cancel_speech)
+        await self.nc.subscribe("ultron.voice.state", cb=voice_state)
         await self.nc.subscribe(self.subject, cb=self.message_handler)
-        await self._shutdown_event.wait()
+        await self.nc.flush()
+        logger.info(f"[ULTRON] Action daemon online. Subscribed to '{self.subject}'...")
+        self.speech_queue.submit("Ultron core action daemon online.")
+        try:
+            await self._shutdown_event.wait()
+        finally:
+            speech_worker.cancel()
+            try:
+                await speech_worker
+            except asyncio.CancelledError:
+                pass
+            await self.nc.close()
+
 async def main():
     # Instantiate your actual action daemon class defined in this file
     daemon = ActionDaemon()

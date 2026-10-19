@@ -3,7 +3,7 @@
 After one-time consent, the brain starts a background sync on startup and polls
 approximately every five minutes, with capped backoff on failure. Existing wake-word
 sessions accept `check my emails`, `email updates`, `check my calendar`, and
-`give me my updates`. Clap detection is not implemented. Ultron must be running;
+`give me my updates`, `what are my latest email updates?`, and `do I have any new emails?`. Clap detection is not implemented. Ultron must be running;
 this is not a cloud service or an iPhone notification service.
 
 ## One-time account connection
@@ -70,3 +70,49 @@ Google can expire refresh tokens after seven days; reconnect when necessary.
 References: [Google Desktop OAuth](https://developers.google.com/identity/protocols/oauth2/native-app),
 [Gmail quickstart](https://developers.google.com/workspace/gmail/api/quickstart/python),
 [Calendar events](https://developers.google.com/workspace/calendar/api/v3/reference/events/list).
+
+## Responsive replies and speech controls
+
+Google status requests bypass the model/action queue once the brain is online.
+Voice responses give short counts and scan/availability limitations; the private
+review command retains detailed titles. These are cached counts across reviewed
+mail, not a filtered count of unread messages or a summary of every message.
+Repeated status replies are combined while pending, suppressed during matching
+speech and for ten seconds afterwards, and expire after twenty seconds in the
+speech queue. Each typed request still receives its own correlated text response.
+
+Run `stop-ultron-speech.cmd` (or `send_intent.py "stop speaking"`) to stop current
+queued voice playback and clear pending speech. It does not cancel physical actions
+or disable future background notifications. Spoken interruption during playback is
+not supported: the microphone is intentionally muted while Ultron speaks.
+
+The listener starts muted, requests the current speaker state and periodically
+refreshes it. It rejects older idle snapshots after newer speaking events. If the
+voice daemon is unreachable, capture stays muted; start/restart the action daemon.
+Restart all three components together after updating this protocol.
+
+### Live regression checklist
+
+1. Stop components, pull main, run `verify_ultron.py`, then launch the trial.
+2. Stay silent during startup. The listener must not dispatch Ultron's own Google
+   announcement as a user command. Wait for STANDBY after calibration.
+3. Ask "What are my latest email updates?" and "Check my calendar." Expect short
+   cached status, no Ollama planning call for these requests, and no false claim
+   that connected mail is inaccessible. Allow speech generation/network latency.
+4. Ask an ordinary model question, then use a separate terminal to send
+   `send_intent.py "check my emails" --timeout 5`. Expect a correlated text reply
+   within five seconds even if model inference is busy. Speech may wait its turn.
+5. Send the same email-status request three times quickly. Text responses should
+   arrive for each request, but speech should not read three matching status
+   paragraphs. Different email/calendar requests may each have one short reply.
+6. During speech run `stop-ultron-speech.cmd`. Expect playback to stop and queued
+   speech to clear. Then ask a new question to verify speech still works.
+7. Leave Ultron running for another sync interval. Counts can increase as archive
+   scanning progresses. This does not necessarily mean newly arrived mail.
+8. Run `collect-ultron-report.cmd --model qwen3:8b --tests` and share the ZIP with
+   your observations. The bundle excludes Google credentials/cache and cannot
+   independently prove what you heard or which Google account you selected.
+
+Automated tests simulate slow inference, queue expiry/coalescing, cancellation,
+actual daemon playback cleanup, state snapshots, and stale speaking-state updates.
+Live microphone echo suppression and perceived latency still require this laptop check.
