@@ -523,6 +523,10 @@ def test_unoffered_or_compound_choice_does_not_dispatch(tmp_path, monkeypatch, c
 
 @pytest.mark.parametrize('prompt,expected', [
     ('check my emails', 'Not connected'),
+    ('Can you brief me about my latest email updates?', 'Not connected'),
+    ('Is there any later latest calendar updates?', 'Not connected'),
+    ('Check my calendar next week', 'cached email importance counts'),
+    ('Delete my emails', 'read-only'),
     ('check my calendar', 'Not connected'),
     ('What time is it?', 'local time'),
     ("What is today's date?", 'local date'),

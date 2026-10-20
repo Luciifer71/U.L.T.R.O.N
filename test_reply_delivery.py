@@ -100,3 +100,71 @@ def test_short_voice_keeps_technical_details_out(tmp_path):
 @pytest.mark.parametrize('text', ['What are my latest calendar updates?', 'Check my upcoming appointments.', 'Give me my calendar update for today.'])
 def test_natural_calendar_requests(text):
     assert request_kind(text) == 'calendar'
+
+
+@pytest.mark.parametrize('text, expected', [
+    ('Can you brief me about my latest email updates?', 'mail'),
+    ('Is there any later latest calendar updates?', 'calendar'),
+    ('Okay, please summarize my inbox.', 'mail'),
+    ('Give me both my email and calendar updates.', 'all'),
+    ('What is on my calendar today?', 'calendar'),
+    ('Tell me about my emails then open calculator', 'clarify'),
+    ('Check my calendar next week', 'clarify'),
+    ('Read the email from Alice', 'clarify'),
+    ('Delete my emails', 'unsupported'),
+    ('Check my emails and delete them', 'unsupported'),
+    ('Send my email updates to someone', 'unsupported'),
+    ('Do not check my emails', None),
+    ('If I ask check my emails', None),
+    ('"check my emails"', None),
+    ('Explain gravity', None),
+    ('Open calculator', None),
+    ('email ' * 1000, None),
+])
+def test_google_routing_contract(text, expected):
+    from ultron_control.google_routing import route_request
+    assert route_request(text) == expected
+
+
+@pytest.mark.parametrize('kind', ['mail', 'calendar', 'all'])
+def test_google_status_states(tmp_path, kind):
+    import time
+    service = GoogleUpdates(tmp_path)
+    assert 'Not connected' in service.spoken_reply(kind)
+    service.enabled = True
+    assert 'Waiting for the first successful sync' in service.spoken_reply(kind)
+    service.status = 'Google sync unavailable. Reconnect if access was revoked or expired.'
+    assert 'unavailable' in service.spoken_reply(kind)
+    service.checked = time.time()
+    assert 'unavailable' in service.spoken_reply(kind)
+    assert '0 events' not in service.spoken_reply(kind)
+    service.mail_ok = service.calendar_ok = True
+    service.complete = service.calendar_complete = True
+    reply = service.spoken_reply(kind)
+    assert 'unavailable' not in reply
+    assert '0' in reply
+    service.complete = service.calendar_complete = False
+    assert any(word in service.spoken_reply(kind) for word in ['progress', 'partial'])
+    service.checked -= 900
+    assert 'minutes old' in service.spoken_reply(kind)
+
+
+def test_routing_batch_stays_out_of_model_queue(tmp_path):
+    from ultron_control.google_routing import route_request
+    async def run():
+        replies = []
+        async def handle(msg): pytest.fail('Google request reached model')
+        async def publish(subject, payload): replies.append(json.loads(payload))
+        inbox = IntentInbox(SimpleNamespace(google_updates=GoogleUpdates(tmp_path)),
+                            SimpleNamespace(publish=publish), handle, route_request)
+        phrases = ['Can you brief me about my latest email updates?',
+                   'Is there any later latest calendar updates?',
+                   'Check my calendar next week', 'Delete my emails']
+        for i in range(200):
+            msg = SimpleNamespace(data=json.dumps({'prompt': phrases[i % 4], 'requestId': str(i)}).encode())
+            await inbox.receive(msg)
+        assert inbox.pending.empty()
+        assert len(replies) == 200
+        assert [r['requestId'] for r in replies] == [str(i) for i in range(200)]
+        assert all('cannot access' not in r['text'] for r in replies)
+    asyncio.run(run())

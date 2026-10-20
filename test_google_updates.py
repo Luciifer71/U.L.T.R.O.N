@@ -125,3 +125,25 @@ def test_support_bundle_excludes_google_cache(tmp_path):
     make_bundle(tmp_path, tmp_path / 'missing.json', output)
     with zipfile.ZipFile(output) as archive:
         assert not any('google' in n or 'credentials' in n for n in archive.namelist())
+
+
+def test_worker_failure_invalidates_previous_success(tmp_path, monkeypatch):
+    import time
+    service = GoogleUpdates(tmp_path)
+    service.enabled = service.mail_ok = service.calendar_ok = True
+    service.checked = time.time()
+    def failed_sync(): raise RuntimeError('private credential detail')
+    service.sync = failed_sync
+    delays = []
+    async def stop_after_failure(delay):
+        delays.append(delay)
+        raise asyncio.CancelledError
+    monkeypatch.setattr(asyncio, 'sleep', stop_after_failure)
+    async def notify(text): pytest.fail('Failure must not announce cached success')
+    async def run():
+        with pytest.raises(asyncio.CancelledError): await service.run(notify)
+    asyncio.run(run())
+    assert not service.mail_ok and not service.calendar_ok
+    assert 'unavailable' in service.spoken_reply('mail')
+    assert 'private credential' not in service.spoken_reply('all')
+    assert delays == [600]
