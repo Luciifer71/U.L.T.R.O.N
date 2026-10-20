@@ -116,3 +116,32 @@ Restart all three components together after updating this protocol.
 Automated tests simulate slow inference, queue expiry/coalescing, cancellation,
 actual daemon playback cleanup, state snapshots, and stale speaking-state updates.
 Live microphone echo suppression and perceived latency still require this laptop check.
+
+### Request routing and verification
+
+Personal email/calendar requests use a bounded, deterministic router shared by
+both the immediate reply lane and the brain. Requests such as “Can you brief me
+about my latest email updates?” and “Is there any later latest calendar updates?”
+return the cached integration status without waiting for the model. Unknown
+qualifiers, requested senders/date ranges and mixed desktop actions produce a
+clarification rather than a fabricated account-access answer. Google mutations
+receive an explicit read-only limitation. Negated, quoted and hypothetical text
+is not treated as consent to read account data. Routing input is capped at 4096
+characters; larger inputs remain outside this shortcut.
+
+These replies are still **counts**, not message summaries: email importance is
+heuristic over the scanned archive, and calendar coverage is the primary calendar
+for the next 24 hours. “Latest” does not turn archive counts into new/unread counts.
+Disconnected, first-sync, unavailable, partial and stale snapshots are reported
+separately. A background authorization/client failure invalidates previous success
+flags instead of presenting a failed connection as a healthy cached sync.
+
+After updating and restarting, run `verify_ultron.py`, then use `send_intent.py`
+with each quoted request above and `--timeout 5`. Also try “Check my calendar next
+week” (clarification) and “Delete my emails” (read-only limitation, no deletion).
+Finally say “Open calculator” to check the existing action path. Collect one
+support ZIP using `collect-ultron-report.cmd --model qwen3:8b --tests` if needed.
+
+Automated tests cover routing boundaries, sync states, failure recovery flags and
+200 correlated requests without filling the model queue. This is regression
+evidence, not a production load benchmark or proof of live OAuth/audio health.

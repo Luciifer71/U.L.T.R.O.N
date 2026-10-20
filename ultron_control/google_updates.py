@@ -10,6 +10,8 @@ import re
 import sqlite3
 import time
 
+from ultron_control.google_routing import request_kind, route_request
+
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly',
           'https://www.googleapis.com/auth/calendar.events.readonly']
 SERVICE = 'Ultron.Google.ReadOnly'
@@ -66,26 +68,6 @@ def disconnect():
     except Exception:
         raise RuntimeError('Could not remove the Windows credential; check Credential Manager.') from None
     (private_dir() / 'updates.sqlite3').unlink(missing_ok=True)
-
-
-def request_kind(prompt):
-    text = re.sub(r'[^a-z0-9 ]', '', prompt.lower()).strip()
-    text = re.sub(r'^(?:(?:hey ultron|okay|please|can you|could you) )+', '', text)
-    if text in {'whats on my calendar', 'what is on my calendar', 'whats on my calendar today', 'what is on my calendar today'}:
-        return 'calendar'
-    if re.fullmatch(r'(?:check|read|show|give me|what are|any)(?: my| me)? (?:(?:latest|recent|new|unread|important) )?(?:email|emails|mail|gmail)(?: updates)?', text):
-        return 'mail'
-    if re.fullmatch(r'(?:check|read|show|give me|what are|any)(?: my| me)? (?:(?:latest|upcoming|recent) )?(?:calendar|calendar update|calendar updates|events|appointments)(?: today| for today)?', text):
-        return 'calendar'
-    if re.fullmatch(r'(?:do i have|have i got) (?:any )?(?:(?:new|important|unread) )?(?:emails|mail)', text):
-        return 'mail'
-    if re.fullmatch(r'(?:tell me|update me) (?:about|on) my (?:(?:latest|recent) )?(?:emails|email updates|mail)', text):
-        return 'mail'
-    if text in {'email update', 'email updates', 'my email updates'}:
-        return 'mail'
-    if text in {'my updates', 'give me my updates', 'calendar update', 'calendar updates'}:
-        return 'calendar' if text.startswith('calendar') else 'all'
-    return None
 
 
 def clean(value, limit=160):
@@ -154,10 +136,14 @@ class GoogleUpdates:
                 'Use google_connect.py review for private titles and priority reasons. Importance is a heuristic, not a guarantee.')
 
     def spoken_reply(self, kind='all'):
+        if kind == 'unsupported':
+            return 'Google access is read-only. I cannot send, delete or change email or calendar events.'
+        if kind == 'clarify':
+            return 'I can report cached email importance counts and primary-calendar events for the next 24 hours. Please ask for email updates, calendar updates, or both; other actions need a separate request.'
         if not self.enabled:
             return 'Not connected to Google on this computer.'
         if not self.checked:
-            return 'Google updates are not ready yet. ' + self.status
+            return 'Google updates are not ready yet. ' + (self.status if 'unavailable' in self.status else 'Waiting for the first successful sync.')
         parts = []
         if kind != 'calendar':
             if self.mail_ok:
@@ -256,6 +242,7 @@ class GoogleUpdates:
                 self.stopping = True
                 raise
             except Exception:
+                self.mail_ok = self.calendar_ok = False
                 self.status = 'Google sync unavailable. Reconnect if access was revoked or expired.'
                 failures += 1
             await asyncio.sleep(min(1800, 300 * 2 ** min(failures, 3)))
