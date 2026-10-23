@@ -145,3 +145,17 @@ support ZIP using `collect-ultron-report.cmd --model qwen3:8b --tests` if needed
 Automated tests cover routing boundaries, sync states, failure recovery flags and
 200 correlated requests without filling the model queue. This is regression
 evidence, not a production load benchmark or proof of live OAuth/audio health.
+
+## Quick troubleshooting before reconnecting
+
+| Symptom | What to check first |
+| --- | --- |
+| Typed command times out | Confirm the brain and NATS are running. A typed timeout alone does not establish an OAuth failure. |
+| Text reply arrives but speech is delayed | Speech can be queued. Use `stop-ultron-speech.cmd` to clear playback, then submit a fresh request. |
+| Waiting for the first successful sync | Allow the background sync to finish; inspect the reported status before reconnecting. |
+| Email or calendar sync is unavailable | Check the connection diagnostics. Network, quota and authorization failures can produce this status. |
+| Priority count rises without new inbox mail | The archive scan may have found older messages. This count is not a new-mail counter. |
+
+When reporting a problem, include the exact request, whether the typed reply arrived,
+and whether you heard speech, alongside one support ZIP. Do not attach OAuth client
+JSON files, tokens or the private Google cache.
