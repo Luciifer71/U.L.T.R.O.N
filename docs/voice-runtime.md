@@ -223,3 +223,21 @@ application or filename. Ambient silence still produces no spoken prompt.
 These are heuristics, not calibrated certainty: a wrong but confident transcript
 can still pass, and quiet legitimate speech can be rejected. Recorded-audio and
 live-device evaluation are still needed to measure recognition accuracy.
+
+## Avoid overlapping launcher sessions
+
+Run `start-qwen3-trial.cmd` once per session. If a launcher reports model warmup,
+wait for completion or its reported timeout before retrying. Re-running the
+launcher while the first set of components remains active can create overlapping
+listeners, brains or speech daemons and make repeated replies harder to diagnose.
+
+For a clean restart, cancel any launcher still waiting, then press Ctrl+C in each
+Ultron component window. Start the launcher once and wait for the voice listener's
+`STANDBY MODE` message after calibration before speaking. Docker and Ollama can
+remain running between sessions.
+
+Model loading and microphone readiness are separate milestones. An Ollama log
+showing all model layers offloaded to the GPU confirms that model's GPU placement;
+it does not confirm Whisper initialization, microphone capture or audible playback.
+If startup fails, retain the final error and collect a support bundle using the
+[report instructions](support-bundles.md).
