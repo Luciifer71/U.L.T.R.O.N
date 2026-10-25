@@ -113,3 +113,19 @@ def test_cancel_during_speaking_notification_still_releases_gate(daemon_module):
         with pytest.raises(asyncio.CancelledError): await task
         assert states == [True, False] and not voice.speaking
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('payload, expected', [
+    ({'text': 'full detailed response', 'speech': 'short response'}, 'short response'),
+    ({'text': 'text-only response'}, 'text-only response'),
+    ({'text': 'do not speak', 'speech': ''}, None),
+])
+def test_daemon_uses_explicit_speech_instead_of_full_text(daemon_module, payload, expected):
+    module = daemon_module
+    async def run():
+        spoken = []
+        daemon = module.ActionDaemon()
+        daemon.speech_queue = SimpleNamespace(submit=lambda text, **kw: spoken.append(text))
+        await daemon.message_handler(SimpleNamespace(subject='ultron.voice', data=json.dumps(payload).encode()))
+        assert spoken == ([] if expected is None else [expected])
+    asyncio.run(run())

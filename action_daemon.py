@@ -243,7 +243,7 @@ class ActionDaemon:
 
             # Standalone voice channel message
             if msg.subject == "ultron.voice":
-                speech_text = payload.get("text") or payload.get("speech")
+                speech_text = payload.get("speech") if "speech" in payload else payload.get("text")
                 if speech_text and not payload.get("silent"):
                     key = payload.get("statusKey")
                     self.speech_queue.submit(speech_text, key=key if isinstance(key, str) else None,

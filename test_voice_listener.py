@@ -28,7 +28,8 @@ def test_saved_settings_loaded_before_listener_configuration(monkeypatch, tmp_pa
     spec = importlib.util.spec_from_file_location("listener_saved_settings", Path(__file__).with_name("voice_listener.py"))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    assert module.MIC_DEVICE == 1
+    assert module.MIC_DEVICE is None
+    assert module.CONFIGURED_MIC_DEVICE == "1"
     assert module.NATS_URL == "nats://127.0.0.1:4222"
     assert module.SpeechConfig.from_env().device == "cuda"
     assert module.SpeechConfig.from_env().model == "medium.en"
@@ -44,6 +45,7 @@ def listener(monkeypatch):
     spec = importlib.util.spec_from_file_location("voice_listener_test", Path(__file__).with_name("voice_listener.py"))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "create_speech_activity", lambda: None)
     return module
 
 
@@ -370,3 +372,26 @@ def test_refresh_closes_stream_before_reinitializing_portaudio(listener, monkeyp
     manager.start(refresh=True)
     assert calls == ['start', 'stop', 'close', 'terminate', 'initialize', 'start']
     assert manager.generation == 2 and manager._first_frame
+
+
+@pytest.mark.parametrize('text, expected', [
+    ('Very good. Hey Ultron, Hey Ultron.', (True, '')),
+    ('Thank you! Hey Ultron, open calculator.', (True, 'open calculator.')),
+    ('He said hey Ultron open calculator.', (False, '')),
+    ('If I say hey Ultron open calculator.', (False, '')),
+    ('Do not say hey Ultron.', (False, '')),
+    ('"Very good. Hey Ultron, open calculator."', (False, '')),
+    ('Very good. Open Ultron notes.', (False, '')),
+])
+def test_only_short_acknowledgements_before_direct_wake_are_accepted(listener, text, expected):
+    assert listener.extract_wake_word_command(text) == expected
+
+
+def test_pinned_input_mode_requires_explicit_opt_in(monkeypatch):
+    monkeypatch.setenv('AUDIO_INPUT_MODE', 'pinned')
+    monkeypatch.setenv('AUDIO_INPUT_DEVICE', '3')
+    monkeypatch.setitem(sys.modules, 'sounddevice', SimpleNamespace())
+    spec = importlib.util.spec_from_file_location('pinned_listener', Path(__file__).with_name('voice_listener.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.MIC_DEVICE == 3
