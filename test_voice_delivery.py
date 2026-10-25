@@ -70,3 +70,46 @@ def test_daemon_registers_snapshot_before_startup_speech(daemon_module):
         daemon._shutdown_event.set()
         await asyncio.wait_for(task, 1)
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('stalled_phase', ['synthesis', 'playback'])
+def test_speech_timeout_releases_microphone_gate(daemon_module, monkeypatch, stalled_phase):
+    module = daemon_module
+    async def run():
+        states, stopped = [], []
+        async def publish(subject, payload): states.append(json.loads(payload)['speaking'])
+        async def flush(): pass
+        class Communicate:
+            def __init__(self, *args, **kwargs): pass
+            async def stream(self):
+                if stalled_phase == 'synthesis': await asyncio.Event().wait()
+                yield {'type': 'audio', 'data': b'audio'}
+        module.edge_tts.Communicate = Communicate
+        module.pygame.mixer.music.stop = lambda: stopped.append(True)
+        original_timeout = asyncio.timeout
+        monkeypatch.setattr(module.asyncio, 'timeout', lambda delay: original_timeout(0.01))
+        voice = module.UltronVoiceEngine(SimpleNamespace(is_connected=True, publish=publish, flush=flush), asyncio.get_running_loop())
+        await voice.speak_and_wait('test')
+        assert stopped and states == [True, False] and not voice.speaking
+    asyncio.run(run())
+
+
+def test_cancel_during_speaking_notification_still_releases_gate(daemon_module):
+    module = daemon_module
+    async def run():
+        entered = asyncio.Event()
+        states = []
+        async def publish(subject, payload):
+            state = json.loads(payload)['speaking']
+            states.append(state)
+            if state:
+                entered.set()
+                await asyncio.Event().wait()
+        async def flush(): pass
+        voice = module.UltronVoiceEngine(SimpleNamespace(is_connected=True, publish=publish, flush=flush), asyncio.get_running_loop())
+        task = asyncio.create_task(voice.speak_and_wait('test'))
+        await asyncio.wait_for(entered.wait(), 1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError): await task
+        assert states == [True, False] and not voice.speaking
+    asyncio.run(run())

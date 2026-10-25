@@ -17,6 +17,7 @@ import numpy as np
 from nats.aio.client import Client as NATS
 import sounddevice as sd
 
+from microphone_runtime import inventory, fingerprint, microphone_candidates, probe_inventory
 from visual_events import publish_visual_event
 from audio_pipeline import AudioFrame, AudioMailbox, UtteranceSegmenter, TranscriptionWorker
 
@@ -111,7 +112,10 @@ class AcousticGate:
                 return
             if version is not None:
                 self._version = version
+            changed = self._is_speaking != status
             self._is_speaking = status
+            if changed:
+                logging.info("[MIC STATE]: %s", "PAUSED: speaker active or state unavailable" if status else "LISTENING: microphone processing resumed")
 
     @property
     def is_speaking(self) -> bool:
@@ -201,6 +205,10 @@ class ResilientAudioStream:
         self.queue = audio_queue
         self.loop = loop
         self.stream: Optional[sd.InputStream] = None
+        self.device_name = "unavailable"
+        self.device_signature = None
+        self.generation = 0
+        self._first_frame = False
 
     def _audio_callback(
         self,
@@ -216,58 +224,74 @@ class ResilientAudioStream:
             captured_at=time.monotonic(),
             sequence=self._sequence,
             muted=bool(self.gate and self.gate.is_speaking),
-            discontinuity=bool(status),
-            discontinuity_reason=f"audio driver: {status}" if status else None,
+            discontinuity=bool(status) or self._first_frame,
+            discontinuity_reason=("microphone restarted; repeat the complete request" if self._first_frame
+                                  else f"audio driver: {status}" if status else None),
         )
+        self._first_frame = False
         self.queue.push(frame)
 
-    def start(self):
+    def close(self):
+        stream, self.stream = self.stream, None
+        if stream is not None:
+            try:
+                stream.stop()
+            finally:
+                stream.close()
 
+    def start(self, refresh=False):
+        if refresh:
+            self.close()
+            # No other PortAudio streams exist in the listener process.
+            sd._terminate()
+            sd._initialize()
+        candidates = []
+        devices = None
         try:
-
-            sd.check_input_settings(
-                device=MIC_DEVICE, samplerate=SAMPLE_RATE,
-                channels=CHANNELS, dtype="float32",
-            )
-            device_info = sd.query_devices(
-                device=MIC_DEVICE, kind="input"
-            )
-
-            device_name = device_info.get(
-                "name",
-                "Default Mic",
-            )
-
-            logging.info(
-                "[AUDIO ENGINE]: Attached to Device -> "
-                f"'{device_name}'"
-            )
-
-            self.stream = sd.InputStream(
-                device=MIC_DEVICE,
-                samplerate=SAMPLE_RATE,
-                channels=CHANNELS,
-                dtype="float32",
-                blocksize=AUDIO_BLOCK_SIZE,
-                callback=self._audio_callback,
-            )
-
-            self.stream.start()
-
-            logging.info(
-                "[AUDIO ENGINE]: SoundDevice microphone "
-                "stream active."
-            )
-
-        except Exception as e:
-
-            logging.error(
-                f"[AUDIO HARDWARE ERROR]: {e}"
-            )
-            if self.stream is not None:
-                self.stream.close()
-                self.stream = None
-            raise RuntimeError("Microphone startup failed; run speech_diagnostics.py --list-mics") from e
+            devices = inventory(sd)
+            self.device_signature = fingerprint(devices)
+            if MIC_DEVICE is None:
+                candidates = microphone_candidates(devices)
+        except (AttributeError, TypeError):
+            # Minimal backends/test doubles can still expose a default input.
+            pass
+        if MIC_DEVICE is not None:
+            candidates = [{'index': MIC_DEVICE, 'api': '', 'name': str(MIC_DEVICE)}]
+        elif not candidates:
+            if devices is not None:
+                raise RuntimeError('Microphone startup failed: no physical input is available')
+            candidates = [{'index': None, 'api': '', 'name': 'Windows/default input'}]
+        errors = []
+        for candidate in candidates:
+            device = candidate['index']
+            extra = {}
+            try:
+                if 'wasapi' in candidate['api'].casefold() and hasattr(sd, 'WasapiSettings'):
+                    extra['extra_settings'] = sd.WasapiSettings(auto_convert=True)
+                sd.check_input_settings(device=device, samplerate=SAMPLE_RATE,
+                                        channels=CHANNELS, dtype='float32', **extra)
+                info = sd.query_devices(device=device, kind='input')
+                self.stream = sd.InputStream(
+                    device=device, samplerate=SAMPLE_RATE, channels=CHANNELS,
+                    dtype='float32', blocksize=AUDIO_BLOCK_SIZE,
+                    callback=self._audio_callback, **extra)
+                self._first_frame = refresh
+                self.stream.start()
+                self.device_name = info.get('name', candidate['name'])
+                self.generation += 1
+                logging.info('[AUDIO ENGINE]: Attached to Device -> %r (%s; %s)',
+                             self.device_name, candidate['api'],
+                             'explicit override' if MIC_DEVICE is not None else 'automatic headset/laptop selection')
+                logging.info('[AUDIO ENGINE]: SoundDevice microphone stream active.')
+                return
+            except Exception as exc:
+                errors.append(f"{candidate['name']}: {exc}")
+                if self.stream is not None:
+                    try:
+                        self.close()
+                    except Exception:
+                        self.stream = None
+        raise RuntimeError('Microphone startup failed: ' + '; '.join(errors))
 
 
 # =========================================================
@@ -529,6 +553,48 @@ async def main():
         max_backlog_seconds=MAX_AUDIO_BACKLOG_SEC,
     )
     last_meter_time = 0.0
+    pending_device_change = False
+
+    async def monitor_devices():
+        nonlocal pending_device_change
+        if MIC_DEVICE is not None or stream_manager.device_signature is None:
+            return
+        while True:
+            await asyncio.sleep(10)
+            try:
+                current = await probe_inventory()
+                pending_device_change = fingerprint(current) != stream_manager.device_signature
+            except Exception as exc:
+                logging.warning('[MIC DEVICE CHECK]: %s; retaining current microphone', exc)
+
+    device_monitor = asyncio.create_task(monitor_devices())
+    last_health_log = time.monotonic()
+    peak_rms = 0.0
+    recovery_after = 0.0
+
+    async def recover_microphone(reason):
+        nonlocal pending_device_change, silence_threshold, recovery_after, is_active_session
+        logging.warning('[MIC RECOVERY]: %s; incomplete audio discarded', reason)
+        # Neither pending nor in-flight transcripts from the old stream may act.
+        transcriber.generation += 1
+        segmenter._reject('microphone changed')
+        is_active_session = False
+        try:
+            stream_manager.start(refresh=True)
+            pending_device_change = False
+            # Old queued frames are stale. Calibration excludes damaged/muted data.
+            audio_queue.clear()
+            silence_threshold = await calibrate_ambient_noise(audio_queue)
+            logging.info("[MIC READY]: Say 'Hey Ultron'. Device=%r", stream_manager.device_name)
+        except Exception as exc:
+            logging.error('[MIC RECOVERY]: %s; retrying automatically in 5 seconds', exc)
+            pending_device_change = True
+            try:
+                stream_manager.close()
+            except Exception:
+                logging.exception('[MIC RECOVERY]: Failed to close unavailable stream')
+        recovery_after = time.monotonic() + 5
+
 
 
     # =====================================================
@@ -790,13 +856,26 @@ async def main():
             # GET AUDIO BLOCK
             # -------------------------------------------------
 
+            if pending_device_change and now >= recovery_after:
+                await recover_microphone('input device inventory changed')
+                continue
             try:
                 frame = await asyncio.wait_for(audio_queue.get(), timeout=5.0)
-            except asyncio.TimeoutError as e:
-                raise RuntimeError("Microphone stopped delivering audio frames") from e
+            except asyncio.TimeoutError:
+                if time.monotonic() >= recovery_after:
+                    await recover_microphone('no audio frames for 5 seconds')
+                continue
             now = time.monotonic()
             block = frame.samples
             rms_energy = float(np.sqrt(np.mean(block ** 2)))
+            peak_rms = max(peak_rms, rms_energy)
+            if now - last_health_log >= 10:
+                logging.info('[MIC HEALTH]: device=%r peak_rms=%.4f threshold=%.4f gate=%s mode=%s',
+                             stream_manager.device_name, peak_rms, silence_threshold,
+                             'paused' if acoustic_gate.is_speaking else 'listening',
+                             'active' if is_active_session else 'standby')
+                peak_rms = 0.0
+                last_health_log = now
             segment = segmenter.feed(
                 frame, speech=rms_energy > silence_threshold,
                 now=now, muted=acoustic_gate.is_speaking,
@@ -859,6 +938,8 @@ async def main():
         )
 
 
+        device_monitor.cancel()
+        await asyncio.gather(device_monitor, return_exceptions=True)
         transcription_task.cancel()
         try:
             await transcription_task

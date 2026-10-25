@@ -161,8 +161,8 @@ def test_calibration_is_bounded_even_if_tts_never_releases_gate(listener, monkey
     asyncio.run(run())
 
 
-@pytest.mark.parametrize('slow_inference', [False, True])
-def test_main_routes_complete_utterance_and_cleans_up_on_cancel(listener, monkeypatch, slow_inference):
+@pytest.mark.parametrize('slow_inference,recover_stream', [(False, False), (True, False), (False, 'dead'), (False, 'device')])
+def test_main_routes_complete_utterance_and_cleans_up_on_cancel(listener, monkeypatch, slow_inference, recover_stream):
     import json
     from threading import Event
     calls = []
@@ -220,6 +220,12 @@ def test_main_routes_complete_utterance_and_cleans_up_on_cancel(listener, monkey
                 streams.append(self)
             def start(self):
                 async def produce():
+                    if recover_stream and len(streams) == 1:
+                        return  # Simulate a driver that stopped delivering frames.
+                    if recover_stream:
+                        for _ in range(30):
+                            self.callback(np.zeros((1024, 1), dtype=np.float32), 1024, None, False)
+                            await mailboxes[0].consumed.get()
                     for index in range(38):
                         data = np.full((1024, 1), 0.1 if 8 <= index < 16 else 0.0, dtype=np.float32)
                         self.callback(data, 1024, None, False)
@@ -246,6 +252,23 @@ def test_main_routes_complete_utterance_and_cleans_up_on_cancel(listener, monkey
         monkeypatch.setattr(listener, "calibrate_ambient_noise", calibrate)
         monkeypatch.setattr(listener, "publish_visual_event", visual)
         monkeypatch.setattr(listener.sd, "InputStream", Stream)
+        monkeypatch.setattr(listener.sd, '_terminate', lambda: None, raising=False)
+        monkeypatch.setattr(listener.sd, '_initialize', lambda: None, raising=False)
+        if recover_stream == 'device':
+            old = [{'index': 0, 'name': 'Microphone Array', 'api': 'MME'}]
+            new = old + [{'index': 1, 'name': 'Headset Microphone', 'api': 'MME'}]
+            monkeypatch.setattr(listener, 'inventory', lambda sd: new if streams else old)
+            async def probe(): return new
+            monkeypatch.setattr(listener, 'probe_inventory', probe)
+            original_sleep = asyncio.sleep
+            async def quick_device_check(delay):
+                await original_sleep(0.01 if delay == 10 else delay)
+            monkeypatch.setattr(listener.asyncio, 'sleep', quick_device_check)
+        if recover_stream == 'dead':
+            original_wait = asyncio.wait_for
+            async def quick_dead_capture(awaitable, timeout):
+                return await original_wait(awaitable, 0.01 if timeout == 5.0 and len(streams) == 1 else timeout)
+            monkeypatch.setattr(listener.asyncio, 'wait_for', quick_dead_capture)
         task = asyncio.create_task(listener.main())
         try:
             await asyncio.wait_for(intent_received.wait(), 10)
@@ -253,7 +276,8 @@ def test_main_routes_complete_utterance_and_cleans_up_on_cancel(listener, monkey
             captured_while_transcribing.set()
             task.cancel()
             await task
-        assert streams[0].closed
+        assert all(stream.closed for stream in streams)
+        assert len(streams) == (2 if recover_stream else 1)
         assert mailboxes[0].dropped_frames == 0
     asyncio.run(run())
     assert calls == [{"prompt": "open calculator."}]
@@ -296,3 +320,53 @@ def test_gate_starts_muted_and_rejects_stale_idle_snapshot(listener):
 ])
 def test_repeated_wake_prefixes_do_not_become_model_commands(listener, text, expected):
     assert listener.extract_wake_word_command(text) == (True, expected)
+
+
+def test_auto_selection_falls_back_when_headset_cannot_open(listener, monkeypatch):
+    attempted = []
+    monkeypatch.setattr(listener, 'MIC_DEVICE', None)
+    monkeypatch.setattr(listener, 'inventory', lambda sd: [
+        {'index': 1, 'name': 'Microphone Array', 'api': 'MME'},
+        {'index': 2, 'name': 'Headset Microphone', 'api': 'MME'}])
+    def check(**kwargs):
+        attempted.append(kwargs['device'])
+        if kwargs['device'] == 2:
+            raise RuntimeError('headset unavailable')
+    monkeypatch.setattr(listener.sd, 'check_input_settings', check)
+    class Stream:
+        def __init__(self, **kwargs): self.device = kwargs['device']
+        def start(self): pass
+    monkeypatch.setattr(listener.sd, 'InputStream', Stream)
+    manager = listener.ResilientAudioStream(None, None)
+    manager.start()
+    assert attempted == [2, 1] and manager.stream.device == 1
+
+
+def test_explicit_microphone_override_is_preserved(listener, monkeypatch):
+    monkeypatch.setattr(listener, 'MIC_DEVICE', 7)
+    monkeypatch.setattr(listener, 'inventory', lambda sd: [
+        {'index': 2, 'name': 'Headset Microphone', 'api': 'MME'}])
+    class Stream:
+        def __init__(self, **kwargs): self.device = kwargs['device']
+        def start(self): pass
+    monkeypatch.setattr(listener.sd, 'InputStream', Stream)
+    manager = listener.ResilientAudioStream(None, None)
+    manager.start()
+    assert manager.stream.device == 7
+
+
+def test_refresh_closes_stream_before_reinitializing_portaudio(listener, monkeypatch):
+    calls = []
+    monkeypatch.setattr(listener.sd, '_terminate', lambda: calls.append('terminate'), raising=False)
+    monkeypatch.setattr(listener.sd, '_initialize', lambda: calls.append('initialize'), raising=False)
+    class Stream:
+        def __init__(self, **kwargs): pass
+        def start(self): calls.append('start')
+        def stop(self): calls.append('stop')
+        def close(self): calls.append('close')
+    monkeypatch.setattr(listener.sd, 'InputStream', Stream)
+    manager = listener.ResilientAudioStream(None, None)
+    manager.start()
+    manager.start(refresh=True)
+    assert calls == ['start', 'stop', 'close', 'terminate', 'initialize', 'start']
+    assert manager.generation == 2 and manager._first_frame

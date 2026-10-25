@@ -96,7 +96,12 @@ class IntentInbox:
                 reply = await asyncio.to_thread(read_request_reply, reads, self.brain.google_updates)
             else:
                 reply = self.brain.google_updates.spoken_reply(kind)
-            payload = {'text': reply, 'speech': '' if stop else reply,
+            speech = reply
+            if reads == ('capabilities',):
+                speech = ('I can open apps and files, search the web, and report system stats. '
+                          'With Google connected, I can read email and calendar updates. '
+                          'The full capability list is in the terminal.')
+            payload = {'text': reply, 'speech': '' if stop else speech,
                        'silent': stop, 'requestId': data.get('requestId'),
                        'statusKey': 'google-' + kind if kind else None,
                        'speechTtl': 20, 'execution': {'success': True, 'error': None}}
