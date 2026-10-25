@@ -265,3 +265,34 @@ attributing it to memory pressure. A later snapshot cannot establish the cause.
 Audio-driver overflow rejects the affected capture and waits for a clean quiet
 gap. A recording completed before that overflow can still finish transcription;
 its adjacent log entry does not by itself mean damaged audio was dispatched.
+
+### Automatic microphone selection and recovery
+
+With `AUDIO_INPUT_DEVICE` unset, the listener prefers an available headset input,
+then a laptop microphone array, then another physical microphone. Output-only
+headphones do not replace the laptop microphone. Windows device names are used
+as a heuristic; this detects an exposed input, not whether a headset is being worn.
+An explicit `AUDIO_INPUT_DEVICE` setting still pins that device for installations
+that require it. No Windows recording or playback defaults are changed.
+
+A separate, bounded helper checks the device inventory every 10 seconds because
+PortAudio caches its initial device list. Healthy streams are not periodically
+restarted. A changed inventory or five seconds without capture frames triggers
+stream reopening and calibration. Failed runtime recovery retries automatically;
+incomplete and pending old-device commands are invalidated. A device switch
+returns to standby: wait for `[MIC READY]` and repeat the complete wake request.
+A headset that cannot open falls back to the next available microphone. Bluetooth
+and analog headset support depends on the Windows driver exposing a recording
+endpoint. Microphone privacy denial and physical mute cannot be overridden.
+
+`[MIC STATE]` reports speech suppression and resumption. `[MIC HEALTH]` reports
+selected device, peak input RMS, threshold, gate and session state every 10 seconds;
+it does not record raw audio. These logs distinguish a quiet/muted input from a
+paused echo gate or a dead stream. Silent but still delivered frames do not prove
+a driver failure, so silence alone does not trigger disruptive restarts.
+
+The 25-second inactivity timeout is unchanged. Listening remains suppressed during
+TTS to avoid self-triggering; voice interruption is not implemented. Synthesis is
+bounded to 20 seconds and playback to 90 seconds, with gate release on completion,
+error, cancellation or timeout. Capability answers retain full terminal text but
+use a shorter spoken summary. `stop-ultron-speech.cmd` can stop speech immediately.

@@ -212,6 +212,9 @@ def test_capability_and_combined_reads_bypass_busy_model(tmp_path, monkeypatch):
             await inbox.receive(SimpleNamespace(data=json.dumps({'prompt':prompt, 'requestId':prompt}).encode()))
         assert inbox.pending.empty()
         assert 'named applications' in replies[0]['text']
+        assert len(replies[0]['speech'].split()) < 40
+        assert 'full capability list' in replies[0]['speech']
+        assert len(replies[0]['speech']) < len(replies[0]['text'])
         assert 'listening' in replies[1]['text']
         assert 'Not connected' in replies[2]['text'] and 'CPU: 7%' in replies[2]['text']
     asyncio.run(run())

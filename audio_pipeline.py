@@ -43,6 +43,8 @@ class TranscriptionWorker:
         loop = asyncio.get_running_loop()
         while True:
             audio, captured_at, generation = await self.queue.get()
+            if generation != self.generation:
+                continue
             if self.clock() - captured_at > self.max_age_seconds:
                 await self.on_discard('utterance expired before transcription')
                 continue
@@ -117,6 +119,11 @@ class AudioMailbox:
                 self._ready.clear()
                 self._notified = False
             await self._ready.wait()
+
+    def clear(self) -> None:
+        """Discard queued capture when switching devices; callback-safe."""
+        with self._lock:
+            self._frames.clear()
 
     def close(self) -> None:
         with self._lock:

@@ -53,7 +53,7 @@ class UltronVoiceEngine:
                     "ultron.status.speaking",
                     json.dumps({"speaking": is_speaking, "version": self.state_version}).encode(),
                 )
-                await self.nc.flush()
+                await asyncio.wait_for(self.nc.flush(), timeout=1)
             except Exception as e:
                 logger.error(f"[ULTRON VOICE STATUS ERROR]: {e}")
 
@@ -64,9 +64,8 @@ class UltronVoiceEngine:
 
         async with self._lock:
             logger.info(f'>>> [ULTRON SPEAKING]: "{text}"')
-            await self._notify_speaking_state(True)
-
             try:
+                await self._notify_speaking_state(True)
                 communicate = edge_tts.Communicate(
                     text,
                     ULTRON_VOICE,
@@ -74,9 +73,11 @@ class UltronVoiceEngine:
                     rate=ULTRON_RATE,
                 )
                 audio_data = bytearray()
-                async for chunk in communicate.stream():
-                    if chunk["type"] == "audio":
-                        audio_data.extend(chunk["data"])
+                async with asyncio.timeout(20):
+                    async for chunk in communicate.stream():
+                        if chunk["type"] == "audio":
+                            audio_data.extend(chunk["data"])
+                logging.info('[TTS READY]: synthesis complete; starting playback')
 
                 if audio_data:
                     sound_file = io.BytesIO(audio_data)
@@ -84,9 +85,12 @@ class UltronVoiceEngine:
                     pygame.mixer.music.play()
 
                     # Block until playback physically ends on sound card
-                    while pygame.mixer.music.get_busy():
-                        await asyncio.sleep(0.05)
+                    async with asyncio.timeout(90):
+                        while pygame.mixer.music.get_busy():
+                            await asyncio.sleep(0.05)
 
+            except TimeoutError:
+                logger.error('[ULTRON VOICE ERROR]: Speech timed out; stopping playback and releasing microphone gate.')
             except Exception as e:
                 logger.error(f"[ULTRON VOICE ERROR]: {e}")
 
