@@ -286,3 +286,13 @@ def test_gate_starts_muted_and_rejects_stale_idle_snapshot(listener):
         await gate.set_speaking(False, 13)
         assert not gate.is_speaking
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('text, expected', [
+    ('Hey Ultron, Hey Ultron,', ''),
+    ('Ultron! Hey Ultron. Hello Ultron?', ''),
+    ('Hey Ultron, hey Ultron, open calculator.', 'open calculator.'),
+    ('Hey Ultron, run Ultron smoke script.', 'run Ultron smoke script.'),
+])
+def test_repeated_wake_prefixes_do_not_become_model_commands(listener, text, expected):
+    assert listener.extract_wake_word_command(text) == (True, expected)

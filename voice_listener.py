@@ -339,29 +339,15 @@ def extract_wake_word_command(
         r"^\s*(?:(?:(?:ok(?:ay)?[\s,]+)?(?:so[\s,]+)?(?:hey|hello)[\s,]+)|ok(?:ay)?[\s,]+)?ultron\b"
     )
 
-    match = re.search(
-        pattern,
-        text,
-        re.IGNORECASE,
-    )
-
-    if match:
-
-        wake_end = match.end()
-
-        command = text[
-            wake_end:
-        ].strip()
-
-        command = re.sub(
-            r"^[,\.\?\!\s]+",
-            "",
-            command,
-        )
-
-        return True, command
-
-    return False, ""
+    found = False
+    command = text
+    while True:
+        match = re.search(pattern, command, re.IGNORECASE)
+        if not match:
+            break
+        found = True
+        command = re.sub(r"^[,\.\?\!\s]+", "", command[match.end():])
+    return (True, command) if found else (False, "")
 
 
 # =========================================================

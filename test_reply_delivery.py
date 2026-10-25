@@ -168,3 +168,50 @@ def test_routing_batch_stays_out_of_model_queue(tmp_path):
         assert [r['requestId'] for r in replies] == [str(i) for i in range(200)]
         assert all('cannot access' not in r['text'] for r in replies)
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('prompt', [
+    'Give me calendar updates as well as what are my system stats',
+    'Check my calendar and show my system stats',
+    'Can you give me calendar updates and also what are my system stats?',
+])
+def test_combined_google_and_system_reads(prompt, monkeypatch):
+    from ultron_control import read_requests as reads
+    kinds = reads.read_request_kinds(prompt)
+    assert kinds == ('google-calendar', 'telemetry')
+    monkeypatch.setattr(reads, 'collect_telemetry', lambda: {'cpu_percent': 12, 'memory_percent': 60})
+    google = SimpleNamespace(spoken_reply=lambda kind: 'Calendar sync is unavailable.')
+    reply = reads.read_request_reply(kinds, google)
+    assert 'Calendar sync is unavailable' in reply and 'CPU: 12%' in reply
+    def broken(kind): raise RuntimeError('private token')
+    google.spoken_reply = broken
+    reply = reads.read_request_reply(kinds, google)
+    assert 'unavailable' in reply and 'CPU: 12%' in reply and 'private token' not in reply
+
+
+@pytest.mark.parametrize('prompt', ['check my calendar and delete my files',
+    'do not check my calendar and system stats', '"check my calendar" and system stats',
+    'open calculator and system stats', 'system stats and system stats and system stats and system stats and system stats'])
+def test_read_composition_never_swallows_other_actions(prompt):
+    from ultron_control.read_requests import read_request_kinds
+    assert read_request_kinds(prompt) is None
+
+
+def test_capability_and_combined_reads_bypass_busy_model(tmp_path, monkeypatch):
+    from ultron_control import read_requests as reads
+    from ultron_control.google_routing import route_request
+    monkeypatch.setattr(reads, 'collect_telemetry', lambda: {'cpu_percent': 7})
+    async def run():
+        replies = []
+        async def handle(msg): pytest.fail('local request reached model')
+        async def publish(subject, payload): replies.append(json.loads(payload))
+        inbox = IntentInbox(SimpleNamespace(google_updates=GoogleUpdates(tmp_path)),
+                            SimpleNamespace(publish=publish), handle, route_request)
+        for prompt in ['what all tasks can you do for me?', 'Hey Ultron, Hey Ultron,',
+                       'check my calendar and what are my system stats']:
+            await inbox.receive(SimpleNamespace(data=json.dumps({'prompt':prompt, 'requestId':prompt}).encode()))
+        assert inbox.pending.empty()
+        assert 'named applications' in replies[0]['text']
+        assert 'listening' in replies[1]['text']
+        assert 'Not connected' in replies[2]['text'] and 'CPU: 7%' in replies[2]['text']
+    asyncio.run(run())

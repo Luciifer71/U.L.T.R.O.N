@@ -163,12 +163,12 @@ def warm_ollama(host, model):
     from ollama_runtime import OllamaRuntimeConfig
     try:
         config = OllamaRuntimeConfig.from_env(host=host, model=model)
-        options = {'num_predict': 1, 'temperature': 0}
+        options = {'num_predict': 8, 'temperature': 0}
         for key, value in (('num_ctx', config.num_ctx), ('temperature', config.temperature),
                            ('seed', config.seed)):
             if value is not None:
                 options[key] = value
-        payload = {'model': model, 'messages': [{'role': 'user', 'content': 'Reply OK.'}],
+        payload = {'model': model, 'messages': [{'role': 'user', 'content': 'Count from one to eight.'}],
                    'stream': False, 'keep_alive': '10m', 'options': options}
         if config.think is not None:
             payload['think'] = config.think
@@ -180,6 +180,12 @@ def warm_ollama(host, model):
             result = json.load(response)
         if not isinstance(result, dict) or result.get('error') or result.get('done') is not True:
             raise ValueError('Ollama did not return a completed warmup response')
+        timing = {'wall_seconds': round(time.monotonic() - started, 3)}
+        for field in ('load_duration', 'prompt_eval_duration', 'eval_duration', 'eval_count'):
+            value = result.get(field)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                timing[field.replace('_duration', '_seconds')] = round(value / 1e9, 3) if field.endswith('_duration') else value
+        print('[WARMUP TIMING] ' + json.dumps(timing), flush=True)
         print(f'Model warmup complete in {time.monotonic() - started:.1f}s. Starting components.', flush=True)
     except (OSError, ValueError) as exc:
         raise StartupError(f'Model warmup failed; microphone not started: {exc}') from exc

@@ -542,3 +542,19 @@ def test_local_facts_never_call_model_or_stage_actions(tmp_path, monkeypatch, pr
     brain.ollama.chat = forbidden
     reply, actions = asyncio.run(brain.process_intent(prompt, 'local-facts'))
     assert expected in reply and not actions
+
+
+@pytest.mark.parametrize('prompt', ['What all tasks can you do for me?',
+    'Give me calendar updates as well as what are my system stats'])
+def test_composed_facts_never_invoke_planner(tmp_path, monkeypatch, prompt):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    brain.google_updates = SimpleNamespace(spoken_reply=lambda kind: 'Calendar sync is unavailable.')
+    monkeypatch.setattr('ultron_control.read_requests.collect_telemetry', lambda: {'cpu_percent': 8})
+    async def forbidden(**kwargs): pytest.fail('facts reached model')
+    brain.ollama.chat = forbidden
+    reply, actions = asyncio.run(brain.process_intent(prompt, 'composed-facts'))
+    assert not actions
+    if 'calendar' in prompt:
+        assert 'unavailable' in reply and 'CPU: 8%' in reply
+    else:
+        assert 'named applications' in reply and 'Script Execution' not in reply

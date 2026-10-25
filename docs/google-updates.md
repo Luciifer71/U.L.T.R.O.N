@@ -159,3 +159,16 @@ evidence, not a production load benchmark or proof of live OAuth/audio health.
 When reporting a problem, include the exact request, whether the typed reply arrived,
 and whether you heard speech, alongside one support ZIP. Do not attach OAuth client
 JSON files, tokens or the private Google cache.
+
+### Combined status requests
+
+You can ask “Give me calendar updates as well as what are my system stats” or
+“Check my calendar and show my system stats.” Up to four explicit read-only
+clauses joined with “and,” “and also,” “also” or “as well as” are supported by this
+status path. Email/calendar status, system stats, uptime and capability questions
+are supported. Each result is included even when another source is unavailable.
+Telemetry collection runs outside the event loop in the immediate reply lane.
+
+This does not add arbitrary multi-action planning. Mixed desktop mutations and
+unknown clauses do not execute through the read-only path. Google updates retain
+the same cached-count, single-account and next-24-hour calendar limitations.

@@ -241,3 +241,27 @@ showing all model layers offloaded to the GPU confirms that model's GPU placemen
 it does not confirm Whisper initialization, microphone capture or audible playback.
 If startup fails, retain the final error and collect a support bundle using the
 [report instructions](support-bundles.md).
+
+## Repeated wake words and first-response latency
+
+Repeated leading wake phrases, such as “Hey Ultron, Hey Ultron,” now produce one
+wake acknowledgement and no leftover greeting for the model. A following command
+is retained; an occurrence of “Ultron” inside a filename is not removed.
+“What all tasks can you do for me?” uses the factual capability response.
+
+The launcher exercises up to eight generated tokens before starting components.
+Its `[WARMUP TIMING]` line separates wall time, model loading, prompt evaluation
+and token generation when Ollama supplies those fields. Qwen3 runtime requests
+retain the model for ten minutes by default, matching startup; explicit caller
+retention values still take precedence. Retention uses memory while idle.
+These changes avoid unnecessary model requests and exercise generation during
+startup; they do not guarantee faster disk loading or eliminate GPU/driver stalls.
+
+To check a slow start, retain the warmup timing line and compare it with the first
+`[OLLAMA TIMING]` request. A long load phase and slow generation are different
+problems. Capture available RAM/GPU memory at the time of the delay before
+attributing it to memory pressure. A later snapshot cannot establish the cause.
+
+Audio-driver overflow rejects the affected capture and waits for a clean quiet
+gap. A recording completed before that overflow can still finish transcription;
+its adjacent log entry does not by itself mean damaged audio was dispatched.

@@ -135,6 +135,8 @@ class OllamaRuntime:
         # A configured trial profile applies to every brain request, including
         # retries and follow-up summaries. Never mutate a caller's options.
         kwargs = dict(kwargs)
+        if self.config.model == 'qwen3:8b':
+            kwargs.setdefault('keep_alive', '10m')
         options = dict(kwargs.get('options') or {})
         for key, value in (('num_ctx', self.config.num_ctx),
                            ('temperature', self.config.temperature),
