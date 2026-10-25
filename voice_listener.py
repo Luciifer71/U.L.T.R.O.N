@@ -18,6 +18,7 @@ from nats.aio.client import Client as NATS
 import sounddevice as sd
 
 from microphone_runtime import inventory, fingerprint, microphone_candidates, probe_inventory
+from speech_activity import create_speech_activity
 from visual_events import publish_visual_event
 from audio_pipeline import AudioFrame, AudioMailbox, UtteranceSegmenter, TranscriptionWorker
 
@@ -30,7 +31,13 @@ from audio_pipeline import AudioFrame, AudioMailbox, UtteranceSegmenter, Transcr
 # Explicit process settings remain available for temporary test overrides.
 load_dotenv(Path(__file__).resolve().with_name(".env"), override=False)
 NATS_URL = os.getenv("NATS_URL", "nats://127.0.0.1:4222")
-MIC_DEVICE = os.getenv("AUDIO_INPUT_DEVICE") or None
+INPUT_MODE = os.getenv("AUDIO_INPUT_MODE", "auto").strip().lower()
+if INPUT_MODE not in {"auto", "pinned"}:
+    raise ValueError("AUDIO_INPUT_MODE must be auto or pinned")
+CONFIGURED_MIC_DEVICE = os.getenv("AUDIO_INPUT_DEVICE") or None
+MIC_DEVICE = CONFIGURED_MIC_DEVICE if INPUT_MODE == "pinned" else None
+if INPUT_MODE == "pinned" and MIC_DEVICE is None:
+    raise ValueError("Pinned input mode requires AUDIO_INPUT_DEVICE")
 if MIC_DEVICE is not None and MIC_DEVICE.isdecimal():
     MIC_DEVICE = int(MIC_DEVICE)
 SAMPLE_RATE = 16000
@@ -363,8 +370,11 @@ def extract_wake_word_command(
         r"^\s*(?:(?:(?:ok(?:ay)?[\s,]+)?(?:so[\s,]+)?(?:hey|hello)[\s,]+)|ok(?:ay)?[\s,]+)?ultron\b"
     )
 
+    # A small acknowledgement before a direct address is supported. Do not
+    # search arbitrary prose for Ultron: quoted/reported commands must not wake.
+    command = re.sub(r"^\s*(?:very good|thank you|thanks|alright)[.!?,]+\s*(?=(?:hey|hello)\s+ultron\b)",
+                     "", text, flags=re.IGNORECASE)
     found = False
-    command = text
     while True:
         match = re.search(pattern, command, re.IGNORECASE)
         if not match:
@@ -452,6 +462,9 @@ async def main():
         await nc.close()
         raise
 
+    speech_activity = await asyncio.to_thread(create_speech_activity)
+    logging.info('[MIC CONFIG]: mode=%s; legacy device override %s', INPUT_MODE,
+                 'ignored in automatic mode' if INPUT_MODE == 'auto' and CONFIGURED_MIC_DEVICE else 'not overridden')
     loop = asyncio.get_running_loop()
 
     audio_queue = AudioMailbox(loop, capacity=AUDIO_MAILBOX_BLOCKS)
@@ -578,6 +591,8 @@ async def main():
         # Neither pending nor in-flight transcripts from the old stream may act.
         transcriber.generation += 1
         segmenter._reject('microphone changed')
+        if speech_activity is not None:
+            speech_activity.reset()
         is_active_session = False
         try:
             stream_manager.start(refresh=True)
@@ -703,8 +718,7 @@ async def main():
 
                     print(
                         "[IGNORED]: "
-                        "Wake word 'Ultron' "
-                        "not present."
+                        "No supported direct wake address at the start of the request."
                     )
 
 
@@ -870,14 +884,31 @@ async def main():
             rms_energy = float(np.sqrt(np.mean(block ** 2)))
             peak_rms = max(peak_rms, rms_energy)
             if now - last_health_log >= 10:
-                logging.info('[MIC HEALTH]: device=%r peak_rms=%.4f threshold=%.4f gate=%s mode=%s',
+                logging.info('[MIC HEALTH]: device=%r peak_rms=%.4f threshold=%.4f gate=%s mode=%s endpoint=%s',
                              stream_manager.device_name, peak_rms, silence_threshold,
                              'paused' if acoustic_gate.is_speaking else 'listening',
-                             'active' if is_active_session else 'standby')
+                             'active' if is_active_session else 'standby',
+                             'silero' if speech_activity is not None else 'rms')
                 peak_rms = 0.0
                 last_health_log = now
+            speech = rms_energy > silence_threshold
+            if speech_activity is not None:
+                if (frame.muted or acoustic_gate.is_speaking or frame.discontinuity
+                        or now - frame.captured_at > MAX_AUDIO_BACKLOG_SEC
+                        or (segmenter.last_sequence is not None and frame.sequence != segmenter.last_sequence + 1)):
+                    speech_activity.reset()
+                else:
+                    try:
+                        speech = await asyncio.to_thread(speech_activity.classify, block)
+                    except Exception:
+                        logging.exception('[SPEECH DETECTOR]: failed; discarding incomplete audio and reverting to RMS')
+                        segmenter._reject('speech detector failed')
+                        transcriber.generation += 1
+                        speech_activity = None
+                        continue
+            now = time.monotonic()
             segment = segmenter.feed(
-                frame, speech=rms_energy > silence_threshold,
+                frame, speech=speech,
                 now=now, muted=acoustic_gate.is_speaking,
             )
             if segment.discarded_reason:

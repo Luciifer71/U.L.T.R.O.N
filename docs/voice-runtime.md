@@ -58,6 +58,7 @@ repair the Linux dynamic loader by changing that variable after startup.
 ```powershell
 .\.venv\Scripts\python.exe speech_diagnostics.py --list-mics
 .\.venv\Scripts\python.exe speech_diagnostics.py --device cuda --mic-device 1 --record-seconds 6
+$env:AUDIO_INPUT_MODE = "pinned"
 $env:AUDIO_INPUT_DEVICE = "1"
 .\.venv\Scripts\python.exe voice_listener.py
 ```
@@ -268,12 +269,13 @@ its adjacent log entry does not by itself mean damaged audio was dispatched.
 
 ### Automatic microphone selection and recovery
 
-With `AUDIO_INPUT_DEVICE` unset, the listener prefers an available headset input,
+With `AUDIO_INPUT_MODE=auto` (the default), the listener prefers an available headset input,
 then a laptop microphone array, then another physical microphone. Output-only
 headphones do not replace the laptop microphone. Windows device names are used
 as a heuristic; this detects an exposed input, not whether a headset is being worn.
-An explicit `AUDIO_INPUT_DEVICE` setting still pins that device for installations
-that require it. No Windows recording or playback defaults are changed.
+Legacy `AUDIO_INPUT_DEVICE` values are ignored in auto mode, with a startup log.
+To intentionally pin a device, set both `AUDIO_INPUT_MODE=pinned` and
+`AUDIO_INPUT_DEVICE`. No private `.env` file or Windows audio default is modified.
 
 A separate, bounded helper checks the device inventory every 10 seconds because
 PortAudio caches its initial device list. Healthy streams are not periodically
@@ -296,3 +298,26 @@ TTS to avoid self-triggering; voice interruption is not implemented. Synthesis i
 bounded to 20 seconds and playback to 90 seconds, with gate release on completion,
 error, cancellation or timeout. Capability answers retain full terminal text but
 use a shorter spoken summary. `stop-ultron-speech.cmd` can stop speech immediately.
+
+
+### Speech boundaries and short acknowledgements
+
+The listener now uses Faster-Whisper 1.2.1's bundled Silero detector on a bounded
+one-second rolling window, off the audio callback and event loop. Only the newest
+64 ms determines speech activity; a 1.4-second non-speech interval still ends a
+recording. RMS remains diagnostic rather than the sole trigger, allowing steady
+non-speech noise to end an utterance. Detection state resets across playback,
+device switches and damaged frames. The 15-second maximum still **rejects** an
+unfinished utterance; it does not execute a truncated command. Initialization
+failure logs an explicit RMS fallback. Runtime detector failure invalidates the
+current capture and pending recognition before falling back.
+
+`[MIC HEALTH]` shows `endpoint=silero` or `endpoint=rms`. This does not establish
+accuracy on every microphone, accent or background sound; the detector can still
+misclassify speech. No user audio is recorded or uploaded by this change.
+
+A short acknowledgement such as `Very good. Hey Ultron` may precede a direct wake
+address. This is a bounded allowlist, not an arbitrary search through quoted or
+reported commands. Capability variants including the observed `give-abilities`
+transcription use the factual fast reply. The voice daemon now honors a separate
+`speech` field, including explicit empty speech, instead of preferring full `text`.

@@ -218,3 +218,14 @@ def test_capability_and_combined_reads_bypass_busy_model(tmp_path, monkeypatch):
         assert 'listening' in replies[1]['text']
         assert 'Not connected' in replies[2]['text'] and 'CPU: 7%' in replies[2]['text']
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('prompt', ['Tell me what are your capabilities?', 'Tell me what are your give-abilities?', 'what are your capabilities'])
+def test_capability_variants_use_factual_fast_lane(prompt):
+    from ultron_control.read_requests import read_request_kinds
+    assert read_request_kinds(prompt) == ('capabilities',)
+
+
+def test_capability_variant_does_not_swallow_an_action():
+    from ultron_control.read_requests import read_request_kinds
+    assert read_request_kinds('tell me what are your capabilities and open calculator') is None

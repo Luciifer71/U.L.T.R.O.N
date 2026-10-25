@@ -275,6 +275,8 @@ def local_information_kind(prompt: str) -> str | None:
     """Recognize whole informational requests, never consume a mixed command."""
     text = re.sub(r"[^a-z0-9']+", " ", _normalize_text(prompt)).strip()
     text = re.sub(r"^(?:(?:okay|ok|please|and)\s+)+", "", text)
+    if re.fullmatch(r"(?:tell me )?(?:what are your|what are all your|list your|show your) (?:capabilities|give abilities)", text):
+        return "capabilities"
     for kind, phrases in {
         "clock": {"what time is it", "what is the time", "what's the time", "current time", "tell me the time"},
         "date": {"what is today's date", "what's today's date", "what is the date", "what's the date", "what day is it", "today's date"},
