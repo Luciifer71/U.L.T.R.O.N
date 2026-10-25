@@ -279,7 +279,7 @@ def local_information_kind(prompt: str) -> str | None:
         "clock": {"what time is it", "what is the time", "what's the time", "current time", "tell me the time"},
         "date": {"what is today's date", "what's today's date", "what is the date", "what's the date", "what day is it", "today's date"},
         "disk": {"how much disk space is free", "how much disk space do i have", "disk space", "free disk space", "check disk space"},
-        "capabilities": {"what can you do", "what can you help me with", "show your capabilities", "list your capabilities"},
+        "capabilities": {"what can you do", "what can you help me with", "show your capabilities", "list your capabilities", "what all tasks can you do for me", "what tasks can you do", "what tasks can you do for me", "what can you do for me"},
     }.items():
         if text in phrases:
             return kind
@@ -302,6 +302,7 @@ def local_information_kind(prompt: str) -> str | None:
         return "uptime"
     if text in {
         "what are my system statistics", "system statistics", "system usage",
+        "what are my system stats", "system stats", "show my system stats", "give me my system stats",
         "what is my uptime", "what's my uptime", "system uptime",
         "view usage and what is my uptime", "what is my system uptime",
     }:

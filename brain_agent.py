@@ -61,6 +61,7 @@ from visual_events import publish_visual_event
 from ultron_control.system_info import collect_telemetry, format_telemetry, format_uptime, format_runtime_status
 from ultron_control.capability_broker import CapabilityBroker
 from ultron_control.reply_delivery import IntentInbox
+from ultron_control.read_requests import read_request_kinds, read_request_reply
 from ultron_control.local_facts import clock_reply, disk_reply, capabilities_reply
 from ultron_control.google_updates import GoogleUpdates, route_request as google_request_kind
 from ultron_control.request_planning import explicit_launch_plan, explicit_resource_plan, PlanClarification, validate_application_targets
@@ -1157,6 +1158,9 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
         return snapshot
 
     def _compose_local_reply(self, prompt: str) -> str | None:
+        reads = read_request_kinds(prompt)
+        if reads and (len(reads) > 1 or reads[0] in {'greeting', 'capabilities'}):
+            return read_request_reply(reads, getattr(self, 'google_updates', None))
         google_kind = google_request_kind(prompt)
         if google_kind:
             return self.google_updates.spoken_reply(google_kind)

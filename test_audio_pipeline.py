@@ -244,3 +244,16 @@ def test_audio_driver_reason_survives_segment_rejection():
     result = engine.feed(frame, speech=True, now=100)
     assert 'audio driver: input overflow' in result.discarded_reason
     assert result.blocks is None
+
+
+def test_later_driver_overflow_does_not_corrupt_completed_utterance():
+    engine = segmenter()
+    feed(engine, 1)
+    completed = feed(engine, 2, count=14, speech=False)
+    assert completed.blocks is not None
+    rejected = feed(engine, 3, discontinuity=True)
+    assert rejected.discarded_reason and rejected.blocks is None
+    assert [block[0] for block in completed.blocks] == [1, 2]
+    assert feed(engine, 4).blocks is None
+    feed(engine, 5, count=14, speech=False)
+    assert feed(engine, 6).started

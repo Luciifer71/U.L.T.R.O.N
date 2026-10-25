@@ -22,7 +22,7 @@ class LauncherTests(unittest.TestCase):
         payload = json.loads(request.data)
         self.assertEqual(payload['model'], 'qwen3:8b')
         self.assertIs(payload['think'], False)
-        self.assertEqual(payload['options'], {'num_predict': 1, 'temperature': 0,
+        self.assertEqual(payload['options'], {'num_predict': 8, 'temperature': 0,
                                               'num_ctx': 4096, 'seed': 42})
         self.assertNotIn('tools', payload)
         self.assertEqual(opener.open.call_args.kwargs['timeout'], 300)
@@ -143,3 +143,14 @@ def test_main_warms_before_any_component_and_stops_on_failure(monkeypatch, tmp_p
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def test_warmup_reports_separate_loading_and_generation(capsys):
+    opener = MagicMock()
+    opener.open.return_value = io.StringIO(json.dumps({'done':True, 'load_duration':190000000000,
+        'prompt_eval_duration':1000000000, 'eval_duration':2000000000, 'eval_count':8}))
+    with patch.object(launcher, 'build_opener', return_value=opener):
+        launcher.warm_ollama('http://127.0.0.1:11434', 'qwen3:8b')
+    output = capsys.readouterr().out
+    assert '"load_seconds": 190.0' in output and '"eval_seconds": 2.0' in output
+    assert '"eval_count": 8' in output

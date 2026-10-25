@@ -41,13 +41,15 @@ def test_trial_profile_applies_to_every_request_without_mutation(monkeypatch):
     options = {'temperature': 0.2, 'num_predict': 256}
     async def run():
         await runtime.chat(model='qwen3:8b', messages=[], options=options)
-        await runtime.chat(model='qwen3:8b', messages=[])
+        await runtime.chat(model='qwen3:8b', messages=[], keep_alive='2m')
     asyncio.run(run())
     for request in received:
         assert request['think'] is False
         assert request['options']['num_ctx'] == 4096
         assert request['options']['temperature'] == 0
         assert request['options']['seed'] == 42
+    assert received[0]['keep_alive'] == '10m'
+    assert received[1]['keep_alive'] == '2m'
     assert received[0]['options']['num_predict'] == 256
     assert options == {'temperature': 0.2, 'num_predict': 256}
 
@@ -92,7 +94,8 @@ def test_timing_metadata_preserves_response_and_excludes_content(monkeypatch, ca
     result = asyncio.run(runtime.chat(diagnostic_task_id='task-1', diagnostic_phase='plan',
                                      messages=[{'role': 'user', 'content': 'private prompt'}]))
     assert result is response
-    assert set(received[0]) == {'messages'}
+    assert set(received[0]) == {'messages', 'keep_alive'}
+    assert received[0]['keep_alive'] == '10m'
     output = capsys.readouterr().out
     assert 'private' not in output
     row = json.loads(output.split('[OLLAMA TIMING] ')[1])

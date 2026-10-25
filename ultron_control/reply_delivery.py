@@ -4,6 +4,8 @@ from collections import deque
 import json
 import time
 
+from ultron_control.read_requests import read_request_kinds, read_request_reply
+
 
 class SpeechQueue:
     def __init__(self, speak, *, clock=time.monotonic, limit=16):
@@ -84,11 +86,14 @@ class IntentInbox:
         except (ValueError, UnicodeError):
             return
         stop = prompt.lower().strip(' .!?') in {'stop speaking', 'cancel speech', 'be quiet'}
-        kind = self.classify(prompt)
+        reads = read_request_kinds(prompt) if not stop else None
+        kind = '+'.join(reads) if reads else self.classify(prompt)
         if stop or kind:
             if stop:
                 await self.nc.publish('ultron.voice.cancel', b'{}')
                 reply = 'Speech cancelled. Running actions were not cancelled.'
+            elif reads:
+                reply = await asyncio.to_thread(read_request_reply, reads, self.brain.google_updates)
             else:
                 reply = self.brain.google_updates.spoken_reply(kind)
             payload = {'text': reply, 'speech': '' if stop else reply,
