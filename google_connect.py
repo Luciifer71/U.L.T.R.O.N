@@ -2,15 +2,19 @@
 import argparse
 import json
 import sqlite3
-from ultron_control.google_updates import connect, disconnect, private_dir
+from ultron_control.google_updates import connect, disconnect, private_dir, connection_diagnostics, failure_details
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['connect', 'disconnect', 'review'])
+    parser.add_argument('command', choices=['connect', 'disconnect', 'review', 'doctor'])
     parser.add_argument('--client', help='Google Desktop OAuth client JSON, outside the repository')
     args = parser.parse_args()
     try:
+        if args.command == 'doctor':
+            report = connection_diagnostics()
+            print(json.dumps(report, indent=2))
+            return int(any(isinstance(value, dict) and value.get('status') == 'failed' for value in report.values()))
         if args.command == 'connect':
             if not args.client:
                 parser.error('--client is required for connect')
@@ -34,8 +38,8 @@ def main():
                 for event in json.loads(row[0]) if row else []:
                     print(f"- Calendar: {event['start']} {event['title']}")
         return 0
-    except Exception:
-        print('Google setup/review failed. Check optional dependencies, Windows Credential Manager and Google consent. No credentials were printed.')
+    except Exception as error:
+        print(json.dumps(failure_details(error), indent=2))
         return 1
 
 

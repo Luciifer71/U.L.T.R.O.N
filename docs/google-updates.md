@@ -172,3 +172,41 @@ Telemetry collection runs outside the event loop in the immediate reply lane.
 This does not add arbitrary multi-action planning. Mixed desktop mutations and
 unknown clauses do not execute through the read-only path. Google updates retain
 the same cached-count, single-account and next-24-hour calendar limitations.
+
+### Diagnose an integration that previously worked
+
+Run this once with the same interpreter as Ultron:
+
+```powershell
+.\.venv\Scripts\python.exe .\google_connect.py doctor
+```
+
+It checks saved credentials, automatic access-token refresh, Gmail access and
+primary-calendar access independently after client initialization. It does not
+download email bodies, reset the cache, or print tokens, account addresses or
+event titles. Successful refresh saves the renewed credentials automatically.
+The support ZIP now runs this check automatically for configured Google access,
+with a 60-second process deadline, and includes optional dependency versions.
+
+- `reauthorization_required`: Google returned `invalid_grant`. Renew consent with
+  the existing Desktop client using the connect command above. This is not proof
+  of a code regression or of the specific reason Google rejected the grant.
+- `oauth_client`: check the Desktop client configuration before reconnecting.
+- `credential_store` / `credential_format`: the Windows vault or saved data failed;
+  the log also identifies the read, save or decode stage.
+- `dependency`: install `requirements-google.txt` into this virtual environment.
+- `network`, `service`, `quota`: resolve connectivity or allow retry; do not
+  delete credentials to fix a temporary provider failure.
+- `forbidden`: check enabled APIs, permissions and quota. A 403 alone does not
+  establish which of those caused it.
+
+Google documents seven-day refresh-token expiry for External OAuth apps in
+**Testing** with these scopes. If this is confirmed as the recurring cause,
+review the project's publishing status and Google's verification requirements;
+publishing is a separate owner decision, not something Ultron changes silently.
+See [Google refresh-token expiration](https://developers.google.com/identity/protocols/oauth2#expiration).
+
+Natural requests including “Are you able to access my Google calendar?”, “Check
+out the email and calendar updates right now”, and “And what are my Google
+calendar updates?” now use the cached status path. Unsupported dates such as
+“next week” still get clarification rather than a misleading 24-hour answer.

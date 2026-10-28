@@ -23,27 +23,70 @@ class GoogleNotConnectedError(RuntimeError):
     pass
 
 
-def sync_failure(service, error):
-    """Expose fixed categories only, never exception text or remote response bodies."""
+class GoogleStageError(RuntimeError):
+    def __init__(self, stage, cause):
+        self.stage, self.cause = stage, cause
+        super().__init__('Google connection stage failed')
+
+
+def failure_details(error):
+    """Return allowlisted facts only; never serialize exception messages/bodies."""
+    stage = error.stage if isinstance(error, GoogleStageError) else 'api'
+    error = error.cause if isinstance(error, GoogleStageError) else error
+    classes = {(c.__module__, c.__name__) for c in type(error).__mro__}
     status = getattr(getattr(error, 'resp', None), 'status', None)
+    oauth = next((arg.get('error') for arg in error.args
+                  if isinstance(arg, dict) and arg.get('error') in
+                  {'invalid_grant', 'invalid_client', 'unauthorized_client', 'temporarily_unavailable'}), None)
     if isinstance(error, GoogleNotConnectedError):
         code, advice = 'not_connected', 'No saved Google credentials were found.'
     elif isinstance(error, ImportError):
-        code, advice = 'dependency', 'A required Google integration dependency is missing.'
+        code, advice = 'dependency', 'Install requirements-google.txt with the Ultron Python interpreter.'
+    elif ('google.auth.exceptions', 'RefreshError') in classes:
+        if oauth == 'invalid_grant':
+            code, advice = 'reauthorization_required', 'Google rejected the saved authorization. Reconnect this account. Expiry or revocation are possible; the exact reason is not established.'
+        elif oauth in {'invalid_client', 'unauthorized_client'}:
+            code, advice = 'oauth_client', 'Google rejected the OAuth client. Check the Desktop client configuration.'
+        elif getattr(error, 'retryable', False) or oauth == 'temporarily_unavailable':
+            code, advice = 'service', 'Google token service is temporarily unavailable; sync will retry.'
+        else:
+            code, advice = 'token_refresh', 'Google token refresh failed. Run google_connect.py doctor for connection status.'
+    elif isinstance(error, (TimeoutError, ConnectionError)) or any(
+            module in {'google.auth.exceptions', 'requests.exceptions', 'httplib2', 'socket'}
+            and name in {'TransportError', 'ConnectionError', 'Timeout', 'HttpLib2Error', 'gaierror'}
+            for module, name in classes):
+        code, advice = 'network', 'A network connection or timeout interrupted sync; it will retry.'
     elif status == 401:
         code, advice = 'authentication', 'Google rejected authentication; reconnect may be required.'
     elif status == 403:
-        code, advice = 'forbidden', 'Google denied access; check API permissions and quota.'
+        code, advice = 'forbidden', 'Google denied access; check API enablement, permissions and quota.'
     elif status == 429:
         code, advice = 'quota', 'Google rate limit reached; sync will retry.'
     elif isinstance(status, int) and 500 <= status <= 599:
         code, advice = 'service', 'Google service is temporarily unavailable.'
-    elif isinstance(error, (TimeoutError, ConnectionError)):
-        code, advice = 'network', 'A network connection or timeout interrupted sync.'
+    elif stage in {'credential_read', 'credential_save'}:
+        code, advice = 'credential_store', 'Windows Credential Manager could not read or save Google access.'
+    elif stage == 'credential_decode':
+        code, advice = 'credential_format', 'Saved Google credentials could not be loaded. Reconnect this account.'
+    elif isinstance(error, sqlite3.Error):
+        code, advice = 'cache', 'The local Google cache is unavailable; check disk access and competing Ultron instances.'
     else:
         code, advice = 'unknown', 'The cause is not established; inspect connection setup and diagnostics.'
-    logging.getLogger(__name__).warning('[GOOGLE SYNC ERROR]: service=%s code=%s', service, code)
-    return f'{service} sync unavailable. {advice}'
+    return {'stage': stage, 'code': code, 'advice': advice}
+
+
+def sync_failure(service, error):
+    details = failure_details(error)
+    logging.getLogger(__name__).warning('[GOOGLE SYNC ERROR]: service=%s stage=%s code=%s',
+                                      service, details['stage'], details['code'])
+    return f"{service} sync unavailable. {details['advice']}"
+
+
+def connection_stage(stage, operation):
+    try:
+        return operation()
+    except Exception as error:
+        raise GoogleStageError(stage, error) from None
 
 
 def private_dir():
@@ -61,14 +104,57 @@ def vault():
 def credentials():
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
-    saved = vault().get_password(SERVICE, 'credentials')
+    saved = connection_stage('credential_read', lambda: vault().get_password(SERVICE, 'credentials'))
     if not saved:
         raise GoogleNotConnectedError('Google is not connected')
-    creds = Credentials.from_authorized_user_info(json.loads(saved), SCOPES)
+    creds = connection_stage('credential_decode',
+                            lambda: Credentials.from_authorized_user_info(json.loads(saved), SCOPES))
     if not creds.valid:
-        creds.refresh(Request())
-        vault().set_password(SERVICE, 'credentials', creds.to_json())
+        request = Request()
+        def bounded_request(*args, **kwargs):
+            kwargs.setdefault('timeout', 15)
+            return request(*args, **kwargs)
+        connection_stage('token_refresh', lambda: creds.refresh(bounded_request))
+        connection_stage('credential_save', lambda: vault().set_password(SERVICE, 'credentials', creds.to_json()))
     return creds
+
+
+
+def google_clients():
+    from googleapiclient.discovery import build
+    import google_auth_httplib2
+    import httplib2
+    creds = credentials()
+    def client(api, version):
+        http = google_auth_httplib2.AuthorizedHttp(creds, http=httplib2.Http(timeout=15))
+        return connection_stage('client_build',
+                                lambda: build(api, version, http=http, cache_discovery=False))
+    return client('gmail', 'v1'), client('calendar', 'v3')
+
+
+def connection_diagnostics():
+    """Live bounded read checks, without downloading message bodies or changing cache."""
+    report = {'scope': 'Live read-only Google connection checks; no email contents or tokens included.'}
+    try:
+        gmail, calendar = google_clients()
+    except Exception as error:
+        report['connection'] = {'status': 'failed', **failure_details(error)}
+        return report
+    report['connection'] = {'status': 'ok'}
+    now = datetime.now(timezone.utc)
+    checks = {
+        'gmail': lambda: gmail.users().messages().list(userId='me', maxResults=1).execute(num_retries=0),
+        'calendar': lambda: calendar.events().list(calendarId='primary', timeMin=now.isoformat(),
+            timeMax=(now + timedelta(hours=24)).isoformat(), singleEvents=True,
+            maxResults=1).execute(num_retries=0),
+    }
+    for name, check in checks.items():
+        try:
+            check()
+            report[name] = {'status': 'ok'}
+        except Exception as error:
+            report[name] = {'status': 'failed', **failure_details(error)}
+    return report
 
 
 def connect(client_file):
@@ -148,6 +234,8 @@ class GoogleUpdates:
         self.mail_ok = False
         self.calendar_ok = False
         self.enabled = (self.root / 'enabled').exists()
+        if self.enabled:
+            self.status = 'Waiting for the first successful sync.'
 
     def reply(self, kind='all'):
         if not self.enabled:
@@ -196,14 +284,7 @@ class GoogleUpdates:
 
     def sync(self, gmail=None, calendar=None):
         if gmail is None:
-            from googleapiclient.discovery import build
-            import google_auth_httplib2
-            import httplib2
-            creds = credentials()
-            def client(api, version):
-                http = google_auth_httplib2.AuthorizedHttp(creds, http=httplib2.Http(timeout=15))
-                return build(api, version, http=http, cache_discovery=False)
-            gmail, calendar = client('gmail', 'v1'), client('calendar', 'v3')
+            gmail, calendar = google_clients()
         self.root.mkdir(parents=True, exist_ok=True)
         errors = []
         with sqlite3.connect(self.root / 'updates.sqlite3') as db:
