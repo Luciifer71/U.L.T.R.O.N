@@ -54,6 +54,15 @@ def classify_request(prompt):
 
 def route_request(prompt):
     """Includes explicit non-executing replies for unsupported/unclear requests."""
+    if isinstance(prompt, str) and len(prompt) <= MAX_REQUEST_LENGTH:
+        text = prompt.lower().replace('’', "'").strip().rstrip('?.')
+        # Whole-question matching: this explains cached connection state, never
+        # authorizes reads, mutations, or an action embedded in a longer request.
+        if re.fullmatch(
+            r"(?:what are your current capabilities and )?why (?:are you not able to|can(?:not|'t) you) "
+            r"access (?:my )?(?:google calendar(?: and google email)?|gmail|google email)", text
+        ):
+            return 'connection'
     return classify_request(prompt)
 
 

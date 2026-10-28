@@ -58,7 +58,7 @@ class UltronVoiceEngine:
                 logger.error(f"[ULTRON VOICE STATUS ERROR]: {e}")
 
     async def speak_and_wait(self, text: str):
-        """Generates TTS audio and blocks synchronously until physical playback finishes."""
+        """Wait for mixer playback; software status cannot prove physical audibility."""
         if not text:
             return
 
@@ -77,17 +77,20 @@ class UltronVoiceEngine:
                     async for chunk in communicate.stream():
                         if chunk["type"] == "audio":
                             audio_data.extend(chunk["data"])
-                logging.info('[TTS READY]: synthesis complete; starting playback')
-
-                if audio_data:
-                    sound_file = io.BytesIO(audio_data)
-                    pygame.mixer.music.load(sound_file)
-                    pygame.mixer.music.play()
-
-                    # Block until playback physically ends on sound card
-                    async with asyncio.timeout(90):
-                        while pygame.mixer.music.get_busy():
-                            await asyncio.sleep(0.05)
+                if not audio_data:
+                    raise RuntimeError('Speech synthesis returned no audio')
+                logger.info('[TTS READY]: synthesized_bytes=%d', len(audio_data))
+                sound_file = io.BytesIO(audio_data)
+                pygame.mixer.music.load(sound_file)
+                pygame.mixer.music.play()
+                if not pygame.mixer.music.get_busy():
+                    raise RuntimeError('Audio mixer did not start playback')
+                started = time.monotonic()
+                logger.info('[TTS PLAYBACK STARTED]: mixer active; physical audibility unverified')
+                async with asyncio.timeout(90):
+                    while pygame.mixer.music.get_busy():
+                        await asyncio.sleep(0.05)
+                logger.info('[TTS PLAYBACK FINISHED]: elapsed_seconds=%.3f', time.monotonic() - started)
 
             except TimeoutError:
                 logger.error('[ULTRON VOICE ERROR]: Speech timed out; stopping playback and releasing microphone gate.')
