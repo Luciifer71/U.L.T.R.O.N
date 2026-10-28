@@ -80,9 +80,29 @@ def collect_process_memory(limit=10):
             "scope": "RSS snapshot; shared pages can be counted in multiple processes. Not GPU memory or total system RAM attribution. Names and PIDs only; no paths or command lines."}
 
 
+
+def check_google():
+    """Isolate live account checks so a stalled provider cannot hang a support bundle."""
+    root = Path(os.environ.get('LOCALAPPDATA', Path.home() / '.local/share')) / 'Ultron' / 'google'
+    if not (root / 'enabled').exists():
+        return {'status': 'not_configured'}
+    try:
+        result = subprocess.run([sys.executable, str(ROOT / 'google_connect.py'), 'doctor'],
+                                cwd=ROOT, capture_output=True, text=True, timeout=60)
+        report = json.loads(result.stdout)
+        if not isinstance(report, dict) or 'connection' not in report:
+            return {'status': 'diagnostic_failed'}
+        return report
+    except subprocess.TimeoutExpired:
+        return {'status': 'timed_out', 'scope': 'Google check exceeded 60 seconds; no authorization conclusion.'}
+    except (OSError, ValueError):
+        return {'status': 'diagnostic_failed'}
+
+
 def build_report(model):
     packages = {}
-    for name in ("psutil", "ollama", "nats-py", "faster-whisper", "ctranslate2", "sounddevice", "edge-tts", "pytest"):
+    for name in ("psutil", "ollama", "nats-py", "faster-whisper", "ctranslate2", "sounddevice", "edge-tts", "pytest",
+                 "google-auth", "google-api-python-client", "google-auth-oauthlib", "google-auth-httplib2", "keyring"):
         try:
             packages[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
@@ -100,6 +120,7 @@ def build_report(model):
         "packages": packages,
         "telemetry": telemetry,
         "process_memory": collect_process_memory(),
+        "google": check_google(),
         "services": {
             "ollama": check_ollama(os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434"), model),
             "nats": check_nats(os.getenv("NATS_URL", "nats://127.0.0.1:4222")),

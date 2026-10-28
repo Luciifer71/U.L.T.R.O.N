@@ -12,7 +12,7 @@ WORDS = set('check read show give me what whats is are any my i have do has got 
             'latest later recent new unread important upcoming email emails mail gmail inbox '
             'calendar events appointments update updates today for on about of brief briefing '
             'summarize summary tell update and both please you can could would will there '
-            'with to know let see get'.split())
+            'with to know let see get google'.split())
 
 
 def classify_request(prompt):
@@ -29,7 +29,9 @@ def classify_request(prompt):
         return None
     text = re.sub(r"[^a-z0-9 ]", ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
-    text = re.sub(r'^(?:(?:hey ultron|okay|ok|please) )+', '', text)
+    text = re.sub(r'^(?:(?:hey ultron|okay|ok|please|and) )+', '', text)
+    text = re.sub(r'^check out\b', 'check', text)
+    text = re.sub(r'\s+right now$', '', text)
     if text in {'my updates', 'give me my updates'}:
         return 'all'
     if not DOMAIN.search(text):
@@ -59,8 +61,8 @@ def route_request(prompt):
         # Whole-question matching: this explains cached connection state, never
         # authorizes reads, mutations, or an action embedded in a longer request.
         if re.fullmatch(
-            r"(?:what are your current capabilities and )?why (?:are you not able to|can(?:not|'t) you) "
-            r"access (?:my )?(?:google calendar(?: and google email)?|gmail|google email)", text
+            r"(?:(?:what are your current capabilities and )?why (?:are you not able to|can(?:not|'t) you)|are you able to|can you) "
+            r"access (?:my )?(?:google calendar(?: and google email)?|calendar|gmail|google email|emails?)", text
         ):
             return 'connection'
     return classify_request(prompt)

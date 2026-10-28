@@ -169,3 +169,100 @@ def test_connection_question_is_explanation_not_action():
     assert request_kind(question) is None
     assert route_request('"' + question + '"') != 'connection'
     assert route_request(question + ' Delete my email.') != 'connection'
+
+
+@pytest.mark.parametrize('prompt,kind', [
+    ('Are you able to access my google calendar?', 'connection'),
+    ('Check out the email and calendar updates right now.', 'all'),
+    ('and what are my google calendar updates?', 'calendar'),
+    ('What is my latest email update?', 'mail'),
+    ('Check my google calendar next week', 'clarify'),
+    ('Check my Google calendar and delete all events', 'unsupported'),
+    ('Do not check my Google calendar', None),
+    ('"Check my Google calendar"', None),
+])
+def test_reported_google_wording(prompt, kind):
+    from ultron_control.google_routing import route_request
+    assert route_request(prompt) == kind
+
+
+def test_real_google_refresh_errors_are_classified_without_secrets():
+    exceptions = pytest.importorskip('google.auth.exceptions')
+    from ultron_control.google_updates import failure_details, GoogleStageError
+    for error, code in [
+        (exceptions.RefreshError('SECRET', {'error':'invalid_grant', 'error_description':'PRIVATE'}), 'reauthorization_required'),
+        (exceptions.RefreshError('SECRET', {'error':'invalid_client'}), 'oauth_client'),
+        (exceptions.RefreshError('SECRET', retryable=True), 'service'),
+        (exceptions.TransportError('SECRET'), 'network'),
+    ]:
+        result = failure_details(GoogleStageError('token_refresh', error))
+        assert result['code'] == code and result['stage'] == 'token_refresh'
+        assert 'SECRET' not in str(result) and 'PRIVATE' not in str(result)
+
+
+def test_connection_diagnostics_keeps_calendar_working_when_mail_fails(monkeypatch):
+    import ultron_control.google_updates as module
+    class BrokenMail(Mail):
+        def list(self, **kwargs): return Result(TimeoutError('SECRET'))
+    monkeypatch.setattr(module, 'google_clients', lambda: (BrokenMail(), Calendar()))
+    result = module.connection_diagnostics()
+    assert result['gmail']['code'] == 'network'
+    assert result['calendar']['status'] == 'ok'
+    assert 'SECRET' not in str(result)
+
+
+def test_credential_store_and_format_failure_stages():
+    from ultron_control.google_updates import failure_details, GoogleStageError
+    for stage, code in [('credential_read','credential_store'), ('credential_save','credential_store'), ('credential_decode','credential_format')]:
+        assert failure_details(GoogleStageError(stage, ValueError('secret')))['code'] == code
+
+
+def test_cached_connection_status_does_not_claim_not_connected_before_first_sync(tmp_path):
+    (tmp_path / 'enabled').touch()
+    service = GoogleUpdates(tmp_path)
+    assert 'Waiting' in service.spoken_reply('connection')
+    assert 'Not connected' not in service.spoken_reply('connection')
+
+
+def test_automatic_access_token_refresh_is_bounded_and_saved(monkeypatch):
+    google_credentials = pytest.importorskip('google.oauth2.credentials')
+    transport = pytest.importorskip('google.auth.transport.requests')
+    import ultron_control.google_updates as module
+    saved, requests = [], []
+    class Creds:
+        valid = False
+        def refresh(self, request):
+            request(url='https://oauth2.googleapis.com/token')
+        def to_json(self): return 'refreshed-secret'
+    monkeypatch.setattr(google_credentials.Credentials, 'from_authorized_user_info',
+                        lambda *a: Creds())
+    monkeypatch.setattr(transport, 'Request', lambda: lambda **kw: requests.append(kw))
+    monkeypatch.setattr(module, 'vault', lambda: SimpleNamespace(
+        get_password=lambda *a: '{}',
+        set_password=lambda *a: saved.append(a)))
+    module.credentials()
+    assert requests[0]['timeout'] == 15
+    assert saved == [(module.SERVICE, 'credentials', 'refreshed-secret')]
+
+
+def test_support_google_check_is_bounded_and_does_not_copy_stderr(tmp_path, monkeypatch):
+    import subprocess
+    import ultron_diagnostics as module
+    monkeypatch.setenv('LOCALAPPDATA', str(tmp_path))
+    assert module.check_google()['status'] == 'not_configured'
+    root = tmp_path / 'Ultron' / 'google'
+    root.mkdir(parents=True); (root / 'enabled').touch()
+    def run(*args, **kwargs):
+        assert kwargs['timeout'] == 60
+        return SimpleNamespace(stdout='{"connection":{"status":"ok"}}', stderr='SECRET')
+    monkeypatch.setattr(module.subprocess, 'run', run)
+    assert module.check_google() == {'connection': {'status': 'ok'}}
+    def stalled(*args, **kwargs): raise subprocess.TimeoutExpired('doctor', 60)
+    monkeypatch.setattr(module.subprocess, 'run', stalled)
+    assert module.check_google()['status'] == 'timed_out'
+
+
+def test_actual_combined_request_preserves_system_stats():
+    from ultron_control.read_requests import read_request_kinds
+    assert read_request_kinds('Check my Google calendar and show my system stats') == ('google-calendar', 'telemetry')
+    assert read_request_kinds('Check out the email and calendar updates right now.') == ('google-mail', 'google-calendar')
