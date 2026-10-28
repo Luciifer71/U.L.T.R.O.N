@@ -558,3 +558,24 @@ def test_composed_facts_never_invoke_planner(tmp_path, monkeypatch, prompt):
         assert 'unavailable' in reply and 'CPU: 8%' in reply
     else:
         assert 'named applications' in reply and 'Script Execution' not in reply
+
+
+def test_youtube_playback_bypasses_model_and_uses_verified_ledger(tmp_path, monkeypatch):
+    from ultron_control.youtube_playback import PlaybackResult
+    brain = make_brain(tmp_path, monkeypatch, [])
+    called = []
+    async def forbidden_model(**kwargs):
+        pytest.fail('Explicit playback must not reach the model')
+    async def play(query):
+        called.append(query)
+        return PlaybackResult(True, data={'state':'verified', 'verification':{'playing':True}})
+    brain.ollama.chat = forbidden_model
+    brain.youtube_playback = SimpleNamespace(play=play)
+    async def run():
+        _, actions = await brain.process_intent('Can you play Never Gonna Give You Up by Rick Astley on YouTube?', 'song')
+        assert len(actions) == 1 and not called
+        success, error = await brain._run_pending_actions(actions, 'song')
+        assert success and error is None
+        assert called == ['Never Gonna Give You Up by Rick Astley']
+        assert brain._compose_execution_response('song').startswith('YouTube playback verified:')
+    asyncio.run(run())

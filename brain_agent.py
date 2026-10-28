@@ -67,6 +67,7 @@ from ultron_control.google_updates import GoogleUpdates, route_request as google
 from ultron_control.request_planning import explicit_launch_plan, explicit_resource_plan, PlanClarification, validate_application_targets
 from ultron_resources.config import create_service as create_resource_service
 from ultron_resources.file_workflow import prepare_file, open_prepared_file, FileSelectionRequired, selection_number, MEDIA
+from ultron_control.youtube_playback import playback_plan, YouTubePlayback
 from ultron_control.request_planning import explicit_file_plan, explicit_sequence_plan
 from ultron_resources.catalog import ResourceError, AmbiguousResource, AccessDenied
 from ultron_resources.native_apps import ExactApplicationDiscovery
@@ -1389,6 +1390,7 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
         dispatched: list[str] = []
         failed: list[str] = []
         completed: list[str] = []
+        playing: list[str] = []
 
         for outcome in outcomes:
             name = str(outcome.get("name") or "action")
@@ -1401,7 +1403,9 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
                 failed.append(f"{label} ({error})" if error else label)
                 continue
 
-            if state == "completed" and outcome.get("exitCode") == 0:
+            if name.startswith("play_youtube:") and state == "verified" and isinstance(verification, dict) and verification.get('playing') is True:
+                playing.append(name.split(':', 1)[1])
+            elif state == "completed" and outcome.get("exitCode") == 0:
                 completed.append(self._friendly_action_name(name))
             elif (
                 state == "dispatched"
@@ -1426,6 +1430,9 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
                 )
 
         parts: list[str] = []
+
+        if playing:
+            parts.append("YouTube playback verified: " + ", ".join(playing) + ".")
 
         if completed:
             parts.append("Completed: " + ", ".join(completed) + ".")
@@ -1568,7 +1575,7 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
             )
 
         try:
-            explicit_calls = explicit_sequence_plan(prompt) or explicit_file_plan(prompt) or explicit_resource_plan(prompt) or explicit_launch_plan(prompt)
+            explicit_calls = playback_plan(prompt) or explicit_sequence_plan(prompt) or explicit_file_plan(prompt) or explicit_resource_plan(prompt) or explicit_launch_plan(prompt)
         except PlanClarification as exc:
             self.last_plan_error = str(exc)
             return str(exc), []
@@ -1984,6 +1991,15 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
                             f"Application '{app_name}' "
                             "staged through the capability broker."
                         )
+
+                elif func_name == "play_youtube":
+                    if not hasattr(self, 'youtube_playback'):
+                        self.youtube_playback = YouTubePlayback()
+                    async def play_video(query=args['query']):
+                        return await self.youtube_playback.play(query)
+                    pending_actions.append(PendingAction(
+                        name="play_youtube:" + args['query'], execute=play_video, completion="wait"))
+                    res = "YouTube playback staged; not yet verified."
 
                 elif func_name == "open_website":
                     raw_target = str(
@@ -2941,6 +2957,11 @@ async def main():
             await intent_worker
         except asyncio.CancelledError:
             pass
+        if hasattr(brain, "youtube_playback"):
+            try:
+                await asyncio.wait_for(brain.youtube_playback.close(), timeout=10)
+            except Exception:
+                print("[YOUTUBE]: Browser cleanup did not complete.")
         google_worker.cancel()
         try:
             await google_worker
