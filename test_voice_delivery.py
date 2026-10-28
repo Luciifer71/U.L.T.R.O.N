@@ -129,3 +129,29 @@ def test_daemon_uses_explicit_speech_instead_of_full_text(daemon_module, payload
         await daemon.message_handler(SimpleNamespace(subject='ultron.voice', data=json.dumps(payload).encode()))
         assert spoken == ([] if expected is None else [expected])
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('audio,busy,expected', [
+    (b'', [], 'returned no audio'),
+    (b'audio', [False], 'did not start playback'),
+    (b'audio', [True, False], 'TTS PLAYBACK FINISHED'),
+])
+def test_playback_evidence_and_no_automatic_replay(daemon_module, caplog, audio, busy, expected):
+    module = daemon_module
+    async def run():
+        plays = []
+        class Communicate:
+            def __init__(self, *args, **kwargs): pass
+            async def stream(self):
+                yield {'type': 'audio', 'data': audio}
+        module.edge_tts.Communicate = Communicate
+        states = iter(busy)
+        module.pygame.mixer.music.get_busy = lambda: next(states)
+        module.pygame.mixer.music.play = lambda: plays.append(True)
+        voice = module.UltronVoiceEngine(None, asyncio.get_running_loop())
+        with caplog.at_level('INFO'):
+            await voice.speak_and_wait('startup')
+        assert expected in caplog.text
+        assert len(plays) == bool(audio)
+        assert not voice.speaking
+    asyncio.run(run())

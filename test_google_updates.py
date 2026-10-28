@@ -147,3 +147,25 @@ def test_worker_failure_invalidates_previous_success(tmp_path, monkeypatch):
     assert 'unavailable' in service.spoken_reply('mail')
     assert 'private credential' not in service.spoken_reply('all')
     assert delays == [600]
+
+
+def test_sync_failure_never_leaks_remote_error(caplog):
+    from ultron_control.google_updates import sync_failure
+    from types import SimpleNamespace
+    for status, expected in [(401, 'authentication'), (403, 'forbidden'), (429, 'quota'), (503, 'service'), (None, 'unknown')]:
+        error = RuntimeError('secret-token private-email@example.com')
+        error.resp = SimpleNamespace(status=status)
+        reply = sync_failure('Google', error)
+        assert 'unavailable' in reply
+        assert f'code={expected}' in caplog.text
+        assert 'secret-token' not in reply + caplog.text
+        assert 'private-email' not in reply + caplog.text
+
+
+def test_connection_question_is_explanation_not_action():
+    from ultron_control.google_routing import route_request, request_kind
+    question = 'What are your current capabilities and why are you not able to access google calendar and google email?'
+    assert route_request(question) == 'connection'
+    assert request_kind(question) is None
+    assert route_request('"' + question + '"') != 'connection'
+    assert route_request(question + ' Delete my email.') != 'connection'

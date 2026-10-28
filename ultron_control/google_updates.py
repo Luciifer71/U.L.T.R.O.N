@@ -4,6 +4,7 @@ import asyncio
 import base64
 from datetime import datetime, timedelta, timezone
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -15,6 +16,34 @@ from ultron_control.google_routing import request_kind, route_request
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly',
           'https://www.googleapis.com/auth/calendar.events.readonly']
 SERVICE = 'Ultron.Google.ReadOnly'
+
+
+
+class GoogleNotConnectedError(RuntimeError):
+    pass
+
+
+def sync_failure(service, error):
+    """Expose fixed categories only, never exception text or remote response bodies."""
+    status = getattr(getattr(error, 'resp', None), 'status', None)
+    if isinstance(error, GoogleNotConnectedError):
+        code, advice = 'not_connected', 'No saved Google credentials were found.'
+    elif isinstance(error, ImportError):
+        code, advice = 'dependency', 'A required Google integration dependency is missing.'
+    elif status == 401:
+        code, advice = 'authentication', 'Google rejected authentication; reconnect may be required.'
+    elif status == 403:
+        code, advice = 'forbidden', 'Google denied access; check API permissions and quota.'
+    elif status == 429:
+        code, advice = 'quota', 'Google rate limit reached; sync will retry.'
+    elif isinstance(status, int) and 500 <= status <= 599:
+        code, advice = 'service', 'Google service is temporarily unavailable.'
+    elif isinstance(error, (TimeoutError, ConnectionError)):
+        code, advice = 'network', 'A network connection or timeout interrupted sync.'
+    else:
+        code, advice = 'unknown', 'The cause is not established; inspect connection setup and diagnostics.'
+    logging.getLogger(__name__).warning('[GOOGLE SYNC ERROR]: service=%s code=%s', service, code)
+    return f'{service} sync unavailable. {advice}'
 
 
 def private_dir():
@@ -34,7 +63,7 @@ def credentials():
     from google.auth.transport.requests import Request
     saved = vault().get_password(SERVICE, 'credentials')
     if not saved:
-        raise RuntimeError('Google is not connected')
+        raise GoogleNotConnectedError('Google is not connected')
     creds = Credentials.from_authorized_user_info(json.loads(saved), SCOPES)
     if not creds.valid:
         creds.refresh(Request())
@@ -136,6 +165,9 @@ class GoogleUpdates:
                 'Use google_connect.py review for private titles and priority reasons. Importance is a heuristic, not a guarantee.')
 
     def spoken_reply(self, kind='all'):
+        if kind == 'connection':
+            return ('I support read-only Gmail and Google Calendar updates. ' +
+                    (self.status if self.enabled else 'Google is not connected on this computer.'))
         if kind == 'unsupported':
             return 'Google access is read-only. I cannot send, delete or change email or calendar events.'
         if kind == 'clarify':
@@ -202,8 +234,8 @@ class GoogleUpdates:
                 self.scanned = db.execute('SELECT COUNT(*) FROM messages').fetchone()[0]
                 self.important = db.execute("SELECT COUNT(*) FROM messages WHERE reason != ''").fetchone()[0]
                 self.mail_ok = True
-            except Exception:
-                errors.append('Mail sync unavailable; authorization, network or quota may need attention.')
+            except Exception as error:
+                errors.append(sync_failure('Mail', error))
                 self.mail_ok = False
             try:
                 now = datetime.now(timezone.utc)
@@ -216,8 +248,8 @@ class GoogleUpdates:
                 self.calendar_complete = not response.get('nextPageToken')
                 put('calendar', json.dumps(self.events))
                 self.calendar_ok = True
-            except Exception:
-                errors.append('Calendar sync unavailable; authorization, network or quota may need attention.')
+            except Exception as error:
+                errors.append(sync_failure('Calendar', error))
                 self.calendar_ok = False
             if self.mail_ok or self.calendar_ok:
                 self.checked = time.time()
@@ -241,8 +273,8 @@ class GoogleUpdates:
             except asyncio.CancelledError:
                 self.stopping = True
                 raise
-            except Exception:
+            except Exception as error:
                 self.mail_ok = self.calendar_ok = False
-                self.status = 'Google sync unavailable. Reconnect if access was revoked or expired.'
+                self.status = sync_failure('Google', error)
                 failures += 1
             await asyncio.sleep(min(1800, 300 * 2 ** min(failures, 3)))
