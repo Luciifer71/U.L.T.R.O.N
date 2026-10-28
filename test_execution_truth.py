@@ -369,3 +369,15 @@ def test_batch_preflight_completes_before_first_execution(monkeypatch):
         assert ok and error is None
         assert events == ['resolve:Calculator', 'resolve:File Explorer', 'execute:Calculator', 'execute:File Explorer']
     asyncio.run(run())
+
+
+def test_youtube_success_requires_playing_evidence():
+    brain = bare_brain()
+    brain.execution_ledger['song'] = [{
+        'name': 'play_youtube:Song by Artist', 'success': True,
+        'state': 'verified', 'verification': {'playing': True},
+    }]
+    assert brain._compose_execution_response('song') == 'YouTube playback verified: Song by Artist.'
+    brain.execution_ledger['song'][0].update(success=False, error='Ads or consent blocked verification.')
+    reply = brain._compose_execution_response('song')
+    assert 'Could not complete' in reply and 'playback verified' not in reply

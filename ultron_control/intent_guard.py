@@ -523,6 +523,14 @@ def normalize_tool_calls(
             f"I can safely process up to {MAX_TOOL_CALLS_PER_TASK} actions in one task."
         )
 
+    if any(_extract_call(call)[0] == 'play_youtube' for call in raw_tool_calls):
+        from ultron_control.youtube_playback import playback_plan
+        expected = playback_plan(prompt)
+        if not expected or len(raw_tool_calls) != 1 or _extract_call(raw_tool_calls[0]) != (
+                'play_youtube', expected[0]['function']['arguments']):
+            return [], 'Please request one song and artist to play on YouTube.'
+        return expected, None
+
     extracted: list[tuple[str, dict[str, Any]]] = []
     for tool in raw_tool_calls:
         name, args = _extract_call(tool)

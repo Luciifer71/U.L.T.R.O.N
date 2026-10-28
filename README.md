@@ -901,3 +901,8 @@ automatically by installation. Uses optional Google API/auth libraries and Windo
 Credential Manager via keyring, without a paid model API. See
 [setup, privacy and coverage limits](docs/google-updates.md) and the
 [development to-do list](docs/development-todo.md).
+
+Optional [YouTube playback](docs/youtube-playback.md) can select a matching video
+and verify browser playback separately from website search. Run
+`setup-youtube-playback.cmd` once; it uses installed Microsoft Edge with a separate
+Ultron profile. See the guide for consent, autoplay and verification limits.
