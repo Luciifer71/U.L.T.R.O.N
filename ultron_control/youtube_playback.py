@@ -42,22 +42,36 @@ def choose_video(query, candidates):
     required = words(query) - {'by', 'the', 'song', 'music'}
     if not required:
         raise RuntimeError('Please specify a song title and artist.')
+    # Artist-channel identity is metadata matching, not proof of ownership.
+    artist = re.split(r'\s+by\s+', query, maxsplit=1, flags=re.I)
+    artist_key = ''.join(re.findall(r'[^\W_]+', artist[1].casefold())) if len(artist) == 2 else ''
     matches = []
+    seen = set()
     for item in candidates[:20]:
         url = watch_url(str(item.get('url', '')))
         title, channel = str(item.get('title', ''))[:300], str(item.get('channel', ''))[:200]
         tokens = words(title + ' ' + channel)
-        if not url or not required <= tokens:
+        if not url or url in seen or not required <= tokens:
             continue
-        if (words(title) & {'cover', 'karaoke', 'reaction', 'remix'}) - words(query):
+        if (words(title) & {'cover', 'karaoke', 'reaction', 'remix', 'live', 'slowed', 'sped'}) - words(query):
             continue
-        score = len(words(title) & {'official'}) + len(words(channel) & {'vevo'})
+        channel_key = ''.join(re.findall(r'[^\W_]+', channel.casefold()))
+        artist_match = bool(artist_key and channel_key in {
+            artist_key, artist_key + 'vevo', artist_key + 'official', artist_key + 'topic'})
+        official = 'official' in words(title)
+        score = (artist_match, official, not bool(words(title) & {'lyrics', 'lyric'}))
+        seen.add(url)
         matches.append((score, url, title))
     if not matches:
         raise RuntimeError('No confident title/artist match found. Please give the exact song and artist.')
-    matches.sort(reverse=True)
-    if len(matches) > 1 and matches[0][0] == matches[1][0] and matches[0][1] != matches[1][1]:
-        raise RuntimeError('Several videos match. Please specify the artist or version.')
+    # Stable sorting preserves YouTube result order, never video-ID order.
+    matches.sort(key=lambda item: item[0], reverse=True)
+    if len(matches) > 1 and matches[0][0] == matches[1][0]:
+        # Multiple official uploads by the explicitly requested artist are an
+        # acceptable default version. Unknown-channel ties still need clarity.
+        if not (matches[0][0][0] and matches[0][0][1]):
+            raise RuntimeError('Several videos match without a clear artist upload. Please specify the version.')
+
     return matches[0][1], matches[0][2]
 
 
@@ -108,17 +122,22 @@ class YouTubePlayback:
             from playwright.async_api import async_playwright
         except ImportError:
             raise RuntimeError('YouTube playback needs setup: run setup-youtube-playback.cmd once.') from None
+        channel = os.environ.get('ULTRON_BROWSER_CHANNEL', 'msedge').strip().lower()
+        if channel not in {'chrome', 'msedge'}:
+            raise RuntimeError('ULTRON_BROWSER_CHANNEL must be chrome or msedge.')
         self.driver = await async_playwright().start()
         root = Path(os.environ.get('LOCALAPPDATA', Path.home() / '.local/share')) / 'Ultron' / 'youtube-browser'
+        if channel == 'chrome':
+            root = root.with_name('youtube-browser-chrome')
         try:
             self.context = await self.driver.chromium.launch_persistent_context(
-                str(root), channel='msedge', headless=False, timeout=20000)
+                str(root), channel=channel, headless=False, timeout=20000, chromium_sandbox=True)
             self.context.set_default_timeout(10000)
             self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
             return self.page
         except Exception:
             await self.close()
-            raise RuntimeError('Could not open the Ultron Edge window. Check Edge installation and browser policies.') from None
+            raise RuntimeError('Could not open the selected Ultron browser with sandboxing enabled. Check browser installation and policies.') from None
 
     async def play(self, query):
         async with self.lock:
