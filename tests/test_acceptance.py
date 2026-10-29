@@ -42,3 +42,25 @@ def test_failed_offline_gate_blocks_live_actions_and_returns_failure(tmp_path, m
     assert acceptance.main(['--live-apps']) == 1
     report = json.loads((tmp_path / 'runtime/acceptance/latest.json').read_text())
     assert report['live']['status'] == 'blocked_by_offline_failure'
+
+def test_regression_runner_fails_closed_when_suite_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(acceptance, 'ROOT', tmp_path)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Do not fall back to unbounded pytest discovery')
+    monkeypatch.setattr(acceptance.subprocess, 'run', forbidden)
+    report, message = acceptance.run_regressions(tmp_path / 'results.xml')
+    assert report['status'] == 'failed' and report['exit_code'] == 2
+    assert 'No regression test files' in message
+
+
+def test_regression_runner_uses_nested_test_directory(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setattr(acceptance, 'ROOT', tmp_path)
+    suite = tmp_path / 'tests' / 'integration'
+    suite.mkdir(parents=True)
+    (suite / 'test_example.py').write_text('')
+    calls = []
+    monkeypatch.setattr(acceptance.subprocess, 'run', lambda command, **kw: calls.append(command) or SimpleNamespace(returncode=0, stdout='', stderr=''))
+    report, _ = acceptance.run_regressions(tmp_path / 'results.xml')
+    assert report['status'] == 'passed'
+    assert 'tests/integration/test_example.py' in calls[0]

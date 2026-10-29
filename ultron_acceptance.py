@@ -76,8 +76,11 @@ async def live_checks():
 
 
 def run_regressions(output):
+    tests = sorted(p.relative_to(ROOT).as_posix() for p in (ROOT / 'tests').rglob('test_*.py'))
+    if not tests:
+        return {'status': 'failed', 'exit_code': 2, 'counts': {}}, 'No regression test files found.'
     result = subprocess.run([sys.executable, '-m', 'pytest', '-q',
-                             *sorted(p.name for p in ROOT.glob('test_*.py')),
+                             *tests,
                              '--junitxml', str(output)], cwd=ROOT, capture_output=True,
                             text=True, errors='replace', timeout=180)
     counts = {}

@@ -11,7 +11,9 @@ __pycache__/
 
 # Environment variables & secrets
 .env
+.env.*
 *.env
+*.env.*
 secrets.json
 !.env.example
 
@@ -32,9 +34,6 @@ node_modules/
 # Local archive / snapshots
 archive/
 
-# Local manual test scripts
-test_long_action.py
-
 # IDE settings
 .vscode/
 .idea/
@@ -48,3 +47,35 @@ token.json
 # Generated frontend output
 ultron-ui/dist/
 *.tsbuildinfo
+
+# Test output (keep test source files tracked)
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+junit*.xml
+
+# Local credentials and private material
+credentials*.json
+token*.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+
+# User knowledge is local input, never a source-code fixture
+/knowledge_base/
+
+# Support archives and editor/OS debris
+ultron-support-*.zip
+ultron-acceptance-*.zip
+.DS_Store
+Thumbs.db
