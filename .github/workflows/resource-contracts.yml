@@ -24,8 +24,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: python -m pip install -r requirements-test.txt
-      - run: python -m pip install -r requirements-google.txt
+      - run: python -m pip install -r requirements/test.txt
+      - run: python -m pip install -r requirements/google.txt
       - run: python -m pip install faster-whisper==1.2.1
       - run: python -m pytest -q tests/test_speech_activity.py
       - run: python -c "from google_auth_oauthlib.flow import InstalledAppFlow; from keyring.backends.Windows import WinVaultKeyring; import googleapiclient.discovery"
@@ -38,7 +38,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: python -m pip install -r requirements-test.txt
+      - run: python -m pip install -r requirements/test.txt
       - run: python ultron_acceptance.py
       - uses: actions/upload-artifact@v4
         if: always()
@@ -53,7 +53,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: python -m pip install pytest psutil -r requirements-browser.txt
+      - run: python -m pip install pytest psutil -r requirements/browser.txt
       - run: python -m playwright install --with-deps chromium
       - run: python -m pytest -q tests/test_youtube_playback.py
         env:

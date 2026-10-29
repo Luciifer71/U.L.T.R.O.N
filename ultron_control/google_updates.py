@@ -41,7 +41,7 @@ def failure_details(error):
     if isinstance(error, GoogleNotConnectedError):
         code, advice = 'not_connected', 'No saved Google credentials were found.'
     elif isinstance(error, ImportError):
-        code, advice = 'dependency', 'Install requirements-google.txt with the Ultron Python interpreter.'
+        code, advice = 'dependency', 'Install requirements/google.txt with the Ultron Python interpreter.'
     elif ('google.auth.exceptions', 'RefreshError') in classes:
         if oauth == 'invalid_grant':
             code, advice = 'reauthorization_required', 'Google rejected the saved authorization. Reconnect this account. Expiry or revocation are possible; the exact reason is not established.'

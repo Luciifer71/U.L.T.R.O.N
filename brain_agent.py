@@ -344,7 +344,7 @@ TOOLS = [
 
                             "The relative or absolute file path to the Python"
 
-                            " script in snake_case (e.g., 'voice_listener.py' or 'gesture.py')."
+                            " script in snake_case (e.g., 'voice_listener.py' or 'speech_diagnostics.py')."
 
                         ),
 

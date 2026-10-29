@@ -31,7 +31,7 @@ configurable. See [.env.example](../.env.example) for runtime settings and
 For supported NVIDIA speech inference on x64 Windows:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements-speech-windows.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements/speech-windows.txt
 ```
 
 This does not install an NVIDIA driver. Follow the [voice runtime guide](voice-runtime.md)

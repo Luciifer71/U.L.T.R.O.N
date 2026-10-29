@@ -17,7 +17,7 @@ The optional NVIDIA libraries are large downloads and do not install a driver.
 From the repository root in PowerShell:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements-speech-windows.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements/speech-windows.txt
 $env:WHISPER_DEVICE = "cuda"
 $env:WHISPER_MODEL_SIZE = "small.en"
 $env:WHISPER_CUDA_COMPUTE_TYPE = "float16"

@@ -17,7 +17,7 @@ installing this code.
    and create a **Desktop app** OAuth client. Download its JSON outside this repository.
 2. Stop Ultron. Run in PowerShell:
    ```powershell
-   .\.venv\Scripts\python.exe -m pip install -r requirements-google.txt
+   .\.venv\Scripts\python.exe -m pip install -r requirements/google.txt
    .\.venv\Scripts\python.exe .\google_connect.py connect --client "C:\path\client_secret.json"
    ```
 3. Sign in to the intended account and grant both read-only scopes in Google's
@@ -194,7 +194,7 @@ with a 60-second process deadline, and includes optional dependency versions.
 - `oauth_client`: check the Desktop client configuration before reconnecting.
 - `credential_store` / `credential_format`: the Windows vault or saved data failed;
   the log also identifies the read, save or decode stage.
-- `dependency`: install `requirements-google.txt` into this virtual environment.
+- `dependency`: install `requirements/google.txt` into this virtual environment.
 - `network`, `service`, `quota`: resolve connectivity or allow retry; do not
   delete credentials to fix a temporary provider failure.
 - `forbidden`: check enabled APIs, permissions and quota. A 403 alone does not

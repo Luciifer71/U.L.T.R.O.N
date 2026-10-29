@@ -79,3 +79,6 @@ ultron-support-*.zip
 ultron-acceptance-*.zip
 .DS_Store
 Thumbs.db
+
+# Legacy local scratch test; maintained tests belong in tests/
+/test_long_action.py

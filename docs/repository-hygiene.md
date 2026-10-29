@@ -9,6 +9,10 @@ belong in either template or source. Git ignore rules do not affect files alread
 
 - `tests/`: versioned regression source, recursively discovered by both runners.
 - `tools/`: manual bus publisher/subscriber and interactive prompt utilities.
+- `tools/experimental/`: standalone gesture, clap and knowledge-ingestion utilities.
+- `requirements/`: optional Python dependency manifests; the base `requirements.txt` stays at root.
+- `config/`: NATS configuration used by the root Docker Compose file.
+- `assets/models/`: the existing hand-landmark model.
 - `docs/`: setup and operational guides.
 - `evals/`: versioned model-evaluation fixtures.
 - `runtime/`: ignored generated reports and logs.
@@ -16,8 +20,10 @@ belong in either template or source. Git ignore rules do not affect files alread
 
 Launchers, runtime components and public diagnostic entry points remain at the root
 so existing commands and working-directory assumptions keep working. Moving these
-requires a separate packaging migration. Model assets used by experimental gesture
-code are also retained until its download/path behavior is migrated.
+requires a separate packaging migration. Experimental utilities and their model asset now have dedicated folders. Their
+manual command paths changed; normal launchers did not. The legacy local
+`test_long_action.py` is ignored explicitly; move it to `runtime/local-tests/`
+if you want a clean local root without deleting it.
 
 ## Updating an existing checkout
 

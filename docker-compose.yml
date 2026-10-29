@@ -17,6 +17,6 @@ services:
 
     volumes:
       - ./nats_data:/data
-      - ./nats-server.conf:/etc/nats/nats-server.conf:ro
+      - ./config/nats-server.conf:/etc/nats/nats-server.conf:ro
 
     stop_grace_period: 30s

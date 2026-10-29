@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """gesture.py - Async MediaPipe hand tracker publishing gesture events to NATS."""
 import os, math, time, json, asyncio, urllib.request
+from pathlib import Path
 import cv2
 from datetime import datetime, timezone
 
-MODEL_PATH = "hand_landmarker.task"
+MODEL_PATH = str(Path(__file__).resolve().parents[2] / "assets" / "models" / "hand_landmarker.task")
 MODEL_URL = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
 NATS_URL = "nats://localhost:4222"
 SUBJECT = "ultron.gestures"
@@ -17,6 +18,7 @@ def ensure_model():
     try:
         if not os.path.exists(MODEL_PATH):
             print("Downloading hand_landmarker.task ...")
+            Path(MODEL_PATH).parent.mkdir(parents=True, exist_ok=True)
             urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
         return True
     except Exception as e:
