@@ -21,7 +21,7 @@ def main() -> int:
     if importlib.util.find_spec("pytest") is None:
         print("pytest is missing. Install it with this interpreter: python -m pip install pytest")
         return 2
-    tests = sorted(path.name for path in root.glob("test_*.py"))
+    tests = sorted(path.relative_to(root).as_posix() for path in (root / "tests").rglob("test_*.py"))
     if not tests:
         print("No regression test files found; verification cannot pass.")
         return 2

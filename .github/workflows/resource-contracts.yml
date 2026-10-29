@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install pytest psutil
-      - run: python -m pytest -q test_microphone_runtime.py test_reply_delivery.py test_google_updates.py test_file_workflow.py test_support_bundle.py test_system_info.py test_resource_catalog.py test_resource_cli.py test_exact_app_discovery.py test_request_planning.py test_intent_guard.py test_model_benchmark.py
+      - run: python -m pytest -q tests/test_microphone_runtime.py tests/test_reply_delivery.py tests/test_google_updates.py tests/test_file_workflow.py tests/test_support_bundle.py tests/test_system_info.py tests/test_resource_catalog.py tests/test_resource_cli.py tests/test_exact_app_discovery.py tests/test_request_planning.py tests/test_intent_guard.py tests/test_model_benchmark.py
   brain:
     runs-on: windows-latest
     steps:
@@ -27,9 +27,9 @@ jobs:
       - run: python -m pip install -r requirements-test.txt
       - run: python -m pip install -r requirements-google.txt
       - run: python -m pip install faster-whisper==1.2.1
-      - run: python -m pytest -q test_speech_activity.py
+      - run: python -m pytest -q tests/test_speech_activity.py
       - run: python -c "from google_auth_oauthlib.flow import InstalledAppFlow; from keyring.backends.Windows import WinVaultKeyring; import googleapiclient.discovery"
-      - run: python -m pytest -q test_voice_delivery.py test_reply_delivery.py test_google_updates.py test_acceptance.py test_send_intent.py test_resource_integration.py test_execution_truth.py test_resource_execution.py test_task_memory.py test_audio_pipeline.py test_start_ultron.py test_verify_ultron.py test_ollama_runtime.py test_voice_listener.py
+      - run: python -m pytest -q tests/test_voice_delivery.py tests/test_reply_delivery.py tests/test_google_updates.py tests/test_acceptance.py tests/test_send_intent.py tests/test_resource_integration.py tests/test_execution_truth.py tests/test_resource_execution.py tests/test_task_memory.py tests/test_audio_pipeline.py tests/test_start_ultron.py tests/test_verify_ultron.py tests/test_ollama_runtime.py tests/test_voice_listener.py
 
   acceptance:
     runs-on: windows-latest
@@ -55,6 +55,6 @@ jobs:
           python-version: '3.13'
       - run: python -m pip install pytest psutil -r requirements-browser.txt
       - run: python -m playwright install --with-deps chromium
-      - run: python -m pytest -q test_youtube_playback.py
+      - run: python -m pytest -q tests/test_youtube_playback.py
         env:
           ULTRON_BROWSER_TESTS: '1'

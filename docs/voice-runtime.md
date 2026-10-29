@@ -115,7 +115,7 @@ Measure command transcription errors and false activations, as well as latency.
 ## Merge/release gate
 
 - Install the development test runner with `python -m pip install pytest`, then
-  run `python -m pytest -q test_speech_runtime.py test_voice_listener.py test_speech_diagnostics.py`.
+  run `python -m pytest -q tests/test_speech_runtime.py tests/test_voice_listener.py tests/test_speech_diagnostics.py`.
 - On Windows, install the speech requirements in the intended environment and
   obtain a successful strict CUDA health report and microphone recording test.
 - Test the complete listener → brain → action → TTS loop, including TTS gating,

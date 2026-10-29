@@ -52,3 +52,9 @@ commit if known. The support collector captures transcripts and resource names;
 review and redact before attaching anything to a public issue. Never post `.env`,
 credentials, private audio or memory databases. Prefer a minimal synthetic example
 when reporting a private-file problem.
+
+## Repository layout and private files
+
+Regression source lives in `tests/`; manual bus utilities live in `tools/`.
+Keep launchers and documented diagnostic entry points stable. See
+[repository hygiene](docs/repository-hygiene.md) for ignore rules and update steps.
