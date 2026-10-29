@@ -29,9 +29,9 @@ def test_relocated_manifest_and_nats_paths_exist():
     root = Path(__file__).resolve().parents[1]
     for reference in ['.github/workflows/resource-contracts.yml', 'setup-youtube-playback.cmd',
                       'CONTRIBUTING.md', 'docs/getting-started.md']:
-        for manifest in re.findall(r'requirements/[a-z-]+\.txt', (root / reference).read_text()):
+        for manifest in re.findall(r'requirements/[a-z-]+\.txt', (root / reference).read_text(encoding="utf-8")):
             assert (root / manifest).is_file(), (reference, manifest)
-    compose = (root / 'docker-compose.yml').read_text()
+    compose = (root / 'docker-compose.yml').read_text(encoding="utf-8")
     match = re.search(r'\./([^:\s]+):/etc/nats/nats-server.conf:ro', compose)
     assert match and (root / match.group(1)).is_file()
     assert (root / 'assets/models/hand_landmarker.task').is_file()
