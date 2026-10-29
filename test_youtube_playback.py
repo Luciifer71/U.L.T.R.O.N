@@ -50,7 +50,7 @@ def test_match_rejects_unrelated_and_unrequested_versions():
 
 def test_ambiguous_matches_do_not_pick_arbitrarily():
     with pytest.raises(RuntimeError, match='Several'):
-        choose_video(QUERY, [candidate(), candidate(url='https://youtube.com/watch?v=abcdefghijk')])
+        choose_video(QUERY, [candidate(channel='Uploader One'), candidate(url='https://youtube.com/watch?v=abcdefghijk', channel='Uploader Two')])
 
 
 @pytest.mark.parametrize('url', ['http://youtube.com/watch?v=dQw4w9WgXcQ',
@@ -135,7 +135,8 @@ def test_real_browser_search_and_playback_fixture():
             page = await browser.new_page()
             async def serve(route):
                 if '/results?' in route.request.url:
-                    html = '<ytd-video-renderer><a id="video-title" href="' + URL + '">' + QUERY + '</a><ytd-channel-name>Rick Astley</ytd-channel-name></ytd-video-renderer>'
+                    html = '<ytd-video-renderer><a id="video-title" href="' + URL + '">' + QUERY + ' (Official Video)</a><ytd-channel-name>Rick Astley</ytd-channel-name></ytd-video-renderer>'
+                    html += html.replace('dQw4w9WgXcQ', 'abcdefghijk')
                 else:
                     html = """<canvas id="c" width="32" height="32"></canvas><video autoplay></video>
                     <script>
@@ -150,3 +151,44 @@ def test_real_browser_search_and_playback_fixture():
             assert result.success, result.error
             await browser.close()
     asyncio.run(run())
+
+
+def test_artist_official_upload_beats_unknown_official_upload_and_lyrics():
+    rows = [
+        candidate(url='https://youtube.com/watch?v=abcdefghijk', channel='Other uploader'),
+        candidate(url='https://youtube.com/watch?v=abcdefghijl', title=QUERY + ' (Lyrics)', channel='Invited Kingdom'),
+        candidate(title='Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)'),
+    ]
+    assert choose_video(QUERY, rows)[0] == URL
+
+
+def test_multiple_official_artist_versions_use_search_order_and_dedupe():
+    rows = [candidate(), candidate(url='https://youtube.com/watch?v=abcdefghijk')]
+    assert choose_video(QUERY, rows)[0] == URL
+    assert choose_video(QUERY, list(reversed(rows)))[0].endswith('abcdefghijk')
+    assert choose_video(QUERY, [candidate(), candidate()])[0] == URL
+
+
+def test_requested_live_version_is_not_replaced_with_studio():
+    live = candidate(url='https://youtube.com/watch?v=abcdefghijk', title=QUERY + ' Live (Official)')
+    assert choose_video(QUERY + ' live', [candidate(), live])[0].endswith('abcdefghijk')
+
+
+@pytest.mark.parametrize('channel', ['msedge', 'chrome'])
+def test_browser_launch_keeps_sandbox_and_separate_profile(monkeypatch, tmp_path, channel):
+    import sys
+    launched = []
+    page = Page()
+    context = SimpleNamespace(set_default_timeout=lambda _: None, pages=[page])
+    async def launch(path, **kwargs):
+        launched.append((path, kwargs)); return context
+    driver = SimpleNamespace(chromium=SimpleNamespace(launch_persistent_context=launch))
+    async def start(): return driver
+    monkeypatch.setitem(sys.modules, 'playwright.async_api',
+                        SimpleNamespace(async_playwright=lambda: SimpleNamespace(start=start)))
+    monkeypatch.setenv('LOCALAPPDATA', str(tmp_path))
+    monkeypatch.setenv('ULTRON_BROWSER_CHANNEL', channel)
+    assert asyncio.run(YouTubePlayback()._page()) is page
+    path, options = launched[0]
+    assert options['channel'] == channel and options['chromium_sandbox'] is True
+    assert path.endswith('youtube-browser-chrome' if channel == 'chrome' else 'youtube-browser')

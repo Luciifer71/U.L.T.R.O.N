@@ -31,7 +31,9 @@ The next playback request reuses its page and replaces the previous video.
 
 Selection requires all meaningful requested title/artist words in the result title
 and channel. Unrequested karaoke, cover, reaction and remix versions are excluded.
-Equal-ranked distinct matches ask for a more specific version. This is conservative
+Matching artist-channel uploads rank above other uploads. Official videos rank above
+lyric videos. Multiple official uploads from the requested artist use YouTube
+result order; unknown-channel ties still ask for a more specific version. This is conservative
 text matching, not musical identity recognition; misleading video metadata remains
 a limitation.
 
@@ -58,3 +60,19 @@ It cannot establish that today's live YouTube markup or your Edge setup works.
 After setup, say the example playback request above once. Check that the requested
 video starts and Ultron reports playback verification. If blocked, inspect the
 dedicated browser window and share a normal support ZIP with what you observed.
+
+## Browser choice
+
+Edge remains the default because it is available on most Windows installations.
+To use installed Chrome, set this before launching Ultron from the same PowerShell:
+
+```powershell
+$env:ULTRON_BROWSER_CHANNEL = "chrome"
+.\start-qwen3-trial.cmd
+```
+
+Use `msedge` to select Edge again. Both launch with Chromium sandboxing enabled;
+there is no automatic fallback to an unsandboxed browser. Chrome uses a separate
+`%LOCALAPPDATA%\Ultron\youtube-browser-chrome` profile, preserving the existing
+Edge automation profile and all normal browser profiles. This selection affects
+managed playback only; ordinary website searches use the existing system handling.
