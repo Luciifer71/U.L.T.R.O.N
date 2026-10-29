@@ -1,4 +1,3 @@
-@"
 # Python environments
 venv/
 .venv/
@@ -39,10 +38,13 @@ test_long_action.py
 # IDE settings
 .vscode/
 .idea/
-"@ | Set-Content .gitignore
 runtime/
 
 # Google desktop client files must stay local
 client_secret*.json
 credentials.json
 token.json
+
+# Generated frontend output
+ultron-ui/dist/
+*.tsbuildinfo

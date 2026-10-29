@@ -1,32 +1,52 @@
-# React + TypeScript + Vite
+# U.L.T.R.O.N. / visual interface
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+An experimental React/TypeScript particle scene built with Three.js, React Three
+Fiber, WebGPU and TSL. It consumes `ultron.visual` events from the local NATS bus.
+The UI does not run the brain or prove that a desktop action succeeded.
 
-Currently, two official plugins are available:
+## Development
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+From the repository root, install both dependency sets:
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```powershell
+npm ci
+cd ultron-ui
+npm ci
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+The root package supplies `@nats-io/nats-core`. Open Vite's printed URL. Start the
+backend separately using the [main setup guide](../README.md#run).
+The default WebSocket endpoint is `ws://127.0.0.1:9222`; override it with
+`VITE_ULTRON_NATS_WS_URL` when needed. Do not expose an unauthenticated NATS server
+publicly.
+
+```powershell
+npm run build
+npm run lint
+```
+
+## States and troubleshooting
+
+The scene responds to listening, thinking, executing, alert and idle events.
+Keyboard keys 1–7 exercise idle, listening, thinking, executing, alert, focus and
+sleep locally. Keyboard animation alone does not verify the backend connection.
+
+`App.tsx` currently mounts `WebGPUTest.tsx`. The scene includes a central core,
+particles, circuits, a computational shell, information flow and energy effects.
+The existing `RenderRuntime` performance controller is not mounted by that active
+scene. Adaptive rendering is unfinished; this guide does not claim it is enabled.
+
+If animation stutters, record browser/version, display resolution, frame timing
+and whether model/speech inference was active. If animation is smooth but fails
+to react, inspect the browser console for `[ULTRON BUS]` connection/subscription
+errors. Include relevant errors with a backend support report, without credentials.
+A still screenshot cannot establish frame rate or GPU selection.
+
+## Scope
+
+Reported UI lag is unresolved. Backend Python checks do not validate this scene's
+performance. Legacy scene files are retained while renderer behavior is investigated;
+they are not evidence that every rendering path is active.
+
+The repository's [ownership terms](../README.md#license--ownership) apply here too.
