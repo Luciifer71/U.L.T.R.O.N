@@ -46,7 +46,7 @@ complete or production-ready.
 Broader browser and desktop automation remain under development.
 
 **Dependency references:** [Python](../requirements.txt),
-[Windows GPU speech](../requirements-speech-windows.txt), and
+[Windows GPU speech](../requirements/speech-windows.txt), and
 [frontend](../ultron-ui/package.json) contain the declared packages and version constraints.
 
 This overview is provided for technical review. See [License & Ownership](../README.md#license--ownership)
@@ -54,4 +54,4 @@ for the project's stated usage restrictions; listing third-party technologies do
 not grant permission to reuse Ultron's implementation.
 
 
-Optional manifests: [Google](../requirements-google.txt), [browser](../requirements-browser.txt) and [tests](../requirements-test.txt). The NATS browser client is declared in the [root package manifest](../package.json).
+Optional manifests: [Google](../requirements/google.txt), [browser](../requirements/browser.txt) and [tests](../requirements/test.txt). The NATS browser client is declared in the [root package manifest](../package.json).

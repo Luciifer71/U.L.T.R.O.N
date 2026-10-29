@@ -1,13 +1,15 @@
 import os
+from pathlib import Path
 import chromadb
 from ollama import Client
 
 # Initialize ChromaDB persistent storage and Ollama Client
-chroma_client = chromadb.PersistentClient(path="./chroma_db")
+ROOT = Path(__file__).resolve().parents[2]
+chroma_client = chromadb.PersistentClient(path=str(ROOT / "chroma_db"))
 collection = chroma_client.get_or_create_collection(name="ultron_knowledge")
 ollama_client = Client()
 
-KNOWLEDGE_DIR = "./knowledge_base"
+KNOWLEDGE_DIR = str(ROOT / "knowledge_base")
 
 
 def get_embedding(text: str) -> list:

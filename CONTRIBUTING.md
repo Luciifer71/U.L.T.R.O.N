@@ -20,7 +20,7 @@ dependencies do not require Ollama, Docker, a microphone, CUDA or a model downlo
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements-test.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements/test.txt
 .\.venv\Scripts\python.exe .\ultron_acceptance.py
 ```
 
