@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import memory_db
-
-
+from ultron.core import memory_db
 def test_task_memory_round_trip(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(memory_db, "DB_PATH", tmp_path / "ultron_memory.db")
     memory_db.init_memory_db()

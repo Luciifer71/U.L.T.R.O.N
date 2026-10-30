@@ -4,9 +4,7 @@ from pathlib import Path
 
 import pytest
 
-import model_benchmark as benchmark
-
-
+from ultron.cli import model_benchmark as benchmark
 def response(calls=None, content=''):
     return {'done': True, 'done_reason': 'stop', 'message': {'content': content, 'tool_calls': calls or []},
             'eval_count': 10, 'eval_duration': 1_000_000_000}

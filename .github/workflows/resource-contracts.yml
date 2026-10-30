@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install pytest psutil
-      - run: python -m pytest -q tests/test_microphone_runtime.py tests/test_reply_delivery.py tests/test_google_updates.py tests/test_file_workflow.py tests/test_support_bundle.py tests/test_system_info.py tests/test_resource_catalog.py tests/test_resource_cli.py tests/test_exact_app_discovery.py tests/test_request_planning.py tests/test_intent_guard.py tests/test_model_benchmark.py
+      - run: python -m pytest -q tests/test_package_layout.py tests/test_microphone_runtime.py tests/test_reply_delivery.py tests/test_google_updates.py tests/test_file_workflow.py tests/test_support_bundle.py tests/test_system_info.py tests/test_resource_catalog.py tests/test_resource_cli.py tests/test_exact_app_discovery.py tests/test_request_planning.py tests/test_intent_guard.py tests/test_model_benchmark.py
   brain:
     runs-on: windows-latest
     steps:
@@ -39,7 +39,7 @@ jobs:
         with:
           python-version: '3.13'
       - run: python -m pip install -r requirements/test.txt
-      - run: python ultron_acceptance.py
+      - run: python run_ultron.py accept
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -58,3 +58,22 @@ jobs:
       - run: python -m pytest -q tests/test_youtube_playback.py
         env:
           ULTRON_BROWSER_TESTS: '1'
+
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install build
+      - run: python -m build
+      - run: python -m pip install --no-deps dist/*.whl
+      - run: python run_ultron.py --help
+      - name: Installed command works outside the checkout
+        working-directory: ${{ runner.temp }}
+        env:
+          ULTRON_PROJECT_ROOT: ${{ github.workspace }}
+        run: |
+          ultron --help
+          ultron benchmark --help

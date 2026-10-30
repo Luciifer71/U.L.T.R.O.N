@@ -21,7 +21,7 @@ From the repository root in PowerShell:
 $env:WHISPER_DEVICE = "cuda"
 $env:WHISPER_MODEL_SIZE = "small.en"
 $env:WHISPER_CUDA_COMPUTE_TYPE = "float16"
-.\.venv\Scripts\python.exe speech_diagnostics.py --device cuda
+.\.venv\Scripts\python.exe run_ultron.py speech --device cuda
 ```
 
 First startup downloads the model unless it is already cached. For offline
@@ -56,11 +56,11 @@ repair the Linux dynamic loader by changing that variable after startup.
 ## Microphone and recognition checks
 
 ```powershell
-.\.venv\Scripts\python.exe speech_diagnostics.py --list-mics
-.\.venv\Scripts\python.exe speech_diagnostics.py --device cuda --mic-device 1 --record-seconds 6
+.\.venv\Scripts\python.exe run_ultron.py speech --list-mics
+.\.venv\Scripts\python.exe run_ultron.py speech --device cuda --mic-device 1 --record-seconds 6
 $env:AUDIO_INPUT_MODE = "pinned"
 $env:AUDIO_INPUT_DEVICE = "1"
-.\.venv\Scripts\python.exe voice_listener.py
+.\.venv\Scripts\python.exe run_ultron.py voice_listener
 ```
 
 Replace `1` with your input device ID. The listener accepts an ID or a device
@@ -79,11 +79,11 @@ hint can influence recognition; it does not prove correct recognition by itself.
 
 The listener keeps its existing English vocabulary prompt, wake-word handling,
 VAD parameters, NATS subjects and UI listening events. `.env.example` documents
-settings that can be saved in `.env` beside `voice_listener.py`. The listener
+settings that can be saved in `.env` in the repository root. The listener
 loads that file at startup, regardless of the current working directory.
 Existing process variables take precedence for temporary testing overrides.
 After saving your settings once, start with
-`.\.venv\Scripts\python.exe .\voice_listener.py`.
+`.\.venv\Scripts\python.exe .\run_ultron.py voice_listener`.
 The brain, action daemon and NATS must still be running separately.
 
 ## Model choice and fallback policy
@@ -297,7 +297,7 @@ The 25-second inactivity timeout is unchanged. Listening remains suppressed duri
 TTS to avoid self-triggering; voice interruption is not implemented. Synthesis is
 bounded to 20 seconds and playback to 90 seconds, with gate release on completion,
 error, cancellation or timeout. Capability answers retain full terminal text but
-use a shorter spoken summary. `stop-ultron-speech.cmd` can stop speech immediately.
+use a shorter spoken summary. `scripts/windows/stop-ultron-speech.cmd` can stop speech immediately.
 
 
 ### Speech boundaries and short acknowledgements

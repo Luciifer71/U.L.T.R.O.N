@@ -14,8 +14,8 @@ From the project directory in PowerShell:
 Wait for component readiness, then use another terminal:
 
 ```powershell
-.\.venv\Scripts\python.exe .\send_intent.py "What is my uptime?"
-.\.venv\Scripts\python.exe .\send_intent.py "Open the calculator and file explorer for me."
+.\.venv\Scripts\python.exe .\run_ultron.py send "What is my uptime?"
+.\.venv\Scripts\python.exe .\run_ultron.py send "Open the calculator and file explorer for me."
 ```
 
 These are **live commands**, not a dry run. The second opens applications.

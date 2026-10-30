@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from ultron_resources import file_workflow as workflow
-from ultron_resources.catalog import PathPolicy, ResourceCatalog, ResourceError, AmbiguousResource
-from ultron_resources.service import ResourceService
-from ultron_control.request_planning import explicit_file_plan, validate_application_targets
+from ultron.resources import file_workflow as workflow
+from ultron.resources.catalog import PathPolicy, ResourceCatalog, ResourceError, AmbiguousResource
+from ultron.resources.service import ResourceService
+from ultron.control.request_planning import explicit_file_plan, validate_application_targets
 
 
 def service_for(tmp_path, monkeypatch):

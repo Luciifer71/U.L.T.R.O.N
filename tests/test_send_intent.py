@@ -3,9 +3,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-import send_intent
-
-
+from ultron.cli import send_intent
 @pytest.mark.parametrize('respond', [True, False])
 def test_typed_command_correlates_response_and_closes(monkeypatch, respond):
     class Nats:

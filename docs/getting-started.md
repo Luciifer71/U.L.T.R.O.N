@@ -42,7 +42,7 @@ for CUDA validation, microphone selection and fallback behavior.
 - **Google:** follow [account setup, privacy and coverage](google-updates.md).
   Installation does not connect an account. Google consent is required; tokens
   use Windows Credential Manager. Access cannot send or delete emails.
-- **YouTube playback:** run `setup-youtube-playback.cmd` and read the
+- **YouTube playback:** run `scripts/windows/setup-youtube-playback.cmd` and read the
   [playback guide](youtube-playback.md). Edge is the default; installed Chrome
   can be selected with `ULTRON_BROWSER_CHANNEL=chrome`. Profiles are isolated.
 - **Knowledge/gestures:** separate utilities and dependencies, not prerequisites
@@ -82,23 +82,23 @@ The root install supplies the NATS browser client. Open the URL printed by Vite
 
 To run components manually, start `docker compose up -d`, ensure Ollama is running,
 then run each in a separate terminal using `.\.venv\Scripts\python.exe`:
-`action_daemon.py`, `brain_agent.py`, `voice_listener.py`.
+`run_ultron.py action_daemon`, `run_ultron.py brain_agent`, `run_ultron.py voice_listener`.
 
 **Stop before restarting:** press Ctrl+C in each component terminal and wait for
 shutdown. Stop the UI separately. Docker and Ollama remain running.
-`stop-ultron-speech.cmd` stops spoken playback, not the whole assistant.
+`scripts/windows/stop-ultron-speech.cmd` stops spoken playback, not the whole assistant.
 
 ## Checks & diagnostics
 
 ```powershell
 .\.venv\Scripts\python.exe .\verify_ultron.py
-.\accept-ultron.cmd
+.\scripts/windows/accept-ultron.cmd
 ```
 
 For a quick typed request while the services are running:
 
 ```powershell
-.\.venv\Scripts\python.exe .\send_intent.py "What is my uptime?" --timeout 5
+.\.venv\Scripts\python.exe .\run_ultron.py send "What is my uptime?" --timeout 5
 ```
 
 Collect one support ZIP instead of copying terminals:
@@ -111,11 +111,14 @@ The collector prints the output path under ignored `runtime/`. **Review before
 sharing:** bundles include command transcripts, replies and resource names.
 Never upload credentials, private email data or personal recordings to an issue.
 For a diagnostic JSON without transcript collection, use
-`.\.venv\Scripts\python.exe .\ultron_diagnostics.py --model qwen3:8b --tests`.
+`.\.venv\Scripts\python.exe .\run_ultron.py diagnose --model qwen3:8b --tests`.
 
 CI covers portable contracts, Windows brain/acceptance checks and a browser fixture.
 Passing tests does not prove live microphone capture, physical speaker output,
 current YouTube markup, Google account access or UI performance. `verify_ultron.py
---speech` adds speech-runtime probes; `accept-ultron.cmd --live-apps` deliberately
+--speech` adds speech-runtime probes; `scripts/windows/accept-ultron.cmd --live-apps` deliberately
 opens real applications through a running brain. See [acceptance scope](acceptance.md).
 
+
+For updated utility commands and optional package installation, see
+[Python package layout](python-package.md).

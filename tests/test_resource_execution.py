@@ -4,8 +4,8 @@ import ctypes
 
 import pytest
 
-from ultron_control.models import CapabilityError, ResolvedResource
-from ultron_control.resource_execution import (
+from ultron.control.models import CapabilityError, ResolvedResource
+from ultron.control.resource_execution import (
     ResourceExecutionCapability,
     SHELLEXECUTEINFOW,
     shell32,
@@ -170,7 +170,7 @@ def test_uri_remains_dispatched_even_when_process_is_created(
 ) -> None:
     executor = ResourceExecutionCapability()
 
-    import ultron_control.resource_execution as resource_execution
+    import ultron.control.resource_execution as resource_execution
 
     def fake_shell_execute(info_ptr) -> bool:
         info = ctypes.cast(

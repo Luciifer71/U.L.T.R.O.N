@@ -2,8 +2,8 @@ import asyncio
 import json
 from types import SimpleNamespace
 import pytest
-from ultron_control.reply_delivery import SpeechQueue, IntentInbox
-from ultron_control.google_updates import request_kind, GoogleUpdates
+from ultron.control.reply_delivery import SpeechQueue, IntentInbox
+from ultron.control.google_updates import request_kind, GoogleUpdates
 
 
 @pytest.mark.parametrize('text', ['What are my latest email updates?', 'Do I have any new emails?',
@@ -93,8 +93,8 @@ def test_short_voice_keeps_technical_details_out(tmp_path):
     reply = updates.spoken_reply('mail')
     assert '4 potentially important' in reply and '25 reviewed' in reply
     assert len(reply.split()) < 35
-    assert 'google_connect.py' not in reply and 'heuristic' not in reply
-    assert 'google_connect.py' in updates.reply('mail')
+    assert 'run_ultron.py google' not in reply and 'heuristic' not in reply
+    assert 'run_ultron.py google' in updates.reply('mail')
 
 
 @pytest.mark.parametrize('text', ['What are my latest calendar updates?', 'Check my upcoming appointments.', 'Give me my calendar update for today.'])
@@ -122,7 +122,7 @@ def test_natural_calendar_requests(text):
     ('email ' * 1000, None),
 ])
 def test_google_routing_contract(text, expected):
-    from ultron_control.google_routing import route_request
+    from ultron.control.google_routing import route_request
     assert route_request(text) == expected
 
 
@@ -150,7 +150,7 @@ def test_google_status_states(tmp_path, kind):
 
 
 def test_routing_batch_stays_out_of_model_queue(tmp_path):
-    from ultron_control.google_routing import route_request
+    from ultron.control.google_routing import route_request
     async def run():
         replies = []
         async def handle(msg): pytest.fail('Google request reached model')
@@ -176,7 +176,7 @@ def test_routing_batch_stays_out_of_model_queue(tmp_path):
     'Can you give me calendar updates and also what are my system stats?',
 ])
 def test_combined_google_and_system_reads(prompt, monkeypatch):
-    from ultron_control import read_requests as reads
+    from ultron.control import read_requests as reads
     kinds = reads.read_request_kinds(prompt)
     assert kinds == ('google-calendar', 'telemetry')
     monkeypatch.setattr(reads, 'collect_telemetry', lambda: {'cpu_percent': 12, 'memory_percent': 60})
@@ -193,13 +193,13 @@ def test_combined_google_and_system_reads(prompt, monkeypatch):
     'do not check my calendar and system stats', '"check my calendar" and system stats',
     'open calculator and system stats', 'system stats and system stats and system stats and system stats and system stats'])
 def test_read_composition_never_swallows_other_actions(prompt):
-    from ultron_control.read_requests import read_request_kinds
+    from ultron.control.read_requests import read_request_kinds
     assert read_request_kinds(prompt) is None
 
 
 def test_capability_and_combined_reads_bypass_busy_model(tmp_path, monkeypatch):
-    from ultron_control import read_requests as reads
-    from ultron_control.google_routing import route_request
+    from ultron.control import read_requests as reads
+    from ultron.control.google_routing import route_request
     monkeypatch.setattr(reads, 'collect_telemetry', lambda: {'cpu_percent': 7})
     async def run():
         replies = []
@@ -222,10 +222,10 @@ def test_capability_and_combined_reads_bypass_busy_model(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize('prompt', ['Tell me what are your capabilities?', 'Tell me what are your give-abilities?', 'what are your capabilities'])
 def test_capability_variants_use_factual_fast_lane(prompt):
-    from ultron_control.read_requests import read_request_kinds
+    from ultron.control.read_requests import read_request_kinds
     assert read_request_kinds(prompt) == ('capabilities',)
 
 
 def test_capability_variant_does_not_swallow_an_action():
-    from ultron_control.read_requests import read_request_kinds
+    from ultron.control.read_requests import read_request_kinds
     assert read_request_kinds('tell me what are your capabilities and open calculator') is None

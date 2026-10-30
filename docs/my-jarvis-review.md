@@ -35,7 +35,7 @@ All links below pin the reviewed revision:
 ## Adopted in Ultron
 
 The ideas of local informational handlers and discoverable capabilities inspired
-an independent implementation in `ultron_control/local_facts.py`. No source,
+an independent implementation in `src/ultron/control/local_facts.py`. No source,
 assets, branding or dependencies were copied from my-jarvis. Ultron's existing
 ownership/license terms are unchanged.
 

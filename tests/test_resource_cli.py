@@ -2,9 +2,9 @@ import json
 from pathlib import Path
 import sys
 
-import resource_cli
-from ultron_resources.catalog import PathPolicy, ResourceCatalog
-from ultron_resources.service import ResourceService
+from ultron.cli import resource_cli
+from ultron.resources.catalog import PathPolicy, ResourceCatalog
+from ultron.resources.service import ResourceService
 
 
 def service(tmp_path, monkeypatch):

@@ -1,7 +1,7 @@
 import pytest
-from ultron_resources.native_apps import ExactApplicationDiscovery
-from ultron_control.application_discovery import ApplicationAmbiguous
-from ultron_control.resource_discovery import ResourceDiscovery
+from ultron.resources.native_apps import ExactApplicationDiscovery
+from ultron.control.application_discovery import ApplicationAmbiguous
+from ultron.control.resource_discovery import ResourceDiscovery
 
 
 def test_spelling_or_game_number_never_selects_similar_installed_application():

@@ -65,8 +65,8 @@ Run from the checkout using the project interpreter. Full paths work without
 indexing. Name-only requests require an index:
 
 ```powershell
-.\.venv\Scripts\python.exe .\resource_cli.py index --root "G:\"
-.\.venv\Scripts\python.exe .\resource_cli.py search "Forza Horizon 6" --root "G:\"
+.\.venv\Scripts\python.exe .\run_ultron.py resources index --root "G:\"
+.\.venv\Scripts\python.exe .\run_ultron.py resources search "Forza Horizon 6" --root "G:\"
 ```
 
 Indexing is explicit, bounded to 100,000 entries/30 seconds per root by default.
@@ -84,9 +84,9 @@ cannot establish uniqueness. Similar names are never automatically executed.
 Typed operations for local diagnosis:
 
 ```powershell
-.\.venv\Scripts\python.exe .\resource_cli.py open "notes.txt" --editor Notepad
-.\.venv\Scripts\python.exe .\resource_cli.py launch "Forza Horizon 6" --root "G:\"
-.\.venv\Scripts\python.exe .\resource_cli.py run "sample.py"
+.\.venv\Scripts\python.exe .\run_ultron.py resources open "notes.txt" --editor Notepad
+.\.venv\Scripts\python.exe .\run_ultron.py resources launch "Forza Horizon 6" --root "G:\"
+.\.venv\Scripts\python.exe .\run_ultron.py resources run "sample.py"
 ```
 
 Use actual unique names from your catalog. `--argument=value` supplies one

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from ultron_control.application_discovery import ApplicationDiscovery
-from ultron_control.policy import CapabilityPolicy, PolicyConfig
+from ultron.control.application_discovery import ApplicationDiscovery
+from ultron.control.policy import CapabilityPolicy, PolicyConfig
 
 
 def test_normalization() -> None:

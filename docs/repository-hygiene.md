@@ -18,10 +18,14 @@ belong in either template or source. Git ignore rules do not affect files alread
 - `runtime/`: ignored generated reports and logs.
 - `knowledge_base/`: ignored personal ingestion input.
 
-Launchers, runtime components and public diagnostic entry points remain at the root
-so existing commands and working-directory assumptions keep working. Moving these
-requires a separate packaging migration. Experimental utilities and their model asset now have dedicated folders. Their
-manual command paths changed; normal launchers did not. The legacy local
+Runtime code lives in `src/ultron/`, grouped into agents, audio, core, CLI,
+control and resources. `run_ultron.py` dispatches utilities from a checkout;
+`verify_ultron.py` and the normal startup/report batch files remain root wrappers.
+Secondary Windows helpers live under `scripts/windows/`.
+Settings, SQLite memory, Google credentials, NATS data and generated logs retain
+their previous locations. No personal data migration is performed.
+
+The legacy local
 `test_long_action.py` is ignored explicitly; move it to `runtime/local-tests/`
 if you want a clean local root without deleting it.
 

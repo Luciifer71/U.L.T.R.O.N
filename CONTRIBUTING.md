@@ -21,7 +21,7 @@ dependencies do not require Ollama, Docker, a microphone, CUDA or a model downlo
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements/test.txt
-.\.venv\Scripts\python.exe .\ultron_acceptance.py
+.\.venv\Scripts\python.exe .\run_ultron.py accept
 ```
 
 On macOS/Linux use `.venv/bin/python` in place of the Windows interpreter path.
@@ -34,7 +34,7 @@ to run unit tests. Existing `.env` values override defaults; never commit them.
 - Work on a focused branch and explain the user-visible problem in the PR.
 - Add regression cases for the behavior being changed, including relevant failure
   cases. Test doubles should never launch real user applications.
-- Run `ultron_acceptance.py`. It writes a report ZIP and source hashes under
+- Run `run_ultron.py accept`. It writes a report ZIP and source hashes under
   ignored `runtime/`. Passing offline tests does not certify live audio or GPU use.
 - `--live-apps` is optional and opens actual applications. Do not use it in CI.
 - Preserve target names, explicit scope, policy checks and the distinction between

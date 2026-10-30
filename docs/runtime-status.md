@@ -24,7 +24,7 @@ are there any errors?" is handled directly without model inference.
 Stop existing components before updating. Run:
 
 ```powershell
-.\.venv\Scripts\python.exe .\ultron_diagnostics.py --model qwen3:8b --tests
+.\.venv\Scripts\python.exe .\run_ultron.py diagnose --model qwen3:8b --tests
 .\start-qwen3-trial.cmd
 ```
 

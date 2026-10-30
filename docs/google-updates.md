@@ -18,7 +18,7 @@ installing this code.
 2. Stop Ultron. Run in PowerShell:
    ```powershell
    .\.venv\Scripts\python.exe -m pip install -r requirements/google.txt
-   .\.venv\Scripts\python.exe .\google_connect.py connect --client "C:\path\client_secret.json"
+   .\.venv\Scripts\python.exe .\run_ultron.py google connect --client "C:\path\client_secret.json"
    ```
 3. Sign in to the intended account and grant both read-only scopes in Google's
    browser consent screen. Restart the normal launcher or `start-qwen3-trial.cmd`.
@@ -31,12 +31,12 @@ Bodies are processed in memory, not stored. Private titles are not spoken or sen
 to Ollama. Review them locally with:
 
 ```powershell
-.\.venv\Scripts\python.exe .\google_connect.py review
+.\.venv\Scripts\python.exe .\run_ultron.py google review
 ```
 
 Stop Ultron before connecting another account or disconnecting:
 ```powershell
-.\.venv\Scripts\python.exe .\google_connect.py disconnect
+.\.venv\Scripts\python.exe .\run_ultron.py google disconnect
 ```
 Also revoke access in your Google account's third-party connections. Disconnect
 removes local credentials/cache, not the Google-side grant. In OAuth testing mode,
@@ -81,7 +81,7 @@ Repeated status replies are combined while pending, suppressed during matching
 speech and for ten seconds afterwards, and expire after twenty seconds in the
 speech queue. Each typed request still receives its own correlated text response.
 
-Run `stop-ultron-speech.cmd` (or `send_intent.py "stop speaking"`) to stop current
+Run `scripts/windows/stop-ultron-speech.cmd` (or `run_ultron.py send "stop speaking"`) to stop current
 queued voice playback and clear pending speech. It does not cancel physical actions
 or disable future background notifications. Spoken interruption during playback is
 not supported: the microphone is intentionally muted while Ultron speaks.
@@ -100,12 +100,12 @@ Restart all three components together after updating this protocol.
    cached status, no Ollama planning call for these requests, and no false claim
    that connected mail is inaccessible. Allow speech generation/network latency.
 4. Ask an ordinary model question, then use a separate terminal to send
-   `send_intent.py "check my emails" --timeout 5`. Expect a correlated text reply
+   `run_ultron.py send "check my emails" --timeout 5`. Expect a correlated text reply
    within five seconds even if model inference is busy. Speech may wait its turn.
 5. Send the same email-status request three times quickly. Text responses should
    arrive for each request, but speech should not read three matching status
    paragraphs. Different email/calendar requests may each have one short reply.
-6. During speech run `stop-ultron-speech.cmd`. Expect playback to stop and queued
+6. During speech run `scripts/windows/stop-ultron-speech.cmd`. Expect playback to stop and queued
    speech to clear. Then ask a new question to verify speech still works.
 7. Leave Ultron running for another sync interval. Counts can increase as archive
    scanning progresses. This does not necessarily mean newly arrived mail.
@@ -136,7 +136,7 @@ Disconnected, first-sync, unavailable, partial and stale snapshots are reported
 separately. A background authorization/client failure invalidates previous success
 flags instead of presenting a failed connection as a healthy cached sync.
 
-After updating and restarting, run `verify_ultron.py`, then use `send_intent.py`
+After updating and restarting, run `verify_ultron.py`, then use `run_ultron.py send`
 with each quoted request above and `--timeout 5`. Also try “Check my calendar next
 week” (clarification) and “Delete my emails” (read-only limitation, no deletion).
 Finally say “Open calculator” to check the existing action path. Collect one
@@ -151,7 +151,7 @@ evidence, not a production load benchmark or proof of live OAuth/audio health.
 | Symptom | What to check first |
 | --- | --- |
 | Typed command times out | Confirm the brain and NATS are running. A typed timeout alone does not establish an OAuth failure. |
-| Text reply arrives but speech is delayed | Speech can be queued. Use `stop-ultron-speech.cmd` to clear playback, then submit a fresh request. |
+| Text reply arrives but speech is delayed | Speech can be queued. Use `scripts/windows/stop-ultron-speech.cmd` to clear playback, then submit a fresh request. |
 | Waiting for the first successful sync | Allow the background sync to finish; inspect the reported status before reconnecting. |
 | Email or calendar sync is unavailable | Check the connection diagnostics. Network, quota and authorization failures can produce this status. |
 | Priority count rises without new inbox mail | The archive scan may have found older messages. This count is not a new-mail counter. |
@@ -178,7 +178,7 @@ the same cached-count, single-account and next-24-hour calendar limitations.
 Run this once with the same interpreter as Ultron:
 
 ```powershell
-.\.venv\Scripts\python.exe .\google_connect.py doctor
+.\.venv\Scripts\python.exe .\run_ultron.py google doctor
 ```
 
 It checks saved credentials, automatic access-token refresh, Gmail access and

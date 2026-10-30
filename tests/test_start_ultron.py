@@ -7,9 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import start_ultron as launcher
-
-
+from ultron.cli import start_ultron as launcher
 class LauncherTests(unittest.TestCase):
     def test_warmup_uses_selected_trial_profile_without_tools(self):
         opener = MagicMock()
@@ -119,7 +117,9 @@ def test_main_warms_before_any_component_and_stops_on_failure(monkeypatch, tmp_p
     executable.parent.mkdir(parents=True)
     executable.touch()
     for component in launcher.COMPONENTS:
-        (tmp_path / (component + '.py')).touch()
+        location = tmp_path / 'src' / 'ultron' / 'agents' / (component + '.py')
+        location.parent.mkdir(parents=True, exist_ok=True)
+        location.touch()
     events = []
     monkeypatch.setattr(sys, 'argv', ['start_ultron.py'])
     monkeypatch.setattr(launcher, 'ROOT', tmp_path)

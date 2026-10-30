@@ -1,7 +1,7 @@
 # Acceptance and release scope
 
-Run `accept-ultron.cmd` from a configured Windows checkout, or
-`python ultron_acceptance.py`. This runs the full regression suite and thirteen
+Run `scripts/windows/accept-ultron.cmd` from a configured Windows checkout, or
+`python run_ultron.py accept`. This runs the full regression suite and thirteen
 request/guard checks, records source hashes, timings, test counts and explicit
 untested areas, then writes a single `runtime/support/ultron-acceptance-*.zip`.
 No live application action is performed by default. GitHub Actions runs this
@@ -14,7 +14,7 @@ contracts, not measurements of speech-recognition accuracy or model intelligence
 Regression tests also assert that every app preflight finishes before any action
 starts, and that a missing app prevents the entire batch from executing.
 
-For an explicitly requested live check, use `accept-ultron.cmd --live-apps`
+For an explicitly requested live check, use `scripts/windows/accept-ultron.cmd --live-apps`
 with the updated brain and action daemon already running. It asks for uptime
 and opens Calculator and File Explorer, validates matched responses, records
 latency, and includes those results in the same ZIP. Offline failures block live
