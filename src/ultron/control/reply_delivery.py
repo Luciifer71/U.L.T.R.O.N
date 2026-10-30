@@ -102,7 +102,7 @@ class IntentInbox:
             speech = reply
             if reads == ('capabilities',):
                 speech = ('I can open apps and files, search websites, report system stats, '
-                          'play songs on YouTube and open Spotify searches. '
+                          'play songs through YouTube or connected Spotify. '
                           'Google email and calendar updates need setup. The full capability list is in the terminal.')
             payload = {'text': reply, 'speech': '' if stop else speech,
                        'silent': stop, 'requestId': data.get('requestId'),

@@ -17,7 +17,7 @@ def clean_music_query(query):
     query = re.sub(r"\s+song\s+by\s+", " by ", query, flags=re.I)
     query = re.sub(r"\s+for me$", "", query, flags=re.I)
     # A narrow, known artist transcription alias, never fuzzy matching titles.
-    query = re.sub(r"\bby the weekend$", "by The Weeknd", query, flags=re.I)
+    query = re.sub(r"\bby (?:the )?weekend$", "by The Weeknd", query, flags=re.I)
     return query.strip()
 
 

@@ -3,7 +3,7 @@ import os
 import runpy
 import sys
 
-COMMANDS = {'start': 'cli.start_ultron', 'verify': 'cli.verify_ultron', 'report': 'cli.collect_ultron_report', 'accept': 'cli.ultron_acceptance', 'diagnose': 'cli.ultron_diagnostics', 'speech': 'cli.speech_diagnostics', 'google': 'cli.google_connect', 'resources': 'cli.resource_cli', 'send': 'cli.send_intent', 'benchmark': 'cli.model_benchmark', 'brain_agent': 'agents.brain_agent', 'action_daemon': 'agents.action_daemon', 'voice_listener': 'agents.voice_listener'}
+COMMANDS = {'start': 'cli.start_ultron', 'verify': 'cli.verify_ultron', 'report': 'cli.collect_ultron_report', 'accept': 'cli.ultron_acceptance', 'diagnose': 'cli.ultron_diagnostics', 'speech': 'cli.speech_diagnostics', 'google': 'cli.google_connect', 'spotify': 'cli.spotify_connect', 'resources': 'cli.resource_cli', 'send': 'cli.send_intent', 'benchmark': 'cli.model_benchmark', 'brain_agent': 'agents.brain_agent', 'action_daemon': 'agents.action_daemon', 'voice_listener': 'agents.voice_listener'}
 
 
 def main():

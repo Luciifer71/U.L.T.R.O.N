@@ -107,3 +107,7 @@ Optional general web search prefers the current `ddgs` package; install
 `requirements/search.txt` to migrate an existing legacy `duckduckgo_search`
 installation. Legacy installations remain compatible. Music requests above do
 not require either search package.
+
+## Optional Spotify default
+
+After [connecting Spotify Premium](spotify.md), named-song requests without a provider use Spotify. An explicit “on YouTube” request still uses this YouTube workflow. Disconnecting Spotify restores the YouTube default.
