@@ -266,3 +266,47 @@ def test_actual_combined_request_preserves_system_stats():
     from ultron.control.read_requests import read_request_kinds
     assert read_request_kinds('Check my Google calendar and show my system stats') == ('google-calendar', 'telemetry')
     assert read_request_kinds('Check out the email and calendar updates right now.') == ('google-mail', 'google-calendar')
+
+
+def test_owned_google_clients_close_when_sync_fails(tmp_path, monkeypatch):
+    import ultron.control.google_updates as module
+    closed = []
+    clients = [SimpleNamespace(close=lambda: closed.append('gmail')),
+               SimpleNamespace(close=lambda: closed.append('calendar'))]
+    monkeypatch.setattr(module, 'google_clients', lambda: clients)
+    service = GoogleUpdates(tmp_path)
+    def fail(*args): raise RuntimeError('sync failed')
+    monkeypatch.setattr(service, '_sync', fail)
+    with pytest.raises(RuntimeError):
+        service.sync()
+    assert sorted(closed) == ['calendar', 'gmail']
+    closed.clear()
+    with pytest.raises(RuntimeError):
+        service.sync(*clients)
+    assert not closed  # Injected clients remain owned by their caller.
+
+
+def test_sync_sqlite_connection_is_closed(tmp_path, monkeypatch):
+    import ultron.control.google_updates as module
+    opened = []
+    original = sqlite3.connect
+    def tracked(*args, **kwargs):
+        db = original(*args, **kwargs); opened.append(db); return db
+    monkeypatch.setattr(module.sqlite3, 'connect', tracked)
+    GoogleUpdates(tmp_path).sync(Mail(), Calendar())
+    assert opened
+    for db in opened:
+        with pytest.raises(sqlite3.ProgrammingError, match='closed'):
+            db.execute('SELECT 1')
+
+
+def test_doctor_closes_clients_after_api_failure(monkeypatch):
+    import ultron.control.google_updates as module
+    closed = []
+    mail, calendar = Mail(), Calendar(RuntimeError('failed'))
+    mail.close = lambda: closed.append('mail')
+    calendar.close = lambda: closed.append('calendar')
+    monkeypatch.setattr(module, 'google_clients', lambda: (mail, calendar))
+    report = module.connection_diagnostics()
+    assert report['calendar']['status'] == 'failed'
+    assert closed == ['mail', 'calendar']

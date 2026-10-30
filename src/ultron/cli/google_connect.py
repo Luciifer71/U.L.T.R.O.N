@@ -1,6 +1,7 @@
 """One-time local Google consent and private cached review. Never logs tokens."""
 import argparse
 import json
+from contextlib import closing
 import sqlite3
 from ultron.control.google_updates import connect, disconnect, private_dir, connection_diagnostics, failure_details
 
@@ -28,7 +29,7 @@ def main():
             if not path.exists():
                 print('No cached Google updates. Connect and start Ultron first.')
                 return 1
-            with sqlite3.connect(path) as db:
+            with closing(sqlite3.connect(path)) as db, db:
                 checked = db.execute("SELECT value FROM state WHERE key='checked'").fetchone()
                 print('Cached snapshot timestamp (Unix seconds):', checked[0] if checked else 'unavailable')
                 print('Potentially important mail (up to 50; heuristic, may be stale):')

@@ -229,3 +229,18 @@ def test_capability_variants_use_factual_fast_lane(prompt):
 def test_capability_variant_does_not_swallow_an_action():
     from ultron.control.read_requests import read_request_kinds
     assert read_request_kinds('tell me what are your capabilities and open calculator') is None
+
+
+def test_fast_capability_reply_clears_music_choice_and_mentions_playback(tmp_path):
+    async def run():
+        from ultron.control.youtube_playback import YouTubePlayback
+        player = YouTubePlayback(); player.choice = {'url': 'old'}
+        replies = []
+        async def publish(subject, payload): replies.append(json.loads(payload))
+        brain = SimpleNamespace(google_updates=GoogleUpdates(tmp_path), youtube_playback=player)
+        inbox = IntentInbox(brain, SimpleNamespace(publish=publish), None, request_kind)
+        await inbox.receive(SimpleNamespace(data=json.dumps({'prompt': 'What all capabilities do you have?'}).encode()))
+        assert player.choice is None
+        assert 'YouTube' in replies[0]['speech'] and 'Spotify' in replies[0]['speech']
+        assert inbox.pending.empty()
+    asyncio.run(run())

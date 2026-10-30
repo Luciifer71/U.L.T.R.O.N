@@ -61,3 +61,22 @@ def test_latest_task_excludes_health_request(tmp_path, monkeypatch):
     memory_db.create_task('health', 'Any problems?')
     assert memory_db.get_latest_task()['task_id'] == 'health'
     assert memory_db.get_latest_task(exclude_task_id='health')['task_id'] == 'previous'
+
+
+def test_memory_connections_close_after_success_and_failure(tmp_path, monkeypatch):
+    import sqlite3
+    import pytest
+    monkeypatch.setattr(memory_db, 'DB_PATH', tmp_path / 'memory.db')
+    original = memory_db.get_db_connection
+    opened = []
+    def tracked():
+        conn = original(); opened.append(conn); return conn
+    monkeypatch.setattr(memory_db, 'get_db_connection', tracked)
+    memory_db.init_memory_db()
+    memory_db.save_fact('test', 'value')
+    assert memory_db.get_all_facts()[0]['value'] == 'value'
+    with pytest.raises(sqlite3.IntegrityError):
+        memory_db.save_fact('invalid', None)
+    for connection in opened:
+        with pytest.raises(sqlite3.ProgrammingError, match='closed'):
+            connection.execute('SELECT 1')

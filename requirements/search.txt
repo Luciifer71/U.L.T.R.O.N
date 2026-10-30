@@ -1,0 +1,2 @@
+# Optional general web search; not needed for music playback.
+ddgs>=9,<10

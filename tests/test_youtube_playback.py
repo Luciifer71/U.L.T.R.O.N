@@ -192,3 +192,73 @@ def test_browser_launch_keeps_sandbox_and_separate_profile(monkeypatch, tmp_path
     path, options = launched[0]
     assert options['channel'] == channel and options['chromium_sandbox'] is True
     assert path.endswith('youtube-browser-chrome' if channel == 'chrome' else 'youtube-browser')
+
+
+@pytest.mark.parametrize('prompt', [
+    'Can you play save your tears by the weekend on YouTube?',
+    'can you play me the save your tears song by the weekend on youtube?',
+    'looking for the song save your tears by the weekend and play it for me on youtube.',
+    'Play the song save your tears by the weekend.',
+])
+def test_observed_music_paraphrases_are_clean_and_grounded(prompt):
+    plan = playback_plan(prompt)
+    assert plan[0]['function'] == {'name': 'play_youtube', 'arguments': {'query': 'save your tears by The Weeknd'}}
+    assert normalize_tool_calls(prompt, plan) == (plan, None)
+
+
+@pytest.mark.parametrize('prompt', [
+    'Play Supergirl from Downloads', 'Play song.mp3', 'Play music on Apple Music',
+    'Do not play Sunflower', 'I hate the movie Supergirl.', 'Play Sunflower then open calculator',
+    'Play Sunflower and delete my files', 'Play the first result',
+])
+def test_default_music_does_not_steal_local_files_or_other_intents(prompt):
+    assert playback_plan(prompt) is None
+
+
+def test_artist_transcription_alias_does_not_weaken_title_matching():
+    row = candidate(title='The Weeknd - Save Your Tears (Official Music Video)', channel='TheWeekndVEVO')
+    assert choose_video('Save Your Tears by the weekend', [row])[0] == URL
+    with pytest.raises(RuntimeError):
+        choose_video('Save Your Tears by another artist', [row])
+    with pytest.raises(RuntimeError):
+        choose_video('Another Song by the weekend', [row])
+
+
+def test_spotify_explicit_request_cannot_be_replaced_by_youtube():
+    plan = playback_plan('Play Sunflower by Post Malone on Spotify')
+    assert plan[0]['function']['name'] == 'open_spotify_search'
+    assert normalize_tool_calls('Play Sunflower by Post Malone on Spotify', plan) == (plan, None)
+    assert normalize_tool_calls('Play Sunflower by Post Malone', plan)[1]
+
+
+def test_failed_match_offers_observed_single_use_expiring_choice(monkeypatch):
+    from ultron.control import youtube_playback as module
+    async def run():
+        player = YouTubePlayback(); player.page = Page()
+        result = await player.play('Unknown Song by Someone')
+        assert not result.success and 'First result:' in result.error
+        choice = player.take_first_choice()
+        assert choice['url'] == URL
+        assert player.take_first_choice() is None
+        player.choice = dict(choice, expires=0)
+        assert player.take_first_choice() is None
+        async def no_wait(_): pass
+        monkeypatch.setattr(module.asyncio, 'sleep', no_wait)
+        result = await player.play(choice['query'], selected=choice)
+        assert result.success
+    asyncio.run(run())
+
+
+def test_spotify_handoff_is_encoded_and_never_claims_playback(monkeypatch):
+    from ultron.control import spotify
+    calls = []
+    monkeypatch.setattr(spotify.sys, 'platform', 'win32')
+    monkeypatch.setattr(spotify.os, 'startfile', lambda uri: calls.append(uri), raising=False)
+    result = asyncio.run(spotify.open_spotify_search('Song & Artist / remix'))
+    assert calls == ['spotify:search:Song%20%26%20Artist%20%2F%20remix']
+    assert result.success and result.data['state'] == 'dispatched'
+    assert result.data['verification'] == 'not_observable'
+    def missing(uri): raise OSError('no handler')
+    monkeypatch.setattr(spotify.os, 'startfile', missing)
+    result = asyncio.run(spotify.open_spotify_search('Song'))
+    assert not result.success and 'Install' in result.error

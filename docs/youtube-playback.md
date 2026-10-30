@@ -44,8 +44,20 @@ restrictions, consent pages, account requirements, network errors and YouTube DO
 changes can block verification. The bounded attempt reports failure instead of
 claiming that opening search results played a song. It does not bypass these gates.
 
-Only explicit single “play ... on YouTube” requests use this path. Other phrasing
-may use existing planning/search behavior. Playback controls for this managed
+Named single-song requests default to YouTube, including “Play the song Sunflower
+by Post Malone” and “Play me Save Your Tears by The Weeknd.” Explicit YouTube
+search requests still open search only. Local requests such as “Play Supergirl
+from Downloads” retain the local-file workflow. Conversational filler is removed
+from music queries; the narrowly scoped artist transcription “by the weekend”
+is normalized to “by The Weeknd.” Other artist/title misspellings are not guessed.
+
+When matching fails but a valid result exists, Ultron names the first observed
+result and offers “play the first result.” This selects that exact saved URL,
+not a new search result. The choice expires after two minutes, is single-use and
+is cleared by another request. A selection still requires playback verification.
+Browser metadata is untrusted text and never becomes an instruction.
+
+ Playback controls for this managed
 browser and multi-step browser workflows are not implemented yet. Music from
 speakers may be picked up by the microphone; headphones reduce that interference.
 
@@ -76,3 +88,22 @@ there is no automatic fallback to an unsandboxed browser. Chrome uses a separate
 `%LOCALAPPDATA%\Ultron\youtube-browser-chrome` profile, preserving the existing
 Edge automation profile and all normal browser profiles. This selection affects
 managed playback only; ordinary website searches use the existing system handling.
+
+## Spotify desktop handoff
+
+“Open Spotify” uses installed-application discovery. “Play Sunflower by Post Malone
+on Spotify” dispatches an encoded Spotify search URI to the installed app. The
+reply says **search dispatched, playback not verified**. Install Spotify and sign
+in through its normal interface if needed. Ultron does not collect credentials,
+connect a Spotify account or automatically press Play in this mode.
+
+Spotify's official [Start/Resume Playback API](https://developer.spotify.com/documentation/web-api/reference/start-a-users-playback)
+requires Premium. This free implementation deliberately provides app/search
+handoff rather than claiming account-linked track playback. Requests without a
+service continue to use YouTube. Windows/macOS/Linux URI handlers may differ;
+accepting a URI is not proof that a track or app window opened successfully.
+
+Optional general web search prefers the current `ddgs` package; install
+`requirements/search.txt` to migrate an existing legacy `duckduckgo_search`
+installation. Legacy installations remain compatible. Music requests above do
+not require either search package.
