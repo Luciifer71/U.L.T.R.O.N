@@ -25,7 +25,7 @@ Stop existing components before updating. Run:
 
 ```powershell
 .\.venv\Scripts\python.exe .\run_ultron.py diagnose --model qwen3:8b --tests
-.\start-qwen3-trial.cmd
+.\scripts/windows/start-qwen3-trial.cmd
 ```
 
 Run the launcher only after the regression checks pass. After `STANDBY MODE`,

@@ -3,7 +3,7 @@
 Use the updated launcher at least once before collecting logs:
 
 ```powershell
-.\start-qwen3-trial.cmd
+.\scripts/windows/start-qwen3-trial.cmd
 ```
 
 The launcher now copies Python output from `brain_agent`, `voice_listener`, and
@@ -15,13 +15,13 @@ Earlier terminal output cannot be recovered retroactively.
 After reproducing a problem, run in a separate project PowerShell terminal:
 
 ```powershell
-.\collect-ultron-report.cmd --model qwen3:8b
+.\scripts/windows/collect-ultron-report.cmd --model qwen3:8b
 ```
 
 To include regression testing as well:
 
 ```powershell
-.\collect-ultron-report.cmd --model qwen3:8b --tests
+.\scripts/windows/collect-ultron-report.cmd --model qwen3:8b --tests
 ```
 
 The command prints the path of one ZIP under `runtime/support/`. Review and upload

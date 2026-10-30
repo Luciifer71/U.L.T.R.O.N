@@ -103,7 +103,7 @@ reject unsupported script types. Qwen2.5 emitted a script call as plain text
 and proposed opening Notion for the hypothetical. No promotion is implied.
 
 After verification, stop all existing ULTRON components and run
-`start-qwen3-trial.cmd` from PowerShell. This inherits the normal launcher and
+`scripts/windows/start-qwen3-trial.cmd` from PowerShell. This inherits the normal launcher and
 sets process-local `LLM_MODEL=qwen3:8b`, `LLM_THINKING=off`, `LLM_CONTEXT=4096`,
 `LLM_TEMPERATURE=0`, and `LLM_SEED=42`. It does not edit `.env`. Runtime controls
 apply to initial inference, follow-up requests and retries. Unset controls leave
@@ -284,7 +284,7 @@ so these overlapping measurements should not be added together. These logs do
 not measure TTS duration or prove that a model was kept resident after warmup.
 
 For a fresh trial, stop all components, run `verify_ultron.py`, then launch
-`start-qwen3-trial.cmd`. Save launcher warmup output and all three component logs.
+`scripts/windows/start-qwen3-trial.cmd`. Save launcher warmup output and all three component logs.
 Try a direct Calculator request and the conversational Calculator/Notion request
 from the live checkpoint, waiting for completion between requests. Compare the
 first and repeated requests. Confirm actual windows opened and record any audio

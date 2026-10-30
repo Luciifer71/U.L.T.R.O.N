@@ -8,5 +8,5 @@ set "LLM_TEMPERATURE=0"
 set "LLM_SEED=42"
 echo Starting Qwen3 trial: thinking off, context 4096, temperature 0, seed 42.
 echo This does not edit .env. Stop all components before returning to the normal launcher.
-call "%~dp0start-ultron.cmd" %*
+call "%~dp0..\..\start-ultron.cmd" %*
 exit /b %errorlevel%

@@ -21,7 +21,7 @@ installing this code.
    .\.venv\Scripts\python.exe .\run_ultron.py google connect --client "C:\path\client_secret.json"
    ```
 3. Sign in to the intended account and grant both read-only scopes in Google's
-   browser consent screen. Restart the normal launcher or `start-qwen3-trial.cmd`.
+   browser consent screen. Restart the normal launcher or `scripts/windows/start-qwen3-trial.cmd`.
 
 Tokens are held by Windows Credential Manager, with no plaintext fallback. Local
 cache lives under `%LOCALAPPDATA%\Ultron\google`, outside the repository and support
@@ -109,7 +109,7 @@ Restart all three components together after updating this protocol.
    speech to clear. Then ask a new question to verify speech still works.
 7. Leave Ultron running for another sync interval. Counts can increase as archive
    scanning progresses. This does not necessarily mean newly arrived mail.
-8. Run `collect-ultron-report.cmd --model qwen3:8b --tests` and share the ZIP with
+8. Run `scripts/windows/collect-ultron-report.cmd --model qwen3:8b --tests` and share the ZIP with
    your observations. The bundle excludes Google credentials/cache and cannot
    independently prove what you heard or which Google account you selected.
 
@@ -140,7 +140,7 @@ After updating and restarting, run `verify_ultron.py`, then use `run_ultron.py s
 with each quoted request above and `--timeout 5`. Also try “Check my calendar next
 week” (clarification) and “Delete my emails” (read-only limitation, no deletion).
 Finally say “Open calculator” to check the existing action path. Collect one
-support ZIP using `collect-ultron-report.cmd --model qwen3:8b --tests` if needed.
+support ZIP using `scripts/windows/collect-ultron-report.cmd --model qwen3:8b --tests` if needed.
 
 Automated tests cover routing boundaries, sync states, failure recovery flags and
 200 correlated requests without filling the model queue. This is regression
