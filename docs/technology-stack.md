@@ -54,4 +54,4 @@ for the project's stated usage restrictions; listing third-party technologies do
 not grant permission to reuse Ultron's implementation.
 
 
-Optional manifests: [Google](../requirements/google.txt), [browser](../requirements/browser.txt) and [tests](../requirements/test.txt). The NATS browser client is declared in the [root package manifest](../package.json).
+Optional manifests: [Google](../requirements/google.txt), [browser](../requirements/browser.txt) and [tests](../requirements/test.txt). The NATS browser client is declared in the [frontend package manifest](../ultron-ui/package.json).

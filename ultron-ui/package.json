@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@nats-io/nats-core": "3.4.0",
     "@react-three/drei": "^10.7.8",
     "@react-three/fiber": "^9.8.0",
     "@react-three/postprocessing": "^3.1.2",
