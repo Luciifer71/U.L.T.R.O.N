@@ -61,6 +61,18 @@ class LauncherTests(unittest.TestCase):
             with self.assertRaises(launcher.StartupError):
                 launcher.ensure_nats('nats://127.0.0.1:4222')
 
+    def test_stopped_nats_allows_compose_to_reconcile_moved_config(self):
+        calls = []
+        def run(command, **kwargs):
+            calls.append((command, kwargs))
+            return SimpleNamespace(returncode=0)
+        with patch.object(launcher, 'nats_ready', side_effect=[False, True]), patch.object(launcher, 'find_executable', return_value='docker.exe'), patch.object(launcher.subprocess, 'run', side_effect=run):
+            launcher.ensure_nats('nats://127.0.0.1:4222')
+        command, options = calls[1]
+        self.assertEqual(command, ['docker.exe', 'compose', 'up', '-d', '--no-deps', '--pull', 'never', 'nats'])
+        self.assertEqual(options['cwd'], launcher.ROOT)
+        self.assertEqual(options['timeout'], 90)
+
     def test_running_ollama_is_reused(self):
         with patch.object(launcher, 'ollama_models', return_value={'models': [{'name': 'qwen2.5:7b'}]}), patch.object(launcher, 'start_console') as start:
             launcher.ensure_ollama('http://127.0.0.1:11434', 'qwen2.5:7b')

@@ -111,7 +111,9 @@ def ensure_nats(url):
         subprocess.Popen([desktop])
         wait_for(docker_ready, 'Docker engine')
     print('Starting the project NATS container...', flush=True)
-    result = subprocess.run([docker, 'compose', 'up', '-d', '--no-recreate', '--pull', 'never', 'nats'],
+    # Compose must reconcile changed bind mounts after a source update.
+    # Reuse unchanged containers, but allow recreation when config changed.
+    result = subprocess.run([docker, 'compose', 'up', '-d', '--no-deps', '--pull', 'never', 'nats'],
                             cwd=ROOT, timeout=90)
     if result.returncode:
         raise StartupError('Docker Compose could not start NATS. Review the output above; the NATS image must already be installed.')

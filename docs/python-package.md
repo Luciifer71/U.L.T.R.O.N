@@ -57,3 +57,20 @@ Docker and the UI still belong to the checkout. When using a wheel, set
 `ULTRON_PROJECT_ROOT` to that checkout. Do not set it to a new empty directory.
 Root Node manifests remain because the UI currently resolves NATS from the parent
 installation; frontend dependency consolidation is separate from this migration.
+
+## Existing NATS container after the configuration move
+
+Older containers can still reference the former root `nats-server.conf` mount.
+The launcher now lets Compose reconcile configuration changes instead of blocking
+container recreation. A healthy, reachable NATS server is still reused.
+
+For the specific old-path mount error, run from the checkout root:
+
+```powershell
+docker compose up -d --force-recreate --no-deps --pull never nats
+```
+
+Only after that succeeds, run `start-qwen3-trial.cmd`. This recreates the NATS
+container with `config/nats-server.conf` and keeps the existing `nats_data/`
+bind mount. Do not delete that data directory or run volume-removal commands.
+Other Compose projects are not part of this recovery.
