@@ -23,7 +23,7 @@ Open Spotify on your laptop and start a track once so it is available to Spotify
 
 ```powershell
 .\.venv\Scripts\python.exe .\run_ultron.py spotify doctor
-.\start-qwen3-trial.cmd
+.\scripts/windows/start-qwen3-trial.cmd
 ```
 
 The doctor makes read-only checks; an authenticated account can still have zero available devices. A Premium account and permitted app user are required. Development-mode limits and Spotify rate limits apply.

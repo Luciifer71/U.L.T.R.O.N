@@ -12,7 +12,7 @@ With Ultron stopped, run from the project directory:
 
 ```powershell
 .\scripts/windows/setup-youtube-playback.cmd
-.\start-qwen3-trial.cmd
+.\scripts/windows/start-qwen3-trial.cmd
 ```
 
 The setup installs the Playwright Python package into the existing virtual
@@ -80,7 +80,7 @@ To use installed Chrome, set this before launching Ultron from the same PowerShe
 
 ```powershell
 $env:ULTRON_BROWSER_CHANNEL = "chrome"
-.\start-qwen3-trial.cmd
+.\scripts/windows/start-qwen3-trial.cmd
 ```
 
 Use `msedge` to select Edge again. Both launch with Chromium sandboxing enabled;

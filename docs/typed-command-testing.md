@@ -8,7 +8,7 @@ From the project directory in PowerShell:
 
 ```powershell
 .\.venv\Scripts\python.exe .\verify_ultron.py
-.\start-qwen3-trial.cmd
+.\scripts/windows/start-qwen3-trial.cmd
 ```
 
 Wait for component readiness, then use another terminal:
@@ -30,7 +30,7 @@ transcript differs, investigate recognition. If the exact typed request fails,
 investigate planning or execution. Collect both runs with:
 
 ```powershell
-.\collect-ultron-report.cmd --model qwen3:8b --tests
+.\scripts/windows/collect-ultron-report.cmd --model qwen3:8b --tests
 ```
 
 ## Conversation and task memory

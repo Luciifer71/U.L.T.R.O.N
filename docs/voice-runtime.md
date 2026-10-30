@@ -227,7 +227,7 @@ live-device evaluation are still needed to measure recognition accuracy.
 
 ## Avoid overlapping launcher sessions
 
-Run `start-qwen3-trial.cmd` once per session. If a launcher reports model warmup,
+Run `scripts/windows/start-qwen3-trial.cmd` once per session. If a launcher reports model warmup,
 wait for completion or its reported timeout before retrying. Re-running the
 launcher while the first set of components remains active can create overlapping
 listeners, brains or speech daemons and make repeated replies harder to diagnose.

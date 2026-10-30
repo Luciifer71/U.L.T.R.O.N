@@ -61,7 +61,7 @@ From the repository root, after setup:
 
 The launcher prepares Docker/NATS and Ollama, warms the model and opens the action
 daemon, brain and listener in separate terminals. Wait for `STANDBY MODE` before
-saying “Hey Ultron”. `start-qwen3-trial.cmd` remains the explicit Qwen3 profile
+saying “Hey Ultron”. `scripts/windows/start-qwen3-trial.cmd` remains the explicit Qwen3 profile
 (thinking off, context 4096, temperature 0, seed 42); it does not rewrite `.env`.
 
 Try “Open Calculator and File Explorer”, “What is my uptime?” or “What can you do?”
@@ -104,7 +104,7 @@ For a quick typed request while the services are running:
 Collect one support ZIP instead of copying terminals:
 
 ```powershell
-.\collect-ultron-report.cmd --model qwen3:8b --tests
+.\scripts/windows/collect-ultron-report.cmd --model qwen3:8b --tests
 ```
 
 The collector prints the output path under ignored `runtime/`. **Review before

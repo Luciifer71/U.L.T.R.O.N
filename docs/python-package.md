@@ -8,9 +8,9 @@ and its child probes.
 Run from the repository root:
 
 ```powershell
-.\start-qwen3-trial.cmd
+.\scripts/windows/start-qwen3-trial.cmd
 .\.venv\Scripts\python.exe .\verify_ultron.py
-.\collect-ultron-report.cmd --model qwen3:8b --tests
+.\scripts/windows/collect-ultron-report.cmd --model qwen3:8b --tests
 ```
 
 Other utilities now use the dispatcher:
@@ -70,7 +70,7 @@ For the specific old-path mount error, run from the checkout root:
 docker compose up -d --force-recreate --no-deps --pull never nats
 ```
 
-Only after that succeeds, run `start-qwen3-trial.cmd`. This recreates the NATS
+Only after that succeeds, run `scripts/windows/start-qwen3-trial.cmd`. This recreates the NATS
 container with `config/nats-server.conf` and keeps the existing `nats_data/`
 bind mount. Do not delete that data directory or run volume-removal commands.
 Other Compose projects are not part of this recovery.
