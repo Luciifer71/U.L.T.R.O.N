@@ -68,6 +68,8 @@ from ultron.control.request_planning import explicit_launch_plan, explicit_resou
 from ultron.resources.config import create_service as create_resource_service
 from ultron.resources.file_workflow import prepare_file, open_prepared_file, FileSelectionRequired, selection_number, MEDIA
 from ultron.control.spotify import open_spotify_search
+from ultron.control.spotify_api import SpotifyClient, configured as spotify_configured
+from ultron.control.spotify_routing import spotify_request
 from ultron.control.youtube_playback import playback_plan, YouTubePlayback, first_result_request
 from ultron.control.request_planning import explicit_file_plan, explicit_sequence_plan
 from ultron.resources.catalog import ResourceError, AmbiguousResource, AccessDenied
@@ -1392,6 +1394,7 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
         failed: list[str] = []
         completed: list[str] = []
         playing: list[str] = []
+        spotify_replies: list[str] = []
 
         for outcome in outcomes:
             name = str(outcome.get("name") or "action")
@@ -1404,7 +1407,9 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
                 failed.append(f"{label} ({error})" if error else label)
                 continue
 
-            if name.startswith("play_youtube:") and state == "verified" and isinstance(verification, dict) and verification.get('playing') is True:
+            if name.startswith('spotify:'):
+                spotify_replies.append(str(outcome.get('message') or 'Spotify request accepted; playback unverified.'))
+            elif name.startswith("play_youtube:") and state == "verified" and isinstance(verification, dict) and verification.get('playing') is True:
                 playing.append(name.split(':', 1)[1])
             elif state == "completed" and outcome.get("exitCode") == 0:
                 completed.append(self._friendly_action_name(name))
@@ -1430,7 +1435,7 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
                     self._friendly_action_name(name)
                 )
 
-        parts: list[str] = []
+        parts: list[str] = list(spotify_replies)
 
         if playing:
             parts.append("YouTube playback verified: " + ", ".join(playing) + ".")
@@ -1513,6 +1518,18 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
         prompt: str,
         task_id: str,
     ) -> tuple[str, list]:
+        spotify_command = spotify_request(prompt, connected=spotify_configured())
+        if spotify_command:
+            self._file_selection = None
+            self.last_plan_error = None
+            player = getattr(self, 'youtube_playback', None)
+            if player:
+                player.clear_choice()
+            create_task(task_id, prompt, status='thinking')
+            async def spotify_action():
+                return await asyncio.to_thread(SpotifyClient().perform, **spotify_command)
+            return 'Spotify request staged; outcome not yet confirmed.', [PendingAction(
+                name='spotify:' + spotify_command['action'], execute=spotify_action, completion='wait')]
         player = getattr(self, 'youtube_playback', None)
         if re.match(r"(?:please\s+)?play (?:the )?first result\b", prompt.strip(), re.I) and not first_result_request(prompt):
             self.last_plan_error = None

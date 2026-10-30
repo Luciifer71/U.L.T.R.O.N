@@ -1,0 +1,3 @@
+# Optional Spotify Premium integration; PKCE requires no client secret.
+requests>=2.31,<3
+keyring>=25,<26

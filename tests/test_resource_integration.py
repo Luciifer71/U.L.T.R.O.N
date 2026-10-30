@@ -637,3 +637,30 @@ def test_verbose_first_result_followup_does_not_become_web_search(tmp_path, monk
     reply, actions = asyncio.run(brain.process_intent(
         'Play the first result that you get, that is the savior tier song by The Weeknd and official music video, play by the same artist.', 'followup'))
     assert not actions and 'play the first result' in reply
+
+
+@pytest.mark.parametrize('state', ['verified', 'dispatched'])
+def test_connected_spotify_stages_then_reports_observed_result(tmp_path, monkeypatch, state):
+    from ultron.control.youtube_playback import PlaybackResult
+    brain = make_brain(tmp_path, monkeypatch, [])
+    module = __import__(brain.__class__.__module__, fromlist=['spotify_configured'])
+    monkeypatch.setattr(module, 'spotify_configured', lambda: True)
+    calls = []
+    message = 'Spotify is playing Sunflower.' if state == 'verified' else 'Spotify accepted the request, but playback was not confirmed.'
+    def perform(**kwargs):
+        calls.append(kwargs)
+        return PlaybackResult(True, message=message, data={'state': state, 'verification': {'spotify_state': True} if state == 'verified' else 'not_observable'})
+    monkeypatch.setattr(module, 'SpotifyClient', lambda: SimpleNamespace(perform=perform))
+    async def forbidden(**kwargs):
+        pytest.fail('Spotify command reached the model')
+    brain.ollama.chat = forbidden
+    async def run():
+        _, actions = await brain.process_intent('Play Sunflower by Post Malone', 'spotify-song')
+        assert len(actions) == 1 and not calls
+        success, error = await brain._run_pending_actions(actions, 'spotify-song')
+        assert success and error is None
+        assert calls == [{'action': 'play', 'query': 'Sunflower by Post Malone'}]
+        assert brain._compose_execution_response('spotify-song') == message
+        _, youtube = await brain.process_intent('Play Sunflower by Post Malone on YouTube', 'youtube-song')
+        assert youtube[0].name.startswith('play_youtube:')
+    asyncio.run(run())

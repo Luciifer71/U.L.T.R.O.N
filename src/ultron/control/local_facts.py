@@ -36,8 +36,8 @@ def capabilities_reply():
         'and find supported files in a named user folder. For example: play Supergirl from Downloads. '
         'I can offer numbered file choices and run up to five explicit app/file steps separated by then. '
         'I can also report local time, date and home-volume disk space. '
-        'Named songs play on YouTube by default; local media needs a folder. '
-        'I can open Spotify and send a song search to its installed app; Spotify playback is not verified. '
+        'Named songs use Spotify after account connection, otherwise YouTube; local media needs a folder. '
+        'Connected Spotify supports playback, pause, resume, skipping, queueing, volume and current-track status. Without connection I can open Spotify search only. '
         'Availability depends on this computer and its configuration. '
         'Read-only email and calendar updates require optional Google setup. iPhone calls, smart-home control and scheduled reminders are not connected.'
     )
