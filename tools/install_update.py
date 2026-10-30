@@ -73,7 +73,7 @@ def main() -> int:
     parser.add_argument('--target', type=Path, default=Path.cwd())
     args = parser.parse_args()
     target = args.target.resolve()
-    if not (target / 'brain_agent.py').is_file():
+    if not (target / 'src/ultron/agents/brain_agent.py').is_file():
         parser.error('--target must be the Ultron-core project directory')
     try:
         install(Path(__file__).resolve().parent, target)

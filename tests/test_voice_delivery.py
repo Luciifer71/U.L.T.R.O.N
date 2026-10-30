@@ -14,7 +14,7 @@ def daemon_module(monkeypatch):
                             get_busy=lambda: True, stop=lambda: None)
     monkeypatch.setitem(sys.modules, 'pygame', SimpleNamespace(mixer=SimpleNamespace(init=lambda **kw: None, music=music)))
     monkeypatch.setitem(sys.modules, 'edge_tts', SimpleNamespace())
-    spec = importlib.util.spec_from_file_location('testable_action_daemon', (Path(__file__).resolve().parents[1] / 'action_daemon.py'))
+    spec = importlib.util.spec_from_file_location('testable_action_daemon', (Path(__file__).resolve().parents[1] / 'src/ultron/agents/action_daemon.py'))
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
     return module
 

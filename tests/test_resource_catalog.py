@@ -2,8 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from ultron_resources.catalog import PathPolicy, ResourceCatalog, ResourceError, AmbiguousResource, AccessDenied
-from ultron_resources.service import ResourceService, PlatformAdapter
+from ultron.resources.catalog import PathPolicy, ResourceCatalog, ResourceError, AmbiguousResource, AccessDenied
+from ultron.resources.service import ResourceService, PlatformAdapter
 
 
 class CatalogTests(unittest.TestCase):
@@ -146,10 +146,10 @@ class CatalogTests(unittest.TestCase):
 
     def test_invalid_config_is_rejected(self):
         from unittest.mock import patch
-        from ultron_resources.config import create_service
+        from ultron.resources.config import create_service
         for value in ['[]', '{"roots":"C:\\\\"}', '{"roots":["relative"]}', '{"roots":[]}']:
             config = self.base / 'settings.json'; config.write_text(value)
-            with patch('ultron_resources.config.data_directory', return_value=self.base), patch.dict('os.environ', {'ULTRON_RESOURCE_CONFIG': str(config)}):
+            with patch('ultron.resources.config.data_directory', return_value=self.base), patch.dict('os.environ', {'ULTRON_RESOURCE_CONFIG': str(config)}):
                 with self.assertRaises((ResourceError, ValueError)): create_service()
 
 
@@ -157,7 +157,7 @@ class AdapterTests(unittest.TestCase):
     def test_macos_application_bundle_uses_absolute_launcher(self):
         from unittest.mock import patch
         from types import SimpleNamespace
-        with patch('ultron_resources.service.subprocess.run',return_value=SimpleNamespace(returncode=0,stderr='')) as run:
+        with patch('ultron.resources.service.subprocess.run',return_value=SimpleNamespace(returncode=0,stderr='')) as run:
             PlatformAdapter('darwin').launch(Path('/Applications/Example.app'), ['literal;value'])
             self.assertEqual(run.call_args.args[0], ['/usr/bin/open',str(Path('/Applications/Example.app')),'--args','literal;value'])
 
@@ -165,7 +165,7 @@ class AdapterTests(unittest.TestCase):
         from unittest.mock import patch
         from types import SimpleNamespace
         path = Path('/games/Game.exe')
-        with patch('ultron_resources.service.subprocess.Popen',return_value=SimpleNamespace(pid=13)) as popen:
+        with patch('ultron.resources.service.subprocess.Popen',return_value=SimpleNamespace(pid=13)) as popen:
             self.assertEqual(PlatformAdapter('win32').launch(path, ['literal;value']), 13)
             self.assertEqual(popen.call_args.args[0], [str(path), 'literal;value'])
             self.assertEqual(popen.call_args.kwargs['cwd'], path.parent)
@@ -174,7 +174,7 @@ class AdapterTests(unittest.TestCase):
     def test_macos_editor_uses_literal_argv(self):
         from unittest.mock import patch
         from types import SimpleNamespace
-        with patch('ultron_resources.service.subprocess.run',return_value=SimpleNamespace(returncode=0,stderr='')) as run:
+        with patch('ultron.resources.service.subprocess.run',return_value=SimpleNamespace(returncode=0,stderr='')) as run:
             PlatformAdapter('darwin').open(Path('/tmp/a; touch unwanted.txt'),'TextEdit')
             self.assertEqual(run.call_args.args[0], ['/usr/bin/open','-a','TextEdit',str(Path('/tmp/a; touch unwanted.txt'))])
             self.assertFalse(run.call_args.kwargs['shell'])
@@ -182,7 +182,7 @@ class AdapterTests(unittest.TestCase):
     def test_windows_editor_uses_absolute_system_executable(self):
         from unittest.mock import patch
         from types import SimpleNamespace
-        with patch('ultron_resources.service.subprocess.Popen',return_value=SimpleNamespace(pid=12)) as popen:
+        with patch('ultron.resources.service.subprocess.Popen',return_value=SimpleNamespace(pid=12)) as popen:
             self.assertEqual(PlatformAdapter('win32').open(Path('/tmp/notes.txt'),'Notepad'),12)
             self.assertEqual(popen.call_args.args[0][-1], str(Path('/tmp/notes.txt')))
             self.assertFalse(popen.call_args.kwargs['shell'])
@@ -240,8 +240,8 @@ class PlatformPathTests(unittest.TestCase):
         except OSError:
             self.skipTest('Host does not permit creation of symlinks.')
         self.assertEqual(os.readlink(alias), root.name)
-        self.enterContext(patch('ultron_resources.catalog.sys.platform', 'darwin'))
-        self.enterContext(patch('ultron_resources.catalog._MACOS_SYSTEM_ALIASES', {alias: root}))
+        self.enterContext(patch('ultron.resources.catalog.sys.platform', 'darwin'))
+        self.enterContext(patch('ultron.resources.catalog._MACOS_SYSTEM_ALIASES', {alias: root}))
         note = root / 'report.txt'; note.write_text('hello')
         return root, alias, note
 
@@ -278,6 +278,6 @@ class PlatformPathTests(unittest.TestCase):
     def test_platform_exception_is_not_enabled_on_other_systems(self):
         from unittest.mock import patch
         root, alias, note = self.alias_fixture()
-        with patch('ultron_resources.catalog.sys.platform', 'linux'):
+        with patch('ultron.resources.catalog.sys.platform', 'linux'):
             with self.assertRaises(AccessDenied):
                 PathPolicy([root]).resolve(alias / note.name)

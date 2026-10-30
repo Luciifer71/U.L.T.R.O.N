@@ -2,8 +2,8 @@ import json
 import sys
 import zipfile
 
-from collect_ultron_report import make_bundle, redact
-from ultron_control.session_logs import capture_console
+from ultron.cli.collect_ultron_report import make_bundle, redact
+from ultron.control.session_logs import capture_console
 
 
 def test_console_output_and_errors_saved_with_streams_restored(tmp_path, capsys):

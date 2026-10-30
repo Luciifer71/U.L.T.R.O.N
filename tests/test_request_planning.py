@@ -1,6 +1,6 @@
 import pytest
-from ultron_control.request_planning import explicit_resource_plan
-from ultron_control.request_planning import validate_resource_target, validate_application_targets
+from ultron.control.request_planning import explicit_resource_plan
+from ultron.control.request_planning import validate_resource_target, validate_application_targets
 
 
 @pytest.mark.parametrize('prefix', [
@@ -68,7 +68,7 @@ def test_editor_request_preserves_spoken_resource_stem():
 def test_actual_misheard_editor_requires_clarification():
     with pytest.raises(PlanClarification):
         explicit_resource_plan('Open Ultron smoke note and not pad.')
-from ultron_control.request_planning import explicit_launch_plan, PlanClarification
+from ultron.control.request_planning import explicit_launch_plan, PlanClarification
 
 
 def names(calls):
@@ -140,71 +140,71 @@ def test_actual_garbled_first_target_does_not_fall_back():
 
 
 def test_model_cannot_insert_edge_from_history():
-    from ultron_control.request_planning import validate_application_targets
+    from ultron.control.request_planning import validate_application_targets
     assert validate_application_targets('Open Perplexory Notion, task manager, search on youtube, quantum computers and also open file explorer.', [
         {'function': {'name': 'open_application', 'arguments': {'app_name': 'Microsoft Edge'}}}
     ])
 
 
 def test_model_coverage_detects_omitted_catalog_application():
-    from ultron_control.request_planning import validate_application_targets
+    from ultron.control.request_planning import validate_application_targets
     calls = [{'function': {'name': 'open_application', 'arguments': {'app_name': 'Notion'}}}]
     assert 'perplexity' in validate_application_targets('So I would like you to open notion as well as perplexity.', calls)
 
 
 def test_alias_grounding_preserves_chrome_and_search_text_is_not_an_app_request():
-    from ultron_control.request_planning import validate_application_targets
+    from ultron.control.request_planning import validate_application_targets
     calls = [{'function': {'name': 'open_application', 'arguments': {'app_name': 'Google Chrome'}}}]
     assert validate_application_targets('Open chrome and search on youtube how to use notion.', calls) is None
 
 
 def test_launch_clause_after_search_is_checked():
-    from ultron_control.request_planning import validate_application_targets
+    from ultron.control.request_planning import validate_application_targets
     calls = [{'function': {'name': 'open_application', 'arguments': {'app_name': 'Notion'}}}]
     assert 'file explorer' in validate_application_targets('Open notion and search youtube quantum computers and also open file explorer.', calls)
 
 
 def test_query_application_name_cannot_authorize_app_launch():
-    from ultron_control.request_planning import validate_application_targets
+    from ultron.control.request_planning import validate_application_targets
     calls = [{'function': {'name': 'open_application', 'arguments': {'app_name': 'Notion'}}}]
     assert validate_application_targets('Search youtube for how to open Notion.', calls)
 
 
 def test_negated_launch_does_not_authorize_model_action():
-    from ultron_control.request_planning import validate_application_targets
+    from ultron.control.request_planning import validate_application_targets
     calls = [{'function': {'name': 'open_application', 'arguments': {'app_name': 'Notion'}}}]
     assert validate_application_targets('Do not open Notion.', calls)
 
 
 @pytest.mark.parametrize('target', ['ForzaHorizon6', 'Forza Horizon 6', 'ForzaHorizon6.exe'])
 def test_cosmetic_game_name_spacing_preserves_current_target(target):
-    from ultron_control.request_planning import validate_application_targets
+    from ultron.control.request_planning import validate_application_targets
     calls = [{'function': {'name': 'open_application', 'arguments': {'app_name': target}}}]
     assert validate_application_targets('Can you launch the Forza Horizon 6 game?', calls) is None
 
 
 def test_game_version_is_not_fuzzy_matched():
-    from ultron_control.request_planning import validate_application_targets
+    from ultron.control.request_planning import validate_application_targets
     calls = [{'function': {'name': 'open_application', 'arguments': {'app_name': 'ForzaHorizon5'}}}]
     assert validate_application_targets('Can you launch Forza Horizon 6?', calls)
 
 
 def test_drive_request_is_grounded_but_does_not_invent_a_path():
-    from ultron_control.request_planning import validate_application_targets
+    from ultron.control.request_planning import validate_application_targets
     calls = [{'function': {'name': 'open_application', 'arguments': {'app_name': 'ForzaHorizon6'}}}]
     assert validate_application_targets('Can you access my G drive and execute the Forza Horizon 6.exe game?', calls) is None
     assert 'path' not in calls[0]['function']['arguments']
 
 
 def test_unrequested_protocol_invalidates_whole_plan():
-    from ultron_control.request_planning import validate_application_targets
+    from ultron.control.request_planning import validate_application_targets
     calls = [{'function': {'name': 'activate_protocol', 'arguments': {'protocol': 'gaming_mode'}}}]
     assert validate_application_targets('Open Perplexor in Ocean and task manager.', calls)
     assert validate_application_targets('Activate gaming mode.', calls) is None
 
 
 def test_negated_or_quoted_protocol_does_not_authorize_activation():
-    from ultron_control.request_planning import validate_application_targets
+    from ultron.control.request_planning import validate_application_targets
     calls = [{'function': {'name': 'activate_protocol', 'arguments': {'protocol': 'gaming_mode'}}}]
     assert validate_application_targets('Do not activate gaming mode.', calls)
     assert validate_application_targets('Search youtube for how to start gaming mode.', calls)
@@ -216,12 +216,12 @@ def test_negated_or_quoted_protocol_does_not_authorize_activation():
     'Explain "open the calculator".',
 ])
 def test_polite_articles_do_not_remove_conditions(prompt):
-    from ultron_control.request_planning import explicit_launch_plan
+    from ultron.control.request_planning import explicit_launch_plan
     assert explicit_launch_plan(prompt) is None
 
 
 def test_article_does_not_hide_unknown_application():
-    from ultron_control.request_planning import explicit_launch_plan, PlanClarification
+    from ultron.control.request_planning import explicit_launch_plan, PlanClarification
     with pytest.raises(PlanClarification):
         explicit_launch_plan('Open the mystery app and calculator')
 
@@ -265,20 +265,20 @@ def test_alias_comma_preserves_negation_guard():
     '"Open Calculator."',
 ])
 def test_application_mentions_are_not_launch_authorization(prompt):
-    from ultron_control.request_planning import validate_application_targets
+    from ultron.control.request_planning import validate_application_targets
     calls = [{'function': {'name': 'open_application', 'arguments': {'app_name': 'Calculator'}}}]
     assert validate_application_targets(prompt, calls)
 
 
 def test_run_application_list_has_explicit_launch_intent():
-    from ultron_control.request_planning import validate_application_targets
+    from ultron.control.request_planning import validate_application_targets
     calls = [{'function': {'name': 'open_application', 'arguments': {'app_name': name}}}
              for name in ['Calculator', 'File Explorer']]
     assert validate_application_targets('Run calculator and file explorer for me.', calls) is None
 
 
 def test_ordered_app_and_file_plan_is_complete_and_grounded():
-    from ultron_control.request_planning import explicit_sequence_plan
+    from ultron.control.request_planning import explicit_sequence_plan
     prompt = 'Open calculator, then play Supergirl from Downloads.'
     calls = explicit_sequence_plan(prompt)
     assert [c['function']['name'] for c in calls] == ['open_application', 'find_and_open_file']
@@ -295,6 +295,6 @@ def test_ordered_app_and_file_plan_is_complete_and_grounded():
     'Open calculator then open notion then open edge then open explorer then open notepad then open chrome.',
 ])
 def test_unresolved_sequence_never_becomes_partial_plan(prompt):
-    from ultron_control.request_planning import explicit_sequence_plan
+    from ultron.control.request_planning import explicit_sequence_plan
     with pytest.raises(PlanClarification):
         explicit_sequence_plan(prompt)

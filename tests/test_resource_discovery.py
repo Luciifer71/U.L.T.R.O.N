@@ -4,9 +4,9 @@ import os
 
 import pytest
 
-from ultron_control.application_discovery import ApplicationDiscovery
-from ultron_control.models import ResolvedApplication
-from ultron_control.resource_discovery import (
+from ultron.control.application_discovery import ApplicationDiscovery
+from ultron.control.models import ResolvedApplication
+from ultron.control.resource_discovery import (
     ResourceDiscovery,
     ResourceNotFound,
 )

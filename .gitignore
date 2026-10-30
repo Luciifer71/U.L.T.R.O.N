@@ -82,3 +82,8 @@ Thumbs.db
 
 # Legacy local scratch test; maintained tests belong in tests/
 /test_long_action.py
+
+# Python package build outputs
+*.egg-info/
+/build/
+/dist/

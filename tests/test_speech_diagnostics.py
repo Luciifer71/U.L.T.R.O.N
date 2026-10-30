@@ -5,9 +5,7 @@ import wave
 
 import numpy as np
 
-import speech_diagnostics as diagnostics
-
-
+from ultron.cli import speech_diagnostics as diagnostics
 def prepare(monkeypatch, arguments):
     monkeypatch.setattr(sys, "argv", ["speech_diagnostics.py", *arguments])
     monkeypatch.setattr(diagnostics, "configure_cuda_libraries", lambda: [])

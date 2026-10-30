@@ -1,9 +1,7 @@
 from types import SimpleNamespace
 
-from ultron_control import system_info
-import ultron_diagnostics as diagnostics
-
-
+from ultron.control import system_info
+from ultron.cli import ultron_diagnostics as diagnostics
 def test_uptime_and_battery_are_separate_measurements(monkeypatch):
     monkeypatch.setattr(system_info.time, 'time', lambda: 90061)
     monkeypatch.setattr(system_info.psutil, 'boot_time', lambda: 0)
@@ -66,14 +64,14 @@ def test_process_memory_is_sorted_bounded_and_omits_sensitive_fields(monkeypatch
 
 def test_local_clock_uses_explicit_offset_and_midnight_date():
     from datetime import datetime, timezone, timedelta
-    from ultron_control.local_facts import clock_reply
+    from ultron.control.local_facts import clock_reply
     now = datetime(2026, 10, 18, 0, 5, tzinfo=timezone(timedelta(hours=5, minutes=30)))
     assert '00:05 (UTC+05:30)' in clock_reply('clock', now=now)
     assert '18 October 2026' in clock_reply('date', now=now)
 
 
 def test_disk_fact_is_scoped_and_does_not_leak_exception(monkeypatch):
-    from ultron_control import local_facts
+    from ultron.control import local_facts
     gib = 1024 ** 3
     monkeypatch.setattr(local_facts.shutil, 'disk_usage', lambda path: SimpleNamespace(total=100*gib, used=80*gib, free=20*gib))
     assert local_facts.disk_reply() == 'Volume containing your home folder: 20.0 GiB free of 100.0 GiB; 80.0 GiB used. Other volumes were not checked.'
@@ -85,7 +83,7 @@ def test_disk_fact_is_scoped_and_does_not_leak_exception(monkeypatch):
 
 
 def test_local_facts_do_not_consume_mixed_commands():
-    from ultron_control.intent_guard import local_information_kind
+    from ultron.control.intent_guard import local_information_kind
     for prompt in ['What time is it and open Calculator?', 'Check disk space then delete old files.',
                    'Remind me tomorrow', 'What time is it in London?', 'What day is my appointment?']:
         assert local_information_kind(prompt) is None

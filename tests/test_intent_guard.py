@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from ultron_control.intent_guard import (
+from ultron.control.intent_guard import (
     build_replay_plan,
     contains_execution_claim,
     extract_replay_plan,
@@ -33,7 +33,7 @@ def test_plain_trailing_conjunction_is_incomplete() -> None:
     assert not looks_incomplete_request("Open YouTube and search quantum computers.")
 
 def test_conversational_ack_variants_are_not_actions() -> None:
-    from ultron_control.intent_guard import is_conversational_only
+    from ultron.control.intent_guard import is_conversational_only
 
     assert is_conversational_only("Thank you")
     assert is_conversational_only("Okay, thank you.")
@@ -53,13 +53,13 @@ def call(name: str, arguments: dict) -> dict:
 
 @pytest.mark.parametrize("prompt", ["Yes.", "Yes please!", "Yeah", "Yep", "Sure", "No", "No thanks", "Do you hear me?", "Can you hear me?", "Are you listening?"])
 def test_bare_acknowledgements_and_connection_checks_are_conversational(prompt):
-    from ultron_control.intent_guard import is_conversational_only
+    from ultron.control.intent_guard import is_conversational_only
     assert is_conversational_only(prompt)
 
 
 @pytest.mark.parametrize("prompt", ["Yes, open calculator.", "Sure, open File Explorer.", "Can you hear me and open calculator?", "Yes, repeat that task."])
 def test_acknowledgement_with_explicit_request_keeps_action_path(prompt):
-    from ultron_control.intent_guard import is_conversational_only
+    from ultron.control.intent_guard import is_conversational_only
     assert not is_conversational_only(prompt)
 
 
@@ -83,7 +83,7 @@ def test_site_search_is_atomic() -> None:
     assert normalized[0]["function"]["arguments"]["query"] == "quantum computers"
 
 def test_execution_claim_detection() -> None:
-    from ultron_control.intent_guard import contains_execution_claim
+    from ultron.control.intent_guard import contains_execution_claim
 
     assert contains_execution_claim("Opened and verified: Calculator.")
     assert contains_execution_claim("Dispatched: Open application Task Manager.")
@@ -281,7 +281,7 @@ def test_missing_required_argument_is_rejected() -> None:
 
 
 def test_conversational_ack_is_not_an_action_request() -> None:
-    from ultron_control.intent_guard import is_conversational_only
+    from ultron.control.intent_guard import is_conversational_only
 
     assert is_conversational_only("Thank you")
     assert is_conversational_only("Okay, good job")
@@ -289,7 +289,7 @@ def test_conversational_ack_is_not_an_action_request() -> None:
 
 
 def test_task_status_request_is_detected() -> None:
-    from ultron_control.intent_guard import is_task_status_request
+    from ultron.control.intent_guard import is_task_status_request
 
     assert is_task_status_request("What's the status on the above task that I gave you?")
     assert is_task_status_request("How is the previous task performing?")
@@ -304,7 +304,7 @@ def test_no_actions_started_is_not_a_success_claim():
 
 @pytest.mark.parametrize('prompt', ['Okay, sure. Thank you.', 'Yes, thanks.', 'Sure, okay.'])
 def test_compound_acknowledgements(prompt):
-    from ultron_control.intent_guard import is_conversational_only
+    from ultron.control.intent_guard import is_conversational_only
     assert is_conversational_only(prompt)
 
 
@@ -315,7 +315,7 @@ def test_compound_acknowledgements(prompt):
     'Explain what "are there any errors" means.',
 ])
 def test_local_information_does_not_swallow_mixed_requests(prompt):
-    from ultron_control.intent_guard import is_conversational_only, local_information_kind
+    from ultron.control.intent_guard import is_conversational_only, local_information_kind
     assert not is_conversational_only(prompt)
     assert local_information_kind(prompt) is None
 
@@ -323,5 +323,5 @@ def test_local_information_does_not_swallow_mixed_requests(prompt):
 @pytest.mark.parametrize('prompt', ['Okay, open calculator and tell me your technology stack',
     'What is my uptime and open Notion', 'Please do not open statistics', 'What is the Q?'])
 def test_grounded_shortcuts_preserve_mixed_or_unclear_requests(prompt):
-    from ultron_control.intent_guard import local_information_kind
+    from ultron.control.intent_guard import local_information_kind
     assert local_information_kind(prompt) is None

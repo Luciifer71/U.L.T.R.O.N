@@ -11,7 +11,7 @@ Search and playback are separate operations:
 With Ultron stopped, run from the project directory:
 
 ```powershell
-.\setup-youtube-playback.cmd
+.\scripts/windows/setup-youtube-playback.cmd
 .\start-qwen3-trial.cmd
 ```
 

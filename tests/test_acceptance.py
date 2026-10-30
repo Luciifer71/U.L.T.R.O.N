@@ -1,9 +1,7 @@
 import json
 import zipfile
 
-import ultron_acceptance as acceptance
-
-
+from ultron.cli import ultron_acceptance as acceptance
 def test_planning_contracts_include_garbled_speech_and_all_pass():
     rows = acceptance.planning_checks()
     assert len(rows) >= 10 and all(r['passed'] for r in rows)
@@ -12,7 +10,7 @@ def test_planning_contracts_include_garbled_speech_and_all_pass():
 
 def setup_acceptance(tmp_path, monkeypatch, status):
     monkeypatch.setattr(acceptance, 'ROOT', tmp_path)
-    for name in ('brain_agent.py', 'ultron_control/request_planning.py', 'ultron_acceptance.py'):
+    for name in ('src/ultron/agents/brain_agent.py', 'src/ultron/control/request_planning.py', 'src/ultron/cli/ultron_acceptance.py'):
         path = tmp_path / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('source')

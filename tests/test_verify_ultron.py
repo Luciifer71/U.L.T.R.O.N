@@ -1,9 +1,7 @@
 from types import SimpleNamespace
-import verify_ultron
-
-
+from ultron.cli import verify_ultron
 def setup_runner(monkeypatch, tmp_path):
-    monkeypatch.setattr(verify_ultron, '__file__', str(tmp_path / 'verify_ultron.py'))
+    monkeypatch.setattr(verify_ultron, 'project_root', lambda: tmp_path)
     monkeypatch.setattr(verify_ultron.sys, 'argv', ['verify_ultron.py'])
     (tmp_path / 'tests').mkdir()
     (tmp_path / 'tests' / 'test_example.py').write_text('')

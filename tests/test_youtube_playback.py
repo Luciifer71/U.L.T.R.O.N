@@ -2,10 +2,10 @@ import asyncio
 import os
 from types import SimpleNamespace
 import pytest
-from ultron_control.youtube_playback import (
+from ultron.control.youtube_playback import (
     playback_plan, choose_video, watch_url, playback_verified, YouTubePlayback, RESULTS_JS, STATE_JS,
 )
-from ultron_control.intent_guard import normalize_tool_calls
+from ultron.control.intent_guard import normalize_tool_calls
 
 URL = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
 QUERY = 'Never Gonna Give You Up by Rick Astley'
@@ -101,7 +101,7 @@ def test_controller_reports_observed_outcome(monkeypatch, mode, success):
     async def run():
         player = YouTubePlayback(); player.page = Page(mode)
         async def no_wait(_): pass
-        monkeypatch.setattr('ultron_control.youtube_playback.asyncio.sleep', no_wait)
+        monkeypatch.setattr('ultron.control.youtube_playback.asyncio.sleep', no_wait)
         result = await player.play(QUERY)
         assert result.success is success
         assert player.page.visits[-1] == URL

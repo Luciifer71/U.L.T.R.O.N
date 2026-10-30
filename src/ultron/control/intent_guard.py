@@ -1,0 +1,732 @@
+"""Deterministic intent normalization and safety guards for ULTRON.
+
+This layer sits between LLM tool selection and physical execution. It does not
+perform any operating-system actions. Its job is to normalize ambiguous tool
+calls, preserve user intent across common LLM decompositions, reject incomplete
+requests, and provide a bounded replay plan for safe repeated tasks.
+"""
+
+from __future__ import annotations
+
+from copy import deepcopy
+import re
+from typing import Any
+
+
+# Browser application names are applications, not web destinations.
+BROWSER_APP_ALIASES = frozenset(
+    {
+        "chrome",
+        "google chrome",
+        "chrome browser",
+        "edge",
+        "microsoft edge",
+        "edge browser",
+        "opera",
+        "opera gx",
+        "firefox",
+        "mozilla firefox",
+        "brave",
+        "brave browser",
+        "vivaldi",
+    }
+)
+
+# Site names for which we can construct a deterministic search URL without
+# needing browser DOM automation.
+SITE_SEARCH_TEMPLATES: dict[str, str] = {
+    "youtube": "https://www.youtube.com/results?search_query={query}",
+    "google": "https://www.google.com/search?q={query}",
+    "github": "https://github.com/search?q={query}",
+    "reddit": "https://www.reddit.com/search/?q={query}",
+    "bing": "https://www.bing.com/search?q={query}",
+    "duckduckgo": "https://duckduckgo.com/?q={query}",
+}
+
+SITE_ALIASES = frozenset(SITE_SEARCH_TEMPLATES) | frozenset(
+    {
+        "netflix",
+        "hotstar",
+        "disney hotstar",
+        "google docs",
+        "docs",
+        "google drive",
+        "chatgpt",
+    }
+)
+
+# Only these operations are silently replayable. Destructive, state-mutating,
+# arbitrary-code, power, clipboard-write, and process-kill actions must require
+# an explicit fresh request.
+REPLAYABLE_TOOLS = frozenset(
+    {
+        "open_application",
+        "open_website",
+        "live_web_search",
+        "query_knowledge_base",
+        "get_system_telemetry",
+    }
+)
+
+MAX_TOOL_CALLS_PER_TASK = 32
+
+
+class IntentNormalizationError(ValueError):
+    """Raised when an LLM plan cannot be made safe/deterministic."""
+
+
+def _normalize_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip()).lower()
+
+
+def _tool_call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "function": {
+            "name": name,
+            "arguments": arguments,
+        }
+    }
+
+
+def _extract_call(tool: Any) -> tuple[str | None, dict[str, Any]]:
+    if isinstance(tool, dict):
+        function = tool.get("function") or {}
+        name = function.get("name")
+        args = function.get("arguments", {})
+    else:
+        function = getattr(tool, "function", None)
+        name = getattr(function, "name", None)
+        args = getattr(function, "arguments", {})
+
+    if isinstance(args, str):
+        try:
+            import json
+
+            parsed = json.loads(args)
+            args = parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            args = {}
+
+    return name, dict(args or {})
+
+
+def is_replay_request(prompt: str) -> bool:
+    """Return True when the user explicitly requests a previous task again."""
+
+    text = _normalize_text(prompt)
+    replay_patterns = (
+        r"\bdo (?:the )?(?:above|previous|last|same) task\b",
+        r"\brepeat (?:the )?(?:above|previous|last|same)(?: task)?\b",
+        r"\bredo (?:the )?(?:above|previous|last|same)(?: task)?\b",
+        r"\bdo that again\b",
+        r"\brepeat that\b",
+        r"\brun that again\b",
+        r"\bperform that again\b",
+        r"\bsame thing again\b",
+        r"\bdo the same thing\b",
+    )
+    return any(re.search(pattern, text) for pattern in replay_patterns)
+
+
+def extract_replay_plan(prompt: str, previous_plan: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """Return a safe previous plan when the user explicitly requests replay."""
+
+    if not previous_plan:
+        return None
+
+    text = _normalize_text(prompt)
+
+    replay_patterns = (
+        r"\bdo (?:the )?(?:above|previous|last|same) task\b",
+        r"\brepeat (?:the )?(?:above|previous|last|same)(?: task)?\b",
+        r"\bredo (?:the )?(?:above|previous|last|same)(?: task)?\b",
+        r"\bdo that again\b",
+        r"\brepeat that\b",
+        r"\brun that again\b",
+        r"\bperform that again\b",
+        r"\bsame thing again\b",
+        r"\bdo the same thing\b",
+    )
+
+    if any(re.search(pattern, text) for pattern in replay_patterns):
+        return deepcopy(previous_plan)
+
+    return None
+
+
+def looks_incomplete_request(prompt: str) -> bool:
+    """Detect high-confidence unfinished voice/STT requests.
+
+    This deliberately avoids treating every trailing ellipsis as incomplete.
+    It focuses on clauses that grammatically require another argument.
+    """
+
+    text = str(prompt or "").strip()
+
+    if not text:
+        return True
+
+    patterns = (
+        # Missing argument after a named/called target.
+        r"\bapp(?:lication)?\s+(?:named|called)\s*(?:\.\.\.)?$",
+        r"\b(?:file|folder|program|site|website)\s+(?:named|called)\s*(?:\.\.\.)?$",
+
+        # Search/look-up requests with no query.
+        r"\b(?:search|look|look up)\s+(?:for\s*)?(?:\.\.\.)?$",
+
+        # Trailing conjunction/preposition that clearly expects more input.
+        r"\b(?:and|then|with|for|named|called)\s*(?:\.\.\.)?$",
+        r"\b(?:and|then|with)\s*[?.!]*$",
+
+        # Bare computer-action requests with no target.
+        r"^(?:open|launch|start|close|run)(?:\s+up)?\s*[?.!]*$",
+        r"^(?:can|could|would)\s+you\s+(?:please\s+)?"
+        r"(?:open|launch|start|close|run)(?:\s+up)?\s*[?.!]*$",
+
+        # Conditional fragments ending after an action clause.
+        r"^(?:when|while|before|after)\b.*"
+        r"\b(?:open|launch|start|close|run)\b[^,;]*[?.!]*$",
+    )
+
+    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
+
+def is_conversational_only(prompt: str) -> bool:
+    """Return True when the input contains only acknowledgement/courtesy language."""
+
+    text = re.sub(r"[^a-z0-9']+", " ", _normalize_text(prompt)).strip()
+
+    # No pending confirmation state exists: a bare answer must not be
+    # interpreted as permission to replay a physical action from chat history.
+    if text in {
+        "yes", "yes please", "yeah", "yep", "sure", "no", "no thanks",
+        "do you hear me", "can you hear me", "are you listening",
+    }:
+        return True
+
+    if not text:
+        return False
+
+    tokens = text.split()
+
+    acknowledgement_tokens = {
+        "sure", "yes", "yeah", "yep",
+        "ok",
+        "okay",
+        "thanks",
+        "thank",
+        "you",
+        "so",
+        "much",
+        "very",
+        "a",
+        "lot",
+        "good",
+        "great",
+        "job",
+        "nice",
+        "perfect",
+        "cool",
+        "got",
+        "it",
+        "that's",
+        "that",
+        "is",
+        "really",
+        "awesome",
+        "understood",
+        "i",
+        "understand",
+    }
+
+    acknowledgement_anchors = {
+        "sure", "yes", "yeah", "yep",
+        "ok",
+        "okay",
+        "thanks",
+        "thank",
+        "got",
+        "nice",
+        "great",
+        "perfect",
+        "cool",
+        "understood",
+        "awesome",
+    }
+
+    # Every word must belong to the acknowledgement vocabulary.
+    # Any command/action word such as "open", "launch", "search", etc.
+    # therefore automatically prevents conversational classification.
+    if not all(token in acknowledgement_tokens for token in tokens):
+        return False
+
+    if not any(token in acknowledgement_anchors for token in tokens):
+        return False
+
+    # Preserve common multi-word acknowledgement structures.
+    if "thank" in tokens and "you" not in tokens:
+        return False
+
+    if "got" in tokens and "it" not in tokens:
+        return False
+
+    return True
+
+def local_information_kind(prompt: str) -> str | None:
+    """Recognize whole informational requests, never consume a mixed command."""
+    text = re.sub(r"[^a-z0-9']+", " ", _normalize_text(prompt)).strip()
+    text = re.sub(r"^(?:(?:okay|ok|please|and)\s+)+", "", text)
+    if re.fullmatch(r"(?:tell me )?(?:what are your|what are all your|list your|show your) (?:capabilities|give abilities)", text):
+        return "capabilities"
+    for kind, phrases in {
+        "clock": {"what time is it", "what is the time", "what's the time", "current time", "tell me the time"},
+        "date": {"what is today's date", "what's today's date", "what is the date", "what's the date", "what day is it", "today's date"},
+        "disk": {"how much disk space is free", "how much disk space do i have", "disk space", "free disk space", "check disk space"},
+        "capabilities": {"what can you do", "what can you help me with", "show your capabilities", "list your capabilities", "what all tasks can you do for me", "what tasks can you do", "what tasks can you do for me", "what can you do for me"},
+    }.items():
+        if text in phrases:
+            return kind
+    if text in {
+        "are there any errors", "any errors", "are there errors",
+        "is everything working", "are you working properly", "are you healthy",
+    }:
+        return "health"
+    if text in {
+        "technology stack", "your technology stack", "tech stack",
+        "what is your technology stack", "what's your technology stack",
+        "what is your tech stack", "what are you built on", "what are you built with",
+        "how is your technology stack that you are built on",
+        "what model are you using", "which model are you using",
+    }:
+        return "stack"
+    if re.fullmatch(r"(?:what|where) (?:is|s) (?:my |the |my system )?uptime", text):
+        return "uptime"
+    if text in {"what is my uptime", "what's my uptime", "system uptime", "what is my system uptime"}:
+        return "uptime"
+    if text in {
+        "what are my system statistics", "system statistics", "system usage",
+        "what are my system stats", "system stats", "show my system stats", "give me my system stats",
+        "what is my uptime", "what's my uptime", "system uptime",
+        "view usage and what is my uptime", "what is my system uptime",
+    }:
+        return "telemetry"
+    return None
+
+
+def is_task_status_request(prompt: str) -> bool:
+    """Detect requests asking for the status of an existing task."""
+
+    text = _normalize_text(prompt)
+    patterns = (
+        r"\b(?:can you|could you|would you)\s+(?:please\s+)?(?:tell|give)\s+me\s+(?:the\s+)?status\s+(?:on|of)\s+(?:the\s+)?(?:above|previous|last|that|this)\s+task\b",
+        r"\b(?:what(?:'s| is)|tell me)\s+(?:the\s+)?status\s+(?:on|of)\s+(?:the\s+)?(?:above|previous|last|that|this)\s+task\b",
+        r"\bhow is (?:the )?(?:above|previous|last|that|this) task (?:doing|performing)\b",
+        r"\bis (?:the )?(?:above|previous|last|that|this) task (?:done|complete|completed)\b",
+        r"\bdid (?:the )?(?:above|previous|last|that|this) task (?:finish|complete)\b",
+        r"\bwhat happened to (?:the )?(?:above|previous|last|that|this) task\b",
+        r"\bwhat(?:'s| is) the status of my (?:latest|last|previous) task\b",
+    )
+    return any(re.search(pattern, text) for pattern in patterns)
+
+
+def infer_site_from_prompt(prompt: str) -> str | None:
+    """Infer a known website from phrases such as 'search X on YouTube'."""
+
+    text = _normalize_text(prompt)
+
+    for site in sorted(SITE_ALIASES, key=len, reverse=True):
+        escaped = re.escape(site)
+        if re.search(rf"\b(?:on|in|inside|within|through)\s+{escaped}\b", text):
+            return site
+
+    # 'open YouTube and search ...' / 'YouTube, then search ...'
+    for site in sorted(SITE_ALIASES, key=len, reverse=True):
+        escaped = re.escape(site)
+        if re.search(rf"\b(?:open|visit|go to|navigate to)\s+{escaped}\b", text):
+            return site
+
+    return None
+
+
+def infer_query_from_prompt(prompt: str, site: str | None) -> str | None:
+    """Infer a web query when a model emits an incomplete website call."""
+
+    if not site:
+        return None
+
+    text = str(prompt or "").strip()
+
+    patterns = (
+        rf"\bsearch(?:\s+for)?\s+(.+?)\s+(?:on|in|inside|within|through)\s+{re.escape(site)}(?:[.!?]|$)",
+        rf"\bsearch\s+(.+?)\s+(?:on|in|inside|within|through)\s+(?:it|the site)(?:[.!?]|$)",
+    )
+
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            query = match.group(1).strip(" \t\r\n,.;:!?\"'")
+            if query:
+                return query
+
+    return None
+
+
+def build_site_search_url(site: str, query: str) -> str | None:
+    normalized_site = _normalize_text(site)
+    template = SITE_SEARCH_TEMPLATES.get(normalized_site)
+    if not template:
+        return None
+
+    from urllib.parse import quote_plus
+
+    return template.format(query=quote_plus(str(query).strip()))
+
+def contains_physical_action_request(prompt: str) -> bool:
+    """Detect whether the user explicitly requested a computer/OS action."""
+
+    normalized = _normalize_text(prompt)
+
+    action_patterns = (
+        r"\bopen\b",
+        r"\blaunch\b",
+        r"\bstart\b",
+        r"\bclose\b",
+        r"\bterminate\b",
+        r"\bkill\b",
+        r"\bexecute\b",
+        r"\brun\b",
+        r"\bsearch\b",
+        r"\blook up\b",
+        r"\btype\b",
+        r"\bclick\b",
+        r"\bpress\b",
+        r"\bdownload\b",
+        r"\bupload\b",
+        r"\binstall\b",
+        r"\buninstall\b",
+        r"\bcreate\b",
+        r"\bdelete\b",
+        r"\bmove\b",
+        r"\bcopy\b",
+        r"\bpaste\b",
+        r"\brename\b",
+    )
+
+    return any(
+        re.search(pattern, normalized, flags=re.IGNORECASE)
+        for pattern in action_patterns
+    )
+
+def contains_execution_claim(text: str) -> bool:
+    """Detect language that claims a physical action actually occurred."""
+
+    normalized = _normalize_text(text)
+    # A generated clarification can explicitly state that nothing ran. Remove
+    # only that negative clause; any later affirmative claim still gets checked.
+    normalized = re.sub(
+        r"\bno actions were (?:started|executed|dispatched|launched)\b",
+        "", normalized,
+    )
+
+    patterns = (
+        r"\bopened\b",
+        r"\bopen(?:ed)? successfully\b",
+        r"\bis now open\b",
+        r"\bis open\b",
+        r"\bhas been opened\b",
+        r"\bwas opened\b",
+        r"\bdispatched\b",
+        r"\bexecuted\b",
+        r"\bstarted\b",
+        r"\blaunched\b",
+        r"\bterminated\b",
+        r"\bclosed\b",
+        r"\bcompleted\b",
+        r"\btask completed\b",
+    )
+
+    return any(
+        re.search(pattern, normalized, flags=re.IGNORECASE)
+        for pattern in patterns
+    )
+def _normalize_open_website_args(
+    *,
+    prompt: str,
+    args: dict[str, Any],
+    last_web_target: str | None,
+) -> tuple[str, dict[str, Any] | None]:
+    raw_target = str(args.get("target", "") or "").strip()
+    raw_query = str(args.get("query", "") or "").strip()
+
+    # Browser names belong to open_application, not open_website. Do not
+    # silently discard a paired query because this would create a false sense
+    # that the browser-specific search occurred.
+    if _normalize_text(raw_target) in BROWSER_APP_ALIASES:
+        if raw_query:
+            raise IntentNormalizationError(
+                "The request targets a specific browser and a search query, "
+                "but browser-specific navigation is not available yet."
+            )
+        application_args = {"app_name": raw_target}
+        return "open_application", application_args
+
+    if not raw_target:
+        inferred_site = last_web_target or infer_site_from_prompt(prompt)
+        if inferred_site and raw_query:
+            return "open_website", {
+                "target": inferred_site,
+                "query": raw_query,
+                "count": args.get("count", 1),
+            }
+
+        inferred_query = infer_query_from_prompt(prompt, inferred_site)
+        if inferred_site and inferred_query:
+            return "open_website", {
+                "target": inferred_site,
+                "query": inferred_query,
+                "count": args.get("count", 1),
+            }
+
+        raise IntentNormalizationError(
+            "A website search query was provided without a website target."
+        )
+
+    target_normalized = _normalize_text(raw_target)
+
+    # A site-specific query becomes one atomic navigation action.
+    if raw_query and target_normalized in SITE_SEARCH_TEMPLATES:
+        return "open_website", {
+            "target": target_normalized,
+            "query": raw_query,
+            "count": args.get("count", 1),
+        }
+
+    return "open_website", {
+        "target": raw_target,
+        "count": args.get("count", 1),
+        **({"query": raw_query} if raw_query else {}),
+    }
+
+
+def normalize_tool_calls(
+    prompt: str,
+    raw_tool_calls: list[Any],
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Normalize and validate an LLM tool-call batch.
+
+    Returns:
+        (normalized_calls, clarification_message)
+    """
+
+    if len(raw_tool_calls) > MAX_TOOL_CALLS_PER_TASK:
+        return [], (
+            "That request produced too many actions at once. "
+            f"I can safely process up to {MAX_TOOL_CALLS_PER_TASK} actions in one task."
+        )
+
+    if any(_extract_call(call)[0] == 'play_youtube' for call in raw_tool_calls):
+        from ultron.control.youtube_playback import playback_plan
+        expected = playback_plan(prompt)
+        if not expected or len(raw_tool_calls) != 1 or _extract_call(raw_tool_calls[0]) != (
+                'play_youtube', expected[0]['function']['arguments']):
+            return [], 'Please request one song and artist to play on YouTube.'
+        return expected, None
+
+    extracted: list[tuple[str, dict[str, Any]]] = []
+    for tool in raw_tool_calls:
+        name, args = _extract_call(tool)
+        if not name:
+            continue
+        extracted.append((str(name), args))
+
+    normalized: list[dict[str, Any]] = []
+    last_web_target: str | None = None
+
+    # Track explicit website targets so a later query-only call can be merged.
+    for name, args in extracted:
+        if name == "open_website":
+            raw_target = str(args.get("target", "") or "").strip()
+            if raw_target:
+                browser_check = _normalize_text(raw_target)
+                known_site_or_domain = (
+                    browser_check in SITE_ALIASES
+                    or browser_check in BROWSER_APP_ALIASES
+                    or "://" in browser_check
+                    or "." in browser_check
+                )
+                if (
+                    last_web_target
+                    and not known_site_or_domain
+                    and not str(args.get("query", "") or "").strip()
+                    and re.search(r"\bsearch\b", _normalize_text(prompt))
+                ):
+                    # Repair a common model decomposition where the second
+                    # website call places the search phrase in `target`.
+                    args = dict(args)
+                    args["query"] = raw_target
+                    args["target"] = ""
+                elif browser_check not in BROWSER_APP_ALIASES:
+                    last_web_target = browser_check
+
+        if name == "open_website":
+            try:
+                normalized_name, normalized_args = _normalize_open_website_args(
+                    prompt=prompt,
+                    args=args,
+                    last_web_target=last_web_target,
+                )
+            except IntentNormalizationError as exc:
+                return [], (
+                    "I need one more detail before I execute that: "
+                    f"{exc}"
+                )
+
+            if normalized_name == "open_application":
+                normalized.append(_tool_call(normalized_name, normalized_args or {}))
+                continue
+
+            # Merge query-only calls into the immediately preceding website action
+            # when they refer to the same site. This fixes the common Qwen
+            # decomposition: open_website(target=YouTube), then
+            # open_website(query=quantum computers).
+            if (
+                normalized_args
+                and normalized_args.get("query")
+                and not str(args.get("target", "") or "").strip()
+                and normalized
+            ):
+                for previous in reversed(normalized):
+                    previous_name, previous_args = _extract_call(previous)
+                    if previous_name == "open_website" and previous_args.get("target"):
+                        previous_args["query"] = normalized_args["query"]
+                        previous["function"]["arguments"] = previous_args
+                        break
+                else:
+                    normalized.append(
+                        _tool_call("open_website", normalized_args)
+                    )
+            else:
+                normalized.append(
+                    _tool_call(
+                        "open_website",
+                        normalized_args or {},
+                    )
+                )
+            continue
+
+        # Normalize browser aliases in open_application.
+        if name == "open_application":
+            app_name = str(args.get("app_name", "") or "").strip()
+            if not app_name:
+                return [], "Which application should I open?"
+            normalized.append(
+                _tool_call(
+                    "open_application",
+                    {"app_name": app_name},
+                )
+            )
+            continue
+
+        # Required-argument guards for the remaining high-impact tools.
+        required = {
+            "run_python_script": "script_path",
+            "recall_facts": "search_term",
+            "query_knowledge_base": "query",
+            "live_web_search": "query",
+            "control_media": "action",
+            "terminate_process": "process_name",
+            "system_power_control": "command",
+            "organize_folder": "target_folder",
+            "activate_protocol": "protocol",
+            "manage_clipboard": "action",
+        }
+
+        if name in required:
+            key = required[name]
+            if not str(args.get(key, "") or "").strip():
+                return [], f"I need the '{key}' value before I execute that."
+
+        normalized.append(_tool_call(name, args))
+
+    # Suppress a knowledge-base lookup when it is merely a duplicate of an
+    # explicit on-site search request.
+    website_queries = {
+        _extract_call(call)[1].get("query", "").strip().lower()
+        for call in normalized
+        if _extract_call(call)[0] == "open_website"
+        and _extract_call(call)[1].get("query")
+    }
+
+    filtered: list[dict[str, Any]] = []
+    for call in normalized:
+        name, args = _extract_call(call)
+        normalized_query = str(args.get("query", "")).strip().lower()
+
+        if (
+            name == "query_knowledge_base"
+            and normalized_query in website_queries
+        ):
+            continue
+
+        if (
+            name == "live_web_search"
+            and normalized_query in website_queries
+        ):
+            continue
+
+        filtered.append(call)
+
+    estimated_actions = 0
+    for call in filtered:
+        name, args = _extract_call(call)
+        if name == "open_application":
+            estimated_actions += 1
+        elif name == "open_website":
+            try:
+                estimated_actions += max(1, min(int(args.get("count", 1)), 15))
+            except (TypeError, ValueError):
+                estimated_actions += 1
+
+    if estimated_actions > MAX_TOOL_CALLS_PER_TASK:
+        return [], (
+            "That request contains too many physical actions for one safe task "
+            f"(maximum {MAX_TOOL_CALLS_PER_TASK})."
+        )
+
+    # Dedupe exact non-repeatable action requests. Explicit website `count`
+    # remains the preferred mechanism for intentional repetition.
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for call in filtered:
+        name, args = _extract_call(call)
+        if name in {"open_application", "open_website"}:
+            key = (
+                name
+                + ":"
+                + repr(sorted((str(k), repr(v)) for k, v in args.items()))
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+        deduped.append(call)
+
+    return deduped, None
+
+
+def build_replay_plan(normalized_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Persist only safe, deterministic operations for future replay."""
+
+    plan: list[dict[str, Any]] = []
+
+    for call in normalized_calls:
+        name, args = _extract_call(call)
+        if name not in REPLAYABLE_TOOLS:
+            continue
+        plan.append(
+            _tool_call(
+                name,
+                deepcopy(args),
+            )
+        )
+
+    return plan

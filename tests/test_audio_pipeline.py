@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from audio_pipeline import AudioFrame, AudioMailbox, UtteranceSegmenter, TranscriptionWorker
+from ultron.audio.audio_pipeline import AudioFrame, AudioMailbox, UtteranceSegmenter, TranscriptionWorker
 
 
 def segmenter(**kwargs):

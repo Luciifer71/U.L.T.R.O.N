@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from brain_agent import (
+from ultron.agents.brain_agent import (
     PendingAction,
     UltronBrain,
     resolve_script_filename,
@@ -99,7 +99,7 @@ def test_pending_action_ledger_records_capability_result(monkeypatch) -> None:
             return None
 
         brain._publish_visual = publish_visual
-        monkeypatch.setattr("brain_agent.update_task", lambda *args, **kwargs: None)
+        monkeypatch.setattr("ultron.agents.brain_agent.update_task", lambda *args, **kwargs: None)
 
         async def action():
             return FakeCapabilityResult(
@@ -135,7 +135,7 @@ def test_pending_action_ledger_records_capability_result(monkeypatch) -> None:
 
 def test_missing_script_is_not_fuzzy_matched(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
-        "brain_agent.os.listdir",
+        "ultron.agents.brain_agent.os.listdir",
         lambda _: [
             "ollama_runtime.py",
             "brain_agent.py",
@@ -159,7 +159,7 @@ def test_normalized_existing_script_still_resolves(tmp_path) -> None:
 
 def test_similar_script_name_is_not_execution_authorization(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
-        "brain_agent.os.listdir",
+        "ultron.agents.brain_agent.os.listdir",
         lambda _: [
             "audio_listen.py",
             "action_daemon.py",
@@ -189,7 +189,7 @@ def test_missing_tool_call_retries_and_stages_without_executing(monkeypatch):
         async def visual(*a, **kw):
             pass
         brain._publish_visual = visual
-        monkeypatch.setattr("brain_agent.create_task", lambda *a, **kw: None)
+        monkeypatch.setattr("ultron.agents.brain_agent.create_task", lambda *a, **kw: None)
         reply, actions = await brain.process_intent("I would like you to open calculator.", "retry-task")
         assert len(calls) == 2
         assert all("tools" in call for call in calls)
@@ -212,7 +212,7 @@ def test_missing_plan_stops_after_one_retry_without_synthesis(monkeypatch):
         async def visual(*a, **kw):
             pass
         brain._publish_visual = visual
-        monkeypatch.setattr("brain_agent.create_task", lambda *a, **kw: None)
+        monkeypatch.setattr("ultron.agents.brain_agent.create_task", lambda *a, **kw: None)
         reply, actions = await brain.process_intent("I would like you to open calculator.", "failed-plan")
         assert len(calls) == 2
         assert actions == []
@@ -232,7 +232,7 @@ def test_explicit_multi_app_plan_stages_every_target_without_llm(monkeypatch):
         async def visual(*a, **kw):
             pass
         brain._publish_visual = visual
-        monkeypatch.setattr('brain_agent.create_task', lambda *a, **kw: None)
+        monkeypatch.setattr('ultron.agents.brain_agent.create_task', lambda *a, **kw: None)
         _, actions = await brain.process_intent('Ok, can you open file explorer perplexity notion and search on youtube quantum computers.', 'complete-plan')
         assert [action.name for action in actions] == [
             'open_application:File Explorer', 'open_application:Perplexity',
@@ -280,7 +280,7 @@ def test_model_inserted_app_is_rejected_before_staging(monkeypatch):
             return {'message': {'tool_calls': [{'function': {'name': 'open_application', 'arguments': {'app_name': 'Microsoft Edge'}}}]}}
         brain._publish_visual = visual
         brain.ollama = SimpleNamespace(chat=chat)
-        monkeypatch.setattr('brain_agent.create_task', lambda *a, **kw: None)
+        monkeypatch.setattr('ultron.agents.brain_agent.create_task', lambda *a, **kw: None)
         reply, actions = await brain.process_intent('I would like you to open Notion.', 'inserted')
         assert actions == []
         assert 'not named' in reply
@@ -296,7 +296,7 @@ def test_failed_action_does_not_contaminate_next_conversation(monkeypatch):
         async def visual(*args, **kwargs):
             pass
         brain._publish_visual = visual
-        monkeypatch.setattr('brain_agent.create_task', lambda *a, **kw: None)
+        monkeypatch.setattr('ultron.agents.brain_agent.create_task', lambda *a, **kw: None)
         async def chat(**kwargs):
             assert all('mysteryapp' not in m.get('content', '') for m in kwargs['messages'])
             return {'message': {'content': 'What would you like to discuss?'}}
@@ -311,7 +311,7 @@ def test_failed_action_does_not_contaminate_next_conversation(monkeypatch):
 
 
 def test_restart_keeps_facts_but_does_not_restore_mixed_chat_log(monkeypatch):
-    monkeypatch.setattr('brain_agent.get_all_facts', lambda: [{'key': 'name', 'value': 'Krish'}])
+    monkeypatch.setattr('ultron.agents.brain_agent.get_all_facts', lambda: [{'key': 'name', 'value': 'Krish'}])
     brain = object.__new__(UltronBrain)
     brain.refresh_system_prompt()
     assert len(brain.history) == 1
@@ -360,8 +360,8 @@ def test_batch_preflight_completes_before_first_execution(monkeypatch):
         async def visual(*a, **kw):
             pass
         brain._publish_visual = visual
-        monkeypatch.setattr('brain_agent.update_task', lambda *a, **kw: None)
-        monkeypatch.setattr('brain_agent.EXECUTION_MIN_HOLD_SEC', 0)
+        monkeypatch.setattr('ultron.agents.brain_agent.update_task', lambda *a, **kw: None)
+        monkeypatch.setattr('ultron.agents.brain_agent.EXECUTION_MIN_HOLD_SEC', 0)
         actions = [PendingAction('open_application:' + name,
                     lambda n=name: events.append('execute:' + n),
                     preflight=lambda n=name: events.append('resolve:' + n)) for name in ['Calculator', 'File Explorer']]

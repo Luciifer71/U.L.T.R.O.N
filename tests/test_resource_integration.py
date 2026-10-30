@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from brain_agent import UltronBrain
-from ultron_control.request_planning import validate_application_targets, explicit_launch_plan
-from ultron_resources.catalog import PathPolicy, ResourceCatalog
-from ultron_resources.service import ResourceService
+from ultron.agents.brain_agent import UltronBrain
+from ultron.control.request_planning import validate_application_targets, explicit_launch_plan
+from ultron.resources.catalog import PathPolicy, ResourceCatalog
+from ultron.resources.service import ResourceService
 
 
 def call(operation, target, **options):
@@ -59,9 +59,9 @@ def make_brain(tmp_path, monkeypatch, model_calls):
         pass
     brain.ollama = SimpleNamespace(chat=chat)
     brain._publish_visual = visual
-    monkeypatch.setattr('brain_agent.create_task', lambda *a, **k: None)
-    monkeypatch.setattr('brain_agent.update_task', lambda *a, **k: None)
-    monkeypatch.setattr('brain_agent.EXECUTION_MIN_HOLD_SEC', 0)
+    monkeypatch.setattr('ultron.agents.brain_agent.create_task', lambda *a, **k: None)
+    monkeypatch.setattr('ultron.agents.brain_agent.update_task', lambda *a, **k: None)
+    monkeypatch.setattr('ultron.agents.brain_agent.EXECUTION_MIN_HOLD_SEC', 0)
     return brain
 
 
@@ -200,8 +200,8 @@ def test_local_replies_do_not_infer_or_create_tasks(tmp_path, monkeypatch, promp
     def forbidden_task(*args, **kwargs):
         pytest.fail('Local replies must not overwrite task evidence')
     brain.ollama.chat = forbidden
-    monkeypatch.setattr('brain_agent.create_task', forbidden_task)
-    monkeypatch.setattr('brain_agent.get_latest_task', lambda: None)
+    monkeypatch.setattr('ultron.agents.brain_agent.create_task', forbidden_task)
+    monkeypatch.setattr('ultron.agents.brain_agent.get_latest_task', lambda: None)
     reply, actions = asyncio.run(brain.process_intent(prompt, 'local'))
     assert reply and actions == []
     assert brain.last_replay_plan is None
@@ -209,7 +209,7 @@ def test_local_replies_do_not_infer_or_create_tasks(tmp_path, monkeypatch, promp
 
 def test_health_reply_reports_failure_without_global_health_claim(tmp_path, monkeypatch):
     brain = make_brain(tmp_path, monkeypatch, [])
-    monkeypatch.setattr('brain_agent.get_latest_task', lambda: {
+    monkeypatch.setattr('ultron.agents.brain_agent.get_latest_task', lambda: {
         'status': 'failed', 'prompt': 'Open example', 'error_text': 'Application missing'})
     reply = brain._compose_local_reply('Are there any errors?')
     assert 'not run a full system health check' in reply
@@ -219,7 +219,7 @@ def test_health_reply_reports_failure_without_global_health_claim(tmp_path, monk
 
 def test_stack_reply_uses_configured_model(tmp_path, monkeypatch):
     brain = make_brain(tmp_path, monkeypatch, [])
-    monkeypatch.setattr('brain_agent.MODEL_NAME', 'test-model')
+    monkeypatch.setattr('ultron.agents.brain_agent.MODEL_NAME', 'test-model')
     reply = brain._compose_local_reply('What model are you using?')
     assert 'test-model' in reply and 'Ollama' in reply and 'NATS' in reply
     assert 'not disclosed' not in reply
@@ -261,7 +261,7 @@ def test_grounded_variants_do_not_call_model(tmp_path, monkeypatch, prompt):
     async def forbidden(**kwargs):
         pytest.fail('Grounded requests must not call a model')
     brain.ollama.chat = forbidden
-    monkeypatch.setattr('brain_agent.get_latest_task', lambda: None)
+    monkeypatch.setattr('ultron.agents.brain_agent.get_latest_task', lambda: None)
     reply, actions = asyncio.run(brain.process_intent(prompt, 'grounded'))
     assert reply and not actions
     assert 'proprietary' not in reply and 'No errors detected' not in reply
@@ -276,7 +276,7 @@ def test_model_selected_telemetry_is_reported_without_invented_followup(tmp_path
         return {'message': {'content': '', 'tool_calls': [
             {'function': {'name': 'get_system_telemetry', 'arguments': {}}}]}}
     brain.ollama.chat = chat
-    monkeypatch.setattr('brain_agent.collect_telemetry', lambda: {
+    monkeypatch.setattr('ultron.agents.brain_agent.collect_telemetry', lambda: {
         'cpu_percent': 5, 'memory_percent': 90, 'uptime_seconds': 3600,
         'battery_percent': 80, 'power_plugged': True})
     reply, actions = asyncio.run(brain.process_intent('How long has this computer been running?', 'telemetry'))
@@ -288,7 +288,7 @@ def test_model_selected_telemetry_is_reported_without_invented_followup(tmp_path
 def test_live_error_phrase_uses_status_evidence_without_model(tmp_path, monkeypatch, connected):
     brain = make_brain(tmp_path, monkeypatch, [])
     brain.nc = SimpleNamespace(is_connected=connected)
-    monkeypatch.setattr('brain_agent.get_latest_task', lambda: {
+    monkeypatch.setattr('ultron.agents.brain_agent.get_latest_task', lambda: {
         'task_id': 'failed-task', 'status': 'failed', 'error_text': 'File missing'})
     async def forbidden(**kwargs):
         pytest.fail('Known health question should not infer')
@@ -311,7 +311,7 @@ def test_model_health_tool_excludes_current_request_and_skips_synthesis(tmp_path
     def latest(exclude_task_id=None):
         assert exclude_task_id == 'health-question'
         return {'status': 'failed', 'error_text': 'Previous execution failed'}
-    monkeypatch.setattr('brain_agent.get_latest_task', latest)
+    monkeypatch.setattr('ultron.agents.brain_agent.get_latest_task', latest)
     brain.ollama.chat = chat
     reply, actions = asyncio.run(brain.process_intent('Check whether Ultron has a problem.', 'health-question'))
     assert 'Previous execution failed' in reply and len(calls) == 1 and not actions
@@ -320,7 +320,7 @@ def test_model_health_tool_excludes_current_request_and_skips_synthesis(tmp_path
 
 def test_uptime_only_reply_omits_unrequested_metrics(tmp_path, monkeypatch):
     brain = make_brain(tmp_path, monkeypatch, [])
-    monkeypatch.setattr('brain_agent.collect_telemetry', lambda: {
+    monkeypatch.setattr('ultron.agents.brain_agent.collect_telemetry', lambda: {
         'uptime_seconds': 116880, 'cpu_percent': 1, 'memory_percent': 87,
         'battery_percent': 80, 'power_plugged': True})
     reply, actions = asyncio.run(brain.process_intent('What is my uptime?', 'uptime'))
@@ -332,7 +332,7 @@ def test_health_db_failure_is_explicit(tmp_path, monkeypatch):
     brain = make_brain(tmp_path, monkeypatch, [])
     def fail():
         raise OSError('private database details')
-    monkeypatch.setattr('brain_agent.get_latest_task', fail)
+    monkeypatch.setattr('ultron.agents.brain_agent.get_latest_task', fail)
     reply = brain._compose_local_reply('Are there any errors?')
     assert 'task history is unavailable' in reply
     assert 'private database' not in reply
@@ -354,14 +354,14 @@ def test_support_bundle_app_requests_bypass_model(tmp_path, monkeypatch, prompt)
 
 def test_support_bundle_uptime_paraphrase_is_concise(tmp_path, monkeypatch):
     brain = make_brain(tmp_path, monkeypatch, [])
-    monkeypatch.setattr('brain_agent.collect_telemetry', lambda: {'uptime_seconds': 3600})
+    monkeypatch.setattr('ultron.agents.brain_agent.collect_telemetry', lambda: {'uptime_seconds': 3600})
     assert brain._compose_local_reply('Where is my uptime?') == 'System uptime: 1 hour.'
 
 
 def test_model_can_request_uptime_only(tmp_path, monkeypatch):
     brain = make_brain(tmp_path, monkeypatch, [
         {'function': {'name': 'get_system_telemetry', 'arguments': {'metric': 'uptime'}}}])
-    monkeypatch.setattr('brain_agent.collect_telemetry', lambda: {'uptime_seconds': 60, 'cpu_percent': 5})
+    monkeypatch.setattr('ultron.agents.brain_agent.collect_telemetry', lambda: {'uptime_seconds': 60, 'cpu_percent': 5})
     reply, actions = asyncio.run(brain.process_intent('How long has this computer been running?', 'uptime-model'))
     assert reply == 'System uptime: 1 minute.' and not actions
 
@@ -397,7 +397,7 @@ def test_model_list_preflights_unknown_app_before_any_launch(tmp_path, monkeypat
 
 
 def test_movie_request_prepares_then_dispatches_unique_local_file(tmp_path, monkeypatch):
-    from ultron_resources import file_workflow
+    from ultron.resources import file_workflow
     folder = tmp_path / 'Downloads'
     folder.mkdir()
     movie = folder / 'Supergirl.2026.mp4'
@@ -419,7 +419,7 @@ def test_movie_request_prepares_then_dispatches_unique_local_file(tmp_path, monk
 
 
 def setup_file_choices(tmp_path, monkeypatch):
-    from ultron_resources import file_workflow
+    from ultron.resources import file_workflow
     folder = tmp_path / 'Downloads'
     folder.mkdir()
     for name in ['Supergirl.2026.mp4', 'Supergirl.2025.mp4']:
@@ -535,7 +535,7 @@ def test_unoffered_or_compound_choice_does_not_dispatch(tmp_path, monkeypatch, c
 ])
 def test_local_facts_never_call_model_or_stage_actions(tmp_path, monkeypatch, prompt, expected):
     brain = make_brain(tmp_path, monkeypatch, [])
-    from ultron_control.google_updates import GoogleUpdates
+    from ultron.control.google_updates import GoogleUpdates
     brain.google_updates = GoogleUpdates(tmp_path)
     async def forbidden(**kwargs):
         pytest.fail('Local facts must not invoke model')
@@ -549,7 +549,7 @@ def test_local_facts_never_call_model_or_stage_actions(tmp_path, monkeypatch, pr
 def test_composed_facts_never_invoke_planner(tmp_path, monkeypatch, prompt):
     brain = make_brain(tmp_path, monkeypatch, [])
     brain.google_updates = SimpleNamespace(spoken_reply=lambda kind: 'Calendar sync is unavailable.')
-    monkeypatch.setattr('ultron_control.read_requests.collect_telemetry', lambda: {'cpu_percent': 8})
+    monkeypatch.setattr('ultron.control.read_requests.collect_telemetry', lambda: {'cpu_percent': 8})
     async def forbidden(**kwargs): pytest.fail('facts reached model')
     brain.ollama.chat = forbidden
     reply, actions = asyncio.run(brain.process_intent(prompt, 'composed-facts'))
@@ -561,7 +561,7 @@ def test_composed_facts_never_invoke_planner(tmp_path, monkeypatch, prompt):
 
 
 def test_youtube_playback_bypasses_model_and_uses_verified_ledger(tmp_path, monkeypatch):
-    from ultron_control.youtube_playback import PlaybackResult
+    from ultron.control.youtube_playback import PlaybackResult
     brain = make_brain(tmp_path, monkeypatch, [])
     called = []
     async def forbidden_model(**kwargs):

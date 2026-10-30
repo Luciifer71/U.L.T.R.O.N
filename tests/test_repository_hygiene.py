@@ -27,7 +27,7 @@ def test_ignore_rules_keep_private_inputs_local_and_source_visible(tmp_path):
 def test_relocated_manifest_and_nats_paths_exist():
     import re
     root = Path(__file__).resolve().parents[1]
-    for reference in ['.github/workflows/resource-contracts.yml', 'setup-youtube-playback.cmd',
+    for reference in ['.github/workflows/resource-contracts.yml', 'scripts/windows/setup-youtube-playback.cmd',
                       'CONTRIBUTING.md', 'docs/getting-started.md']:
         for manifest in re.findall(r'requirements/[a-z-]+\.txt', (root / reference).read_text(encoding="utf-8")):
             assert (root / manifest).is_file(), (reference, manifest)

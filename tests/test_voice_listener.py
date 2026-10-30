@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from speech_runtime import SpeechConfig
+from ultron.audio.speech_runtime import SpeechConfig
 
 
 def test_saved_settings_loaded_before_listener_configuration(monkeypatch, tmp_path):
@@ -25,7 +25,7 @@ def test_saved_settings_loaded_before_listener_configuration(monkeypatch, tmp_pa
         monkeypatch.delenv(name)
     monkeypatch.setenv("WHISPER_MODEL_SIZE", "medium.en")
     monkeypatch.setitem(sys.modules, "sounddevice", SimpleNamespace())
-    spec = importlib.util.spec_from_file_location("listener_saved_settings", (Path(__file__).resolve().parents[1] / 'voice_listener.py'))
+    spec = importlib.util.spec_from_file_location("listener_saved_settings", (Path(__file__).resolve().parents[1] / 'src/ultron/agents/voice_listener.py'))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert module.MIC_DEVICE is None
@@ -42,7 +42,7 @@ def listener(monkeypatch):
     sd = SimpleNamespace(InputStream=object, check_input_settings=lambda **kwargs: None,
                          query_devices=lambda **kwargs: {})
     monkeypatch.setitem(sys.modules, "sounddevice", sd)
-    spec = importlib.util.spec_from_file_location("voice_listener_test", (Path(__file__).resolve().parents[1] / 'voice_listener.py'))
+    spec = importlib.util.spec_from_file_location("voice_listener_test", (Path(__file__).resolve().parents[1] / 'src/ultron/agents/voice_listener.py'))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setattr(module, "create_speech_activity", lambda: None)
@@ -391,7 +391,7 @@ def test_pinned_input_mode_requires_explicit_opt_in(monkeypatch):
     monkeypatch.setenv('AUDIO_INPUT_MODE', 'pinned')
     monkeypatch.setenv('AUDIO_INPUT_DEVICE', '3')
     monkeypatch.setitem(sys.modules, 'sounddevice', SimpleNamespace())
-    spec = importlib.util.spec_from_file_location('pinned_listener', (Path(__file__).resolve().parents[1] / 'voice_listener.py'))
+    spec = importlib.util.spec_from_file_location('pinned_listener', (Path(__file__).resolve().parents[1] / 'src/ultron/agents/voice_listener.py'))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert module.MIC_DEVICE == 3

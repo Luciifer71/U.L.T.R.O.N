@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from ollama_runtime import OllamaRuntime, OllamaRuntimeConfig
+from ultron.core.ollama_runtime import OllamaRuntime, OllamaRuntimeConfig
 
 
 @pytest.fixture(autouse=True)
@@ -17,7 +17,7 @@ def test_explicit_legacy_model_preserves_existing_request(monkeypatch):
         async def chat(self, **kwargs):
             received.append(kwargs)
             return {'message': {'content': 'ok'}}
-    monkeypatch.setattr('ollama_runtime.AsyncClient', lambda **kwargs: Client())
+    monkeypatch.setattr('ultron.core.ollama_runtime.AsyncClient', lambda **kwargs: Client())
     runtime = OllamaRuntime(OllamaRuntimeConfig.from_env(model="qwen2.5:7b"))
     runtime._ready = True
     request = {'model': 'qwen2.5:7b', 'messages': [], 'options': {'temperature': 0.2}}
@@ -35,7 +35,7 @@ def test_trial_profile_applies_to_every_request_without_mutation(monkeypatch):
         async def chat(self, **kwargs):
             received.append(kwargs)
             return {'message': {'content': 'ok'}}
-    monkeypatch.setattr('ollama_runtime.AsyncClient', lambda **kwargs: Client())
+    monkeypatch.setattr('ultron.core.ollama_runtime.AsyncClient', lambda **kwargs: Client())
     runtime = OllamaRuntime(OllamaRuntimeConfig.from_env(model='qwen3:8b'))
     runtime._ready = True
     options = {'temperature': 0.2, 'num_predict': 256}
@@ -63,7 +63,7 @@ def test_invalid_profile_fails_before_client_creation(monkeypatch, key, value):
     monkeypatch.setenv(key, value)
     def forbidden_client(**kwargs):
         pytest.fail('Invalid profile must fail before client creation')
-    monkeypatch.setattr('ollama_runtime.AsyncClient', forbidden_client)
+    monkeypatch.setattr('ultron.core.ollama_runtime.AsyncClient', forbidden_client)
     with pytest.raises(ValueError):
         OllamaRuntime(OllamaRuntimeConfig.from_env())
 
@@ -80,13 +80,13 @@ def test_timing_metadata_preserves_response_and_excludes_content(monkeypatch, ca
                 if shape == 'object' else {'message': {'content': 'private response'}})
     received = []
     clock = [0.0]
-    monkeypatch.setattr('ollama_runtime.time.perf_counter', lambda: clock[0])
+    monkeypatch.setattr('ultron.core.ollama_runtime.time.perf_counter', lambda: clock[0])
     class Client:
         async def chat(self, **kwargs):
             received.append(kwargs)
             clock[0] += 9
             return response
-    monkeypatch.setattr('ollama_runtime.AsyncClient', lambda **kwargs: Client())
+    monkeypatch.setattr('ultron.core.ollama_runtime.AsyncClient', lambda **kwargs: Client())
     runtime = OllamaRuntime(OllamaRuntimeConfig())
     async def ready():
         clock[0] += 2
@@ -118,7 +118,7 @@ def test_timing_reports_failed_attempt_and_recovery(monkeypatch, capsys):
             if len(calls) == 1:
                 raise OSError('temporary failure')
             return {'message': {'content': 'ok'}}
-    monkeypatch.setattr('ollama_runtime.AsyncClient', lambda **kwargs: Client())
+    monkeypatch.setattr('ultron.core.ollama_runtime.AsyncClient', lambda **kwargs: Client())
     runtime = OllamaRuntime(OllamaRuntimeConfig(retry_attempts=2, retry_backoff_sec=0))
     async def ready():
         pass

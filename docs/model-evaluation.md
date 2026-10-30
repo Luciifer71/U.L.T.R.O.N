@@ -6,9 +6,9 @@ not change `.env`, memory databases, speech settings or tool execution rules.
 
 ## What the benchmark does
 
-`model_benchmark.py` uses Python's standard library to contact local Ollama. It
+`run_ultron.py benchmark` uses Python's standard library to contact local Ollama. It
 extracts the **current** literal tool definitions and system prompt from
-`brain_agent.py` with Python's AST reader. It never imports the brain, loads user
+`src/ultron/agents/brain_agent.py` with Python's AST reader. It never imports the brain, loads user
 memory, connects to NATS, or executes a proposed tool. An unsupported prompt/schema
 construction fails instead of evaluating arbitrary Python.
 
@@ -159,7 +159,7 @@ through its normal installer and retry; do not downgrade project packages.
 4. Run this one command (venv activation is optional):
 
 ```powershell
-.\.venv\Scripts\python.exe .\model_benchmark.py
+.\.venv\Scripts\python.exe .\run_ultron.py benchmark
 ```
 
 Defaults: all three models, 14 cases each, three repetitions, 4096 context tokens,
@@ -175,7 +175,7 @@ concurrently: the benchmark is not a server-wide lock.
 For a short initial check or baseline-only run:
 
 ```powershell
-.\.venv\Scripts\python.exe .\model_benchmark.py --models qwen2.5:7b --repeats 1
+.\.venv\Scripts\python.exe .\run_ultron.py benchmark --models qwen2.5:7b --repeats 1
 ```
 
 Missing models cause preflight failure; the tool never downloads models itself.
@@ -214,7 +214,7 @@ After the brain-only comparison, repeat with the voice listener loaded on CUDA
 but the **brain stopped**, and label that run:
 
 ```powershell
-.\.venv\Scripts\python.exe .\model_benchmark.py --label whisper-loaded
+.\.venv\Scripts\python.exe .\run_ultron.py benchmark --label whisper-loaded
 ```
 
 The label documents the workload; it does not start or verify Whisper. NATS must
@@ -234,7 +234,7 @@ a reviewed follow-up change before claiming benchmark/live equivalence.
 
 Preserve the old model and record prior settings. Rollback means restoring
 `LLM_MODEL=qwen2.5:7b` and restarting the components. Do not delete model weights,
-replace `brain_agent.py` wholesale, or disable execution guards to get a higher
+replace `run_ultron.py brain_agent` wholesale, or disable execution guards to get a higher
 benchmark score.
 
 ## Automated checks and Git

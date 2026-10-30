@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from microphone_runtime import fingerprint, inventory, microphone_candidates, probe_inventory
+from ultron.audio.microphone_runtime import fingerprint, inventory, microphone_candidates, probe_inventory
 
 
 def device(index, name, api='Windows WASAPI'):

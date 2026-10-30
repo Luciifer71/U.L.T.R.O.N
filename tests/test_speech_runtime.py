@@ -9,9 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import speech_runtime as runtime
-
-
+from ultron.audio import speech_runtime as runtime
 def test_environment_selects_model_and_strict_gpu(monkeypatch):
     monkeypatch.setenv("WHISPER_MODEL_SIZE", "large-v3")
     monkeypatch.setenv("WHISPER_DEVICE", "cuda")

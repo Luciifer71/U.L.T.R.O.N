@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
-from speech_activity import SpeechActivity
-from audio_pipeline import AudioFrame, UtteranceSegmenter
+from ultron.audio.speech_activity import SpeechActivity
+from ultron.audio.audio_pipeline import AudioFrame, UtteranceSegmenter
 
 
 def test_loud_non_speech_can_finish_an_utterance_without_truncation():
