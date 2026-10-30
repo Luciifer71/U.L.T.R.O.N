@@ -281,7 +281,7 @@ def local_information_kind(prompt: str) -> str | None:
         "clock": {"what time is it", "what is the time", "what's the time", "current time", "tell me the time"},
         "date": {"what is today's date", "what's today's date", "what is the date", "what's the date", "what day is it", "today's date"},
         "disk": {"how much disk space is free", "how much disk space do i have", "disk space", "free disk space", "check disk space"},
-        "capabilities": {"what can you do", "what can you help me with", "show your capabilities", "list your capabilities", "what all tasks can you do for me", "what tasks can you do", "what tasks can you do for me", "what can you do for me"},
+        "capabilities": {"what all capabilities do you have", "what capabilities do you have", "what are your capabilities", "what can you do", "what can you help me with", "show your capabilities", "list your capabilities", "what all tasks can you do for me", "what tasks can you do", "what tasks can you do for me", "what can you do for me"},
     }.items():
         if text in phrases:
             return kind
@@ -523,12 +523,12 @@ def normalize_tool_calls(
             f"I can safely process up to {MAX_TOOL_CALLS_PER_TASK} actions in one task."
         )
 
-    if any(_extract_call(call)[0] == 'play_youtube' for call in raw_tool_calls):
+    if any(_extract_call(call)[0] in {'play_youtube', 'open_spotify_search'} for call in raw_tool_calls):
         from ultron.control.youtube_playback import playback_plan
         expected = playback_plan(prompt)
         if not expected or len(raw_tool_calls) != 1 or _extract_call(raw_tool_calls[0]) != (
-                'play_youtube', expected[0]['function']['arguments']):
-            return [], 'Please request one song and artist to play on YouTube.'
+                expected[0]['function']['name'], expected[0]['function']['arguments']):
+            return [], 'Please request one song and artist, with YouTube or Spotify if desired.'
         return expected, None
 
     extracted: list[tuple[str, dict[str, Any]]] = []

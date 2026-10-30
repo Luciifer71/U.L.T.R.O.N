@@ -570,7 +570,7 @@ def test_youtube_playback_bypasses_model_and_uses_verified_ledger(tmp_path, monk
         called.append(query)
         return PlaybackResult(True, data={'state':'verified', 'verification':{'playing':True}})
     brain.ollama.chat = forbidden_model
-    brain.youtube_playback = SimpleNamespace(play=play)
+    brain.youtube_playback = SimpleNamespace(play=play, clear_choice=lambda: None)
     async def run():
         _, actions = await brain.process_intent('Can you play Never Gonna Give You Up by Rick Astley on YouTube?', 'song')
         assert len(actions) == 1 and not called
@@ -579,3 +579,61 @@ def test_youtube_playback_bypasses_model_and_uses_verified_ledger(tmp_path, monk
         assert called == ['Never Gonna Give You Up by Rick Astley']
         assert brain._compose_execution_response('song').startswith('YouTube playback verified:')
     asyncio.run(run())
+
+
+@pytest.mark.parametrize('prompt,name', [
+    ('Can you play the song Sunflower by Post Malone?', 'play_youtube:Sunflower by Post Malone'),
+    ('looking for the song save your tears by the weekend and play it for me on youtube.', 'play_youtube:save your tears by The Weeknd'),
+    ('Play Sunflower by Post Malone on Spotify', 'open_spotify_search:Sunflower by Post Malone'),
+])
+def test_music_routes_without_model_and_only_stages(tmp_path, monkeypatch, prompt, name):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    async def forbidden(**kw):
+        pytest.fail('Named music shortcut should not call the model')
+    brain.ollama.chat = forbidden
+    reply, actions = asyncio.run(brain.process_intent(prompt, 'music'))
+    assert [a.name for a in actions] == [name]
+    assert 'verified' in reply.lower() or 'staged' in reply.lower()
+
+
+def test_capability_paraphrase_bypasses_model(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    async def forbidden(**kw):
+        pytest.fail('Capability inventory should not call the model')
+    brain.ollama.chat = forbidden
+    reply, actions = asyncio.run(brain.process_intent('What all capabilities do you have?', 'capabilities'))
+    assert not actions and 'YouTube' in reply and 'Spotify' in reply
+
+
+def test_music_choice_uses_observed_target_once_and_clears_on_other_request(tmp_path, monkeypatch):
+    import time
+    from ultron.control.youtube_playback import YouTubePlayback, PlaybackResult
+    brain = make_brain(tmp_path, monkeypatch, [])
+    player = brain.youtube_playback = YouTubePlayback()
+    choice = dict(query='test song', title='Observed Song', url='https://www.youtube.com/watch?v=abcdefghijk', expires=time.monotonic() + 120)
+    seen = []
+    async def play(query, *, selected):
+        seen.append(selected); return PlaybackResult(True)
+    player.play = play
+    async def run():
+        player.choice = choice
+        _, actions = await brain.process_intent('Play the first result.', 'choice')
+        assert len(actions) == 1 and not seen
+        await actions[0].execute()
+        assert seen == [choice]
+        reply, actions = await brain.process_intent('Play the first result.', 'again')
+        assert not actions and 'no current' in reply
+        player.choice = choice
+        await brain.process_intent('What can you do?', 'unrelated')
+        assert player.choice is None
+    asyncio.run(run())
+
+
+def test_verbose_first_result_followup_does_not_become_web_search(tmp_path, monkeypatch):
+    brain = make_brain(tmp_path, monkeypatch, [])
+    async def forbidden(**kw):
+        pytest.fail('A result-selection followup must not turn into general web search')
+    brain.ollama.chat = forbidden
+    reply, actions = asyncio.run(brain.process_intent(
+        'Play the first result that you get, that is the savior tier song by The Weeknd and official music video, play by the same artist.', 'followup'))
+    assert not actions and 'play the first result' in reply

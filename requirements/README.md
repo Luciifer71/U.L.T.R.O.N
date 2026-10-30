@@ -11,6 +11,7 @@ Run pip from the repository root using the project virtual environment:
 | --- | --- |
 | `test.txt` | Running hardware-free regression and acceptance checks |
 | `google.txt` | Enabling optional read-only Google integration |
+| `search.txt` | Enabling current optional general web search (`ddgs`) |
 | `browser.txt` | Enabling experimental managed YouTube playback |
 | `speech-windows.txt` | Setting up supported NVIDIA speech inference on Windows |
 

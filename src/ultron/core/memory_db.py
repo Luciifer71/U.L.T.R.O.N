@@ -1,3 +1,4 @@
+from contextlib import closing
 import json
 import sqlite3
 from pathlib import Path
@@ -18,7 +19,7 @@ def get_db_connection() -> sqlite3.Connection:
 
 def init_memory_db():
     """Initialize durable user, conversation, and task-memory tables."""
-    with get_db_connection() as conn:
+    with closing(get_db_connection()) as conn, conn:
         conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS user_facts (
@@ -74,7 +75,7 @@ def init_memory_db():
 def save_fact(key: str, value: str, category: str = "general") -> str:
     """Insert or update a key-value fact in long-term memory."""
     key = key.lower().strip()
-    with get_db_connection() as conn:
+    with closing(get_db_connection()) as conn, conn:
         conn.execute(
             """
             INSERT INTO user_facts (key, value, category, updated_at)
@@ -92,7 +93,7 @@ def save_fact(key: str, value: str, category: str = "general") -> str:
 
 def get_all_facts() -> list[dict]:
     """Retrieve all stored user facts."""
-    with get_db_connection() as conn:
+    with closing(get_db_connection()) as conn, conn:
         cursor = conn.execute(
             "SELECT key, value, category FROM user_facts ORDER BY updated_at DESC"
         )
@@ -102,7 +103,7 @@ def get_all_facts() -> list[dict]:
 def query_facts(search_term: str) -> list[dict]:
     """Search for specific facts matching a key or value keyword."""
     term = f"%{search_term.lower().strip()}%"
-    with get_db_connection() as conn:
+    with closing(get_db_connection()) as conn, conn:
         cursor = conn.execute(
             """
             SELECT key, value, category FROM user_facts
@@ -120,7 +121,7 @@ def log_chat(role: str, content: str):
     """Save a chat message turn to persistent history."""
     if not content:
         return
-    with get_db_connection() as conn:
+    with closing(get_db_connection()) as conn, conn:
         conn.execute(
             "INSERT INTO chat_logs (role, content) VALUES (?, ?)",
             (role, content),
@@ -131,7 +132,7 @@ def log_chat(role: str, content: str):
 def get_recent_chat_history(limit: int = 10) -> list[dict]:
     """Load the last N chat turns in chronological order."""
     limit = max(1, min(int(limit), 100))
-    with get_db_connection() as conn:
+    with closing(get_db_connection()) as conn, conn:
         cursor = conn.execute(
             "SELECT role, content FROM chat_logs ORDER BY id DESC LIMIT ?",
             (limit,),
@@ -153,7 +154,7 @@ def _serialize_execution(execution: list[dict[str, Any]] | None) -> str | None:
 
 def create_task(task_id: str, prompt: str, status: str = "received") -> None:
     """Create one durable task record and its initial lifecycle event."""
-    with get_db_connection() as conn:
+    with closing(get_db_connection()) as conn, conn:
         conn.execute(
             """
             INSERT INTO tasks (task_id, prompt, status)
@@ -187,7 +188,7 @@ def update_task(
     """Persist task state, result/error, execution evidence, and lifecycle event."""
     terminal = status in {"completed", "failed", "cancelled"}
     execution_json = _serialize_execution(execution)
-    with get_db_connection() as conn:
+    with closing(get_db_connection()) as conn, conn:
         conn.execute(
             """
             UPDATE tasks
@@ -228,7 +229,7 @@ def update_task(
 
 def get_task(task_id: str) -> dict | None:
     """Retrieve one durable task by ID."""
-    with get_db_connection() as conn:
+    with closing(get_db_connection()) as conn, conn:
         row = conn.execute(
             "SELECT * FROM tasks WHERE task_id = ?",
             (task_id,),
@@ -238,7 +239,7 @@ def get_task(task_id: str) -> dict | None:
 
 def get_latest_task(exclude_task_id: str | None = None) -> dict | None:
     """Retrieve the most recently updated task."""
-    with get_db_connection() as conn:
+    with closing(get_db_connection()) as conn, conn:
         row = conn.execute(
             """
             SELECT * FROM tasks
@@ -254,7 +255,7 @@ def get_latest_task(exclude_task_id: str | None = None) -> dict | None:
 def get_recent_tasks(limit: int = 20) -> list[dict]:
     """Retrieve recent durable tasks for future task-history tools."""
     limit = max(1, min(int(limit), 100))
-    with get_db_connection() as conn:
+    with closing(get_db_connection()) as conn, conn:
         rows = conn.execute(
             """
             SELECT * FROM tasks

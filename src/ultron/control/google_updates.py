@@ -1,6 +1,7 @@
 """Optional read-only Google updates. Remote text never enters the action planner."""
 from __future__ import annotations
 import asyncio
+from contextlib import ExitStack, closing
 import base64
 from datetime import datetime, timedelta, timezone
 import json
@@ -114,7 +115,12 @@ def credentials():
         def bounded_request(*args, **kwargs):
             kwargs.setdefault('timeout', 15)
             return request(*args, **kwargs)
-        connection_stage('token_refresh', lambda: creds.refresh(bounded_request))
+        try:
+            connection_stage('token_refresh', lambda: creds.refresh(bounded_request))
+        finally:
+            session = getattr(request, 'session', None)
+            if session is not None:
+                session.close()
         connection_stage('credential_save', lambda: vault().set_password(SERVICE, 'credentials', creds.to_json()))
     return creds
 
@@ -127,9 +133,18 @@ def google_clients():
     creds = credentials()
     def client(api, version):
         http = google_auth_httplib2.AuthorizedHttp(creds, http=httplib2.Http(timeout=15))
-        return connection_stage('client_build',
-                                lambda: build(api, version, http=http, cache_discovery=False))
-    return client('gmail', 'v1'), client('calendar', 'v3')
+        try:
+            return connection_stage('client_build',
+                                    lambda: build(api, version, http=http, cache_discovery=False))
+        except BaseException:
+            http.close()
+            raise
+    gmail = client('gmail', 'v1')
+    try:
+        return gmail, client('calendar', 'v3')
+    except BaseException:
+        gmail.close()
+        raise
 
 
 def connection_diagnostics():
@@ -148,12 +163,18 @@ def connection_diagnostics():
             timeMax=(now + timedelta(hours=24)).isoformat(), singleEvents=True,
             maxResults=1).execute(num_retries=0),
     }
-    for name, check in checks.items():
-        try:
-            check()
-            report[name] = {'status': 'ok'}
-        except Exception as error:
-            report[name] = {'status': 'failed', **failure_details(error)}
+    try:
+        for name, check in checks.items():
+            try:
+                check()
+                report[name] = {'status': 'ok'}
+            except Exception as error:
+                report[name] = {'status': 'failed', **failure_details(error)}
+    finally:
+        for service in (gmail, calendar):
+            close = getattr(service, 'close', None)
+            if close:
+                close()
     return report
 
 
@@ -283,11 +304,17 @@ class GoogleUpdates:
         return ' '.join(parts)
 
     def sync(self, gmail=None, calendar=None):
-        if gmail is None:
-            gmail, calendar = google_clients()
+        with ExitStack() as owned:
+            if gmail is None:
+                gmail, calendar = google_clients()
+                for service in (gmail, calendar):
+                    owned.callback(service.close)
+            return self._sync(gmail, calendar)
+
+    def _sync(self, gmail, calendar):
         self.root.mkdir(parents=True, exist_ok=True)
         errors = []
-        with sqlite3.connect(self.root / 'updates.sqlite3') as db:
+        with closing(sqlite3.connect(self.root / 'updates.sqlite3')) as db, db:
             db.execute('CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, subject TEXT, reason TEXT)')
             db.execute('CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT)')
             def state(key, default=''):

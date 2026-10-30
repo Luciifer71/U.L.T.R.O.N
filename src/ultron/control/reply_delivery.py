@@ -89,6 +89,9 @@ class IntentInbox:
         reads = read_request_kinds(prompt) if not stop else None
         kind = '+'.join(reads) if reads else self.classify(prompt)
         if stop or kind:
+            player = getattr(self.brain, 'youtube_playback', None)
+            if player is not None:
+                player.clear_choice()
             if stop:
                 await self.nc.publish('ultron.voice.cancel', b'{}')
                 reply = 'Speech cancelled. Running actions were not cancelled.'
@@ -98,9 +101,9 @@ class IntentInbox:
                 reply = self.brain.google_updates.spoken_reply(kind)
             speech = reply
             if reads == ('capabilities',):
-                speech = ('I can open apps and files, search the web, and report system stats. '
-                          'With Google connected, I can read email and calendar updates. '
-                          'The full capability list is in the terminal.')
+                speech = ('I can open apps and files, search websites, report system stats, '
+                          'play songs on YouTube and open Spotify searches. '
+                          'Google email and calendar updates need setup. The full capability list is in the terminal.')
             payload = {'text': reply, 'speech': '' if stop else speech,
                        'silent': stop, 'requestId': data.get('requestId'),
                        'statusKey': 'google-' + kind if kind else None,

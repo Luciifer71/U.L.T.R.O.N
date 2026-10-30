@@ -5,23 +5,50 @@ from dataclasses import dataclass, field
 import os
 from pathlib import Path
 import re
+import time
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from ultron.control.request_planning import REQUEST_PREFIX
 
 
+def clean_music_query(query):
+    query = re.sub(r"^(?:me\s+)?(?:the\s+)?song\s+", "", query.strip(), flags=re.I)
+    query = re.sub(r"^me\s+(?:the\s+)?", "", query, flags=re.I)
+    query = re.sub(r"\s+song\s+by\s+", " by ", query, flags=re.I)
+    query = re.sub(r"\s+for me$", "", query, flags=re.I)
+    # A narrow, known artist transcription alias, never fuzzy matching titles.
+    query = re.sub(r"\bby the weekend$", "by The Weeknd", query, flags=re.I)
+    return query.strip()
+
+
 def playback_plan(prompt):
     if not isinstance(prompt, str) or len(prompt) > 1000:
         return None
-    match = re.fullmatch(REQUEST_PREFIX + r"play\s+(.+?)\s+on\s+youtube(?:\s+for me)?[.!?]*",
-                         prompt.strip(), re.I)
+    text = prompt.strip().rstrip('.!?')
+    match = re.fullmatch(REQUEST_PREFIX + r"play\s+(.+)", text, re.I)
+    if not match:
+        match = re.fullmatch(r"(?:I am |I'm )?looking for (.+?) and play it for me on youtube", text, re.I)
     if not match:
         return None
-    query = match.group(1).strip()
-    if (len(query) > 200 or not words(query) or
-            re.search(r'\b(?:then|unless|if|instead)\b|[\r\n]', query, re.I)):
+    query = match.group(1)
+    service = 'youtube'
+    suffix = re.search(r"\s+on\s+(youtube|spotify)(?:\s+for me)?$", query, re.I)
+    if suffix:
+        service = suffix.group(1).lower()
+        query = query[:suffix.start()]
+    # Keep local media, compound actions and unsupported services on their own routes.
+    if re.search(r"\b(?:from|folder|downloads|desktop|documents|movie|video|game|then|unless|if|instead|on|result|first|second)\b|[\r\n/\\:]|\.(?:mp3|mp4|wav|mkv)\b", query, re.I):
         return None
-    return [{'function': {'name': 'play_youtube', 'arguments': {'query': query}}}]
+    query = clean_music_query(query)
+    if (len(query) > 200 or not words(query) or query.casefold() in {'it', 'that', 'this', 'music', 'a song', 'song', 'on youtube'}
+            or re.search(r"\b(?:and|also) (?:open|play|delete|run|send|search|launch)\b", query, re.I)):
+        return None
+    name = 'open_spotify_search' if service == 'spotify' else 'play_youtube'
+    return [{'function': {'name': name, 'arguments': {'query': query}}}]
+
+
+def first_result_request(prompt):
+    return bool(re.fullmatch(REQUEST_PREFIX + r"play (?:the )?first result(?: that you get)?[.!?]*", prompt.strip(), re.I))
 
 
 def words(text):
@@ -39,6 +66,7 @@ def watch_url(url):
 
 def choose_video(query, candidates):
     """Require all requested title/artist words; never treat page text as instructions."""
+    query = clean_music_query(query)
     required = words(query) - {'by', 'the', 'song', 'music'}
     if not required:
         raise RuntimeError('Please specify a song title and artist.')
@@ -113,6 +141,7 @@ class YouTubePlayback:
         self.driver = None
         self.page = None
         self.lock = asyncio.Lock()
+        self.choice = None
 
     async def _page(self):
         if self.page is not None and not self.page.is_closed():
@@ -139,20 +168,46 @@ class YouTubePlayback:
             await self.close()
             raise RuntimeError('Could not open the selected Ultron browser with sandboxing enabled. Check browser installation and policies.') from None
 
-    async def play(self, query):
+    def clear_choice(self):
+        self.choice = None
+
+    def take_first_choice(self):
+        choice, self.choice = self.choice, None
+        if choice and time.monotonic() < choice['expires']:
+            return choice
+        return None
+
+    async def play(self, query, *, selected=None):
         async with self.lock:
             try:
                 async with asyncio.timeout(60):
                     page = await self._page()
-                    await page.goto('https://www.youtube.com/results?' + urlencode({'search_query': query}),
-                                    wait_until='domcontentloaded', timeout=20000)
-                    if urlparse(page.url).hostname not in {'www.youtube.com', 'youtube.com'}:
-                        raise RuntimeError('YouTube requires consent or sign-in in the Ultron browser window.')
-                    try:
-                        await page.locator('ytd-video-renderer a#video-title').first.wait_for()
-                    except Exception:
-                        raise RuntimeError('YouTube results are unavailable. Check consent, sign-in, network, or page changes.') from None
-                    target, title = choose_video(query, await page.evaluate(RESULTS_JS))
+                    self.choice = None
+                    if selected is not None:
+                        # Selection is a previously observed URL, never model-generated.
+                        target, title = selected['url'], selected['title']
+                        if not watch_url(target):
+                            raise RuntimeError('The saved YouTube result is no longer valid.')
+                    else:
+                        await page.goto('https://www.youtube.com/results?' + urlencode({'search_query': query}),
+                                        wait_until='domcontentloaded', timeout=20000)
+                        if urlparse(page.url).hostname not in {'www.youtube.com', 'youtube.com'}:
+                            raise RuntimeError('YouTube requires consent or sign-in in the Ultron browser window.')
+                        try:
+                            await page.locator('ytd-video-renderer a#video-title').first.wait_for()
+                        except Exception:
+                            raise RuntimeError('YouTube results are unavailable. Check consent, sign-in, network, or page changes.') from None
+                        candidates = await page.evaluate(RESULTS_JS)
+                        try:
+                            target, title = choose_video(query, candidates)
+                        except RuntimeError as error:
+                            first = next((row for row in candidates[:20] if watch_url(str(row.get('url', '')))), None)
+                            if first:
+                                title = re.sub(r'[\x00-\x1f\x7f]', ' ', str(first.get('title', '')))[:160]
+                                self.choice = dict(query=query, url=watch_url(first['url']), title=title,
+                                                   expires=time.monotonic() + 120)
+                                raise RuntimeError(f'{error} First result: {title}. Say "play the first result" to select it, or repeat the song and artist.') from None
+                            raise
                     await page.goto(target, wait_until='domcontentloaded', timeout=20000)
                     await page.locator('video').first.wait_for()
                     # Attempt normal playback, without changing mute or volume.

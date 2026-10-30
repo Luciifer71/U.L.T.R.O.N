@@ -67,7 +67,8 @@ from ultron.control.google_updates import GoogleUpdates, route_request as google
 from ultron.control.request_planning import explicit_launch_plan, explicit_resource_plan, PlanClarification, validate_application_targets
 from ultron.resources.config import create_service as create_resource_service
 from ultron.resources.file_workflow import prepare_file, open_prepared_file, FileSelectionRequired, selection_number, MEDIA
-from ultron.control.youtube_playback import playback_plan, YouTubePlayback
+from ultron.control.spotify import open_spotify_search
+from ultron.control.youtube_playback import playback_plan, YouTubePlayback, first_result_request
 from ultron.control.request_planning import explicit_file_plan, explicit_sequence_plan
 from ultron.resources.catalog import ResourceError, AmbiguousResource, AccessDenied
 from ultron.resources.native_apps import ExactApplicationDiscovery
@@ -122,12 +123,12 @@ except ImportError:
 
 
 try:
-
-    from duckduckgo_search import DDGS
-
+    from ddgs import DDGS
 except ImportError:
-
-    DDGS = None
+    try:
+        from duckduckgo_search import DDGS  # Compatibility for existing installations.
+    except ImportError:
+        DDGS = None
 
 
 
@@ -1462,6 +1463,8 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
 
     @staticmethod
     def _friendly_action_name(action_name: str) -> str:
+        if action_name.startswith("open_spotify_search:"):
+            return "Spotify search (playback not verified)"
         if action_name.startswith("operate_resource:"):
             return action_name.split(":", 2)[-1]
         if action_name.startswith("open_application:"):
@@ -1510,6 +1513,23 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
         prompt: str,
         task_id: str,
     ) -> tuple[str, list]:
+        player = getattr(self, 'youtube_playback', None)
+        if re.match(r"(?:please\s+)?play (?:the )?first result\b", prompt.strip(), re.I) and not first_result_request(prompt):
+            self.last_plan_error = None
+            return 'Please say "play the first result" to select the offered video, or give a new song and artist.', []
+        if first_result_request(prompt):
+            self._file_selection = None
+            self.last_plan_error = None
+            choice = player.take_first_choice() if player else None
+            if not choice:
+                return 'There is no current YouTube result choice. Repeat the song and artist.', []
+            create_task(task_id, prompt, status='thinking')
+            async def play_choice():
+                return await player.play(choice['query'], selected=choice)
+            return 'Selected YouTube result staged; playback not yet verified.', [PendingAction(
+                name='play_youtube:' + choice['title'], execute=play_choice, completion='wait')]
+        if player:
+            player.clear_choice()  # A choice belongs only to the next request.
         previous = list(self.history)
         selection = getattr(self, '_file_selection', None)
         self._file_selection = None  # A choice is single-use and scoped to the next request.
@@ -1992,6 +2012,13 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
                             "staged through the capability broker."
                         )
 
+                elif func_name == "open_spotify_search":
+                    async def spotify_search(query=args['query']):
+                        return await open_spotify_search(query)
+                    pending_actions.append(PendingAction(
+                        name="open_spotify_search:" + args['query'], execute=spotify_search, completion="wait"))
+                    res = "Spotify search staged; automatic Spotify playback is not connected."
+
                 elif func_name == "play_youtube":
                     if not hasattr(self, 'youtube_playback'):
                         self.youtube_playback = YouTubePlayback()
@@ -2434,7 +2461,7 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
                     if DDGS is None:
                         res = (
                             "Search module unavailable. Install using "
-                            "'pip install duckduckgo_search'."
+                            "'pip install -r requirements/search.txt'."
                         )
                     else:
                         query = str(
@@ -2714,6 +2741,8 @@ async def main():
                 # conversational paths.
                 local_reply = brain._compose_local_reply(prompt)
                 if local_reply is not None:
+                    if hasattr(brain, 'youtube_playback'):
+                        brain.youtube_playback.clear_choice()
                     await brain._publish_visual("thinking", task_id=task_id)
                     reply_text = local_reply
                     pending_actions = []
