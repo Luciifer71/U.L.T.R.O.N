@@ -1525,8 +1525,16 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
             player = getattr(self, 'youtube_playback', None)
             if player:
                 player.clear_choice()
+            if spotify_command['action'] == 'clarify':
+                return 'Please give the song title and artist, or say "resume Spotify" to continue its current track.', []
+            open_first = spotify_command.pop('open_first', False)
             create_task(task_id, prompt, status='thinking')
             async def spotify_action():
+                if open_first:
+                    opened = await self.capabilities.open_resource('Spotify', task_id=task_id, verify=True)
+                    if getattr(opened, 'success', False) is not True:
+                        return opened
+                    await asyncio.sleep(1)  # Allow the app to register with Spotify Connect.
                 return await asyncio.to_thread(SpotifyClient().perform, **spotify_command)
             return 'Spotify request staged; outcome not yet confirmed.', [PendingAction(
                 name='spotify:' + spotify_command['action'], execute=spotify_action, completion='wait')]

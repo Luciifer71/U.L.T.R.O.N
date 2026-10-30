@@ -101,6 +101,24 @@ def check_google():
         return {'status': 'diagnostic_failed'}
 
 
+def check_spotify():
+    """Bounded, read-only playback-device check; never includes token or track data."""
+    from ultron.control.spotify_api import configured
+    if not configured():
+        return {'status': 'not_configured'}
+    try:
+        result = subprocess.run([sys.executable, str(ROOT / 'run_ultron.py'), 'spotify', 'doctor'],
+                                cwd=ROOT, capture_output=True, text=True, timeout=45)
+        report = json.loads(result.stdout)
+        if not isinstance(report, dict) or 'connection' not in report:
+            return {'status': 'diagnostic_failed'}
+        return report
+    except subprocess.TimeoutExpired:
+        return {'status': 'timed_out', 'scope': 'Spotify check exceeded 45 seconds; no authorization conclusion.'}
+    except (OSError, ValueError):
+        return {'status': 'diagnostic_failed', 'advice': 'Run run_ultron.py spotify doctor for the local error.'}
+
+
 def build_report(model):
     packages = {}
     for name in ("psutil", "ollama", "nats-py", "faster-whisper", "ctranslate2", "sounddevice", "edge-tts", "pytest",
@@ -123,6 +141,7 @@ def build_report(model):
         "telemetry": telemetry,
         "process_memory": collect_process_memory(),
         "google": check_google(),
+        "spotify": check_spotify(),
         "services": {
             "ollama": check_ollama(os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434"), model),
             "nats": check_nats(os.getenv("NATS_URL", "nats://127.0.0.1:4222")),

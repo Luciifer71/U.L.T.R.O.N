@@ -109,11 +109,15 @@ def main():
             else:
                 state = client.state()
                 print(json.dumps({'connection': 'ok', 'available_devices': len(devices),
+                    'active_devices': sum(bool(d.get('is_active')) for d in devices),
                     'playback_active': bool(state.get('is_playing')),
                     'scope': 'Read-only checks; no track, tokens or account identifiers included.'}, indent=2))
         return 0
     except SpotifyError as error:
-        print(str(error))
+        if args.command == 'doctor':
+            print(json.dumps({'connection': 'failed', 'advice': str(error)}))
+        else:
+            print(str(error))
         return 1
     except (KeyboardInterrupt, EOFError):
         print('Spotify setup cancelled.')

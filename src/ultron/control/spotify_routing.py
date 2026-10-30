@@ -7,6 +7,19 @@ from ultron.control.youtube_playback import playback_plan
 def spotify_request(prompt, *, connected):
     if not connected or not isinstance(prompt, str) or len(prompt) > 1000:
         return None
+    text = prompt.strip().rstrip('.!?')
+    # References are not titles: do not search Spotify for a song called "now".
+    generic = r'play (?:a song|(?:the )?(?:song|music|it|that|this))(?: now)?(?: on spotify)?(?: for me)?'
+    if re.fullmatch(REQUEST_PREFIX + r'(?:open spotify and )?' + generic, text, re.I):
+        return {'action': 'clarify'}
+    # A bounded compound request: opening Spotify is explicit, as is playback.
+    compound = re.fullmatch(REQUEST_PREFIX + r'open spotify and (?:search for (.+?) and play it|play (.+))', text, re.I)
+    if compound:
+        query = compound[1] or compound[2]
+        plan = playback_plan('play ' + query + ' on Spotify')
+        if plan:
+            return {'action': 'play', 'query': plan[0]['function']['arguments']['query'], 'open_first': True}
+        return {'action': 'clarify'}
     plan = playback_plan(prompt)
     if plan:
         if re.search(r'\bon youtube(?:\s+for me)?[.!?]*$', prompt.strip(), re.I):
@@ -24,7 +37,7 @@ def spotify_request(prompt, *, connected):
     for phrase, action in controls.items():
         if re.fullmatch(REQUEST_PREFIX + re.escape(phrase), text, re.I):
             return {'action': action}
-    volume = re.fullmatch(REQUEST_PREFIX + r'(?:set )?spotify volume (?:to )?(\d{1,3})(?:\s*(?:percent|%))?', text, re.I)
+    volume = re.fullmatch(REQUEST_PREFIX + r'(?:set )?(?:spotify volume|(?:the )?volume (?:of|on|for) spotify) (?:to )?(\d{1,3})(?:\s*(?:percent|%))?(?: for me)?', text, re.I)
     if volume:
         return {'action': 'volume', 'volume': int(volume[1])}
     queued = re.fullmatch(REQUEST_PREFIX + r'queue (.+?)(?: on spotify)?', prompt.strip().rstrip('.!?'), re.I)

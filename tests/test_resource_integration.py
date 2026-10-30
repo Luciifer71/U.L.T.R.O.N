@@ -664,3 +664,30 @@ def test_connected_spotify_stages_then_reports_observed_result(tmp_path, monkeyp
         _, youtube = await brain.process_intent('Play Sunflower by Post Malone on YouTube', 'youtube-song')
         assert youtube[0].name.startswith('play_youtube:')
     asyncio.run(run())
+
+
+def test_spotify_compound_opens_app_before_playback_and_generic_request_clarifies(tmp_path, monkeypatch):
+    from ultron.control.youtube_playback import PlaybackResult
+    brain = make_brain(tmp_path, monkeypatch, [])
+    module = __import__(brain.__class__.__module__, fromlist=['spotify_configured'])
+    monkeypatch.setattr(module, 'spotify_configured', lambda: True)
+    calls = []
+    async def open_app(name, **kw):
+        calls.append(('open', name))
+        return SimpleNamespace(success=True)
+    def perform(**kw):
+        calls.append(('play', kw['query']))
+        return PlaybackResult(True, message='Spotify accepted playback.', data={'state':'dispatched', 'verification':'not_observable'})
+    brain.capabilities = SimpleNamespace(open_resource=open_app)
+    monkeypatch.setattr(module, 'SpotifyClient', lambda: SimpleNamespace(perform=perform))
+    async def forbidden(**kw): pytest.fail('Music command reached model')
+    brain.ollama.chat = forbidden
+    async def run():
+        reply, actions = await brain.process_intent('Can you play the song now?', 'generic')
+        assert not actions and not calls and 'title and artist' in reply
+        _, actions = await brain.process_intent('Open Spotify and search for save your tears by weekend and play it.', 'compound')
+        assert not calls
+        success, error = await brain._run_pending_actions(actions, 'compound')
+        assert success and error is None
+        assert calls == [('open', 'Spotify'), ('play', 'save your tears by The Weeknd')]
+    asyncio.run(run())
