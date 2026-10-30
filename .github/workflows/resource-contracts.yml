@@ -77,3 +77,39 @@ jobs:
         run: |
           ultron --help
           ultron benchmark --help
+
+  nats-migration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Create a stopped container with the former config mount
+        run: |
+          cp docker-compose.yml /tmp/ultron-compose-current.yml
+          cp config/nats-server.conf nats-server.conf
+          sed -i 's|./config/nats-server.conf|./nats-server.conf|' docker-compose.yml
+          mkdir -p nats_data
+          echo preserved > nats_data/migration-marker
+          docker compose up -d nats
+          docker compose stop nats
+          cp /tmp/ultron-compose-current.yml docker-compose.yml
+          rm nats-server.conf
+      - name: Launcher reconciles the container and preserves bind data
+        env:
+          PYTHONPATH: src
+        run: |
+          python - <<'PY'
+          import shutil
+          from pathlib import Path
+          from unittest.mock import patch
+          from ultron.cli import start_ultron
+          with patch.object(start_ultron, 'find_executable', return_value=shutil.which('docker')):
+              start_ultron.ensure_nats('nats://127.0.0.1:4222')
+          assert Path('nats_data/migration-marker').read_text().strip() == 'preserved'
+          PY
+          docker inspect nats --format '{{json .Mounts}}' | python -c "import json,sys; mounts=json.load(sys.stdin); assert any(m['Source'].endswith('/config/nats-server.conf') and m['Destination']=='/etc/nats/nats-server.conf' for m in mounts)"
+      - name: Stop CI container
+        if: always()
+        run: docker compose down
