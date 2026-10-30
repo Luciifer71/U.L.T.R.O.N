@@ -196,3 +196,43 @@ def test_connect_binds_loopback_exchanges_pkce_and_stores_no_token_file(monkeypa
     assert api.configured()
     for file in api.private_dir().iterdir():
         assert 'SECRET' not in file.read_text()
+
+
+@pytest.mark.parametrize('prompt,expected', [
+    ('Can you set the volume of Spotify to 40%?', {'action': 'volume', 'volume': 40}),
+    ('Set the volume on Spotify to 40 percent', {'action': 'volume', 'volume': 40}),
+    ('Open Spotify and search for save your tears by weekend and play it.', {'action': 'play', 'query': 'save your tears by The Weeknd', 'open_first': True}),
+    ('Can you open Spotify and play Sunflower by Post Malone?', {'action': 'play', 'query': 'Sunflower by Post Malone', 'open_first': True}),
+    ('Can you play the song now?', {'action': 'clarify'}),
+    ('Can you open Spotify and play a song?', {'action': 'clarify'}),
+    ('Play it now', {'action': 'clarify'}),
+    ('Resumes 45.', None),
+    ('Do not open Spotify and play Sunflower', None),
+    ('If I open Spotify and play Sunflower', None),
+    ('Set the volume of Spotify to 40% and delete files', None),
+])
+def test_live_session_phrasings(prompt, expected):
+    assert spotify_request(prompt, connected=True) == expected
+
+
+def test_device_error_distinguishes_empty_from_ambiguous(monkeypatch):
+    client, _ = fake_client(monkeypatch, devices=[])
+    with pytest.raises(api.SpotifyError, match='no available playback devices'): client.device()
+    client, _ = fake_client(monkeypatch, devices=[dict(DEVICE, is_active=False), dict(DEVICE, id='phone', is_active=False)])
+    with pytest.raises(api.SpotifyError, match='Several Spotify devices'): client.device()
+
+
+def test_support_spotify_check_is_bounded_and_omits_raw_error_output(monkeypatch):
+    from ultron.cli import ultron_diagnostics as diagnostics
+    monkeypatch.setattr(api, 'configured', lambda: True)
+    calls = []
+    def run(*a, **kw):
+        calls.append(kw)
+        return SimpleNamespace(stdout='TOKEN_DO_NOT_COPY', returncode=1)
+    monkeypatch.setattr(diagnostics.subprocess, 'run', run)
+    report = diagnostics.check_spotify()
+    assert report['status'] == 'diagnostic_failed'
+    assert 'TOKEN_DO_NOT_COPY' not in json.dumps(report)
+    assert calls[0]['timeout'] == 45
+    monkeypatch.setattr(diagnostics.subprocess, 'run', lambda *a, **kw: SimpleNamespace(stdout='{"connection":"ok","available_devices":0}'))
+    assert diagnostics.check_spotify()['available_devices'] == 0

@@ -58,3 +58,7 @@ If that device is unavailable, Ultron asks you to open/select it instead of swit
 This removes local credentials and returns unnamed-provider music requests to YouTube. You can also revoke app access in Spotify account settings. Access tokens refresh automatically; revoked authorization requires reconnecting. Do not reconnect repeatedly for rate-limit errors—wait and retry.
 
 References: [PKCE](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow), [redirect URIs](https://developer.spotify.com/documentation/web-api/concepts/redirect_uri), [playback](https://developer.spotify.com/documentation/web-api/reference/start-a-users-playback).
+
+Natural variants include “Can you set the volume of Spotify to 40%?” and “Open Spotify and search for Save Your Tears by The Weeknd and play it.” The latter opens the app before requesting playback; Spotify Connect still needs to report an available device. “Play the song now” asks for a title instead of searching for a track called “now.” Use “resume Spotify” for the current Spotify track.
+
+Support ZIPs include a bounded read-only Spotify doctor result (connection status, available/active device counts and whether playback is active). No Spotify device names, IDs, track names or credentials are included in that diagnostic.

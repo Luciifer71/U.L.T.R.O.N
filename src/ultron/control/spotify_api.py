@@ -163,6 +163,8 @@ class SpotifyClient:
             preferred = json.loads(path.read_text())['id'] if path.exists() else None
         except (ValueError, KeyError, OSError):
             raise SpotifyError('Saved Spotify device preference is unreadable. Select the device again.') from None
+        if not devices:
+            raise SpotifyError('Spotify reports no available playback devices. Open Spotify on this laptop using the authorized account and start a track once, then repeat the song request.')
         if preferred:
             chosen = [d for d in devices if d['id'] == preferred]
         else:
@@ -170,7 +172,9 @@ class SpotifyClient:
             if not chosen and len(devices) == 1:
                 chosen = devices
         if len(chosen) != 1:
-            raise SpotifyError('Open Spotify on the intended device and start a track once, or select it with the Spotify device command.')
+            if preferred:
+                raise SpotifyError('Your selected Spotify device is offline. Open it, or select an available device with the Spotify device command.')
+            raise SpotifyError('Several Spotify devices are available but none is uniquely active. Start playback on the intended device or select it with the Spotify device command.')
         return chosen[0]
 
     def state(self):
