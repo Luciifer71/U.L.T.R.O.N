@@ -61,8 +61,8 @@ From the repository root, after setup:
 
 The launcher prepares Docker/NATS and Ollama, warms the model and opens the action
 daemon, brain and listener in separate terminals. Wait for `STANDBY MODE` before
-saying “Hey Ultron”. `scripts/windows/start-qwen3-trial.cmd` remains the explicit Qwen3 profile
-(thinking off, context 4096, temperature 0, seed 42); it does not rewrite `.env`.
+saying “Hey Ultron”. The launcher defaults to Qwen3:8b. Use `.\start-ultron.cmd --menu` to select a model or `.\start-ultron.cmd --qwen25` for Qwen2.5:7b. The legacy Qwen3 launcher remains available as a compatibility wrapper.
+The Qwen3 profile uses thinking off, context 4096, temperature 0 and seed 42 without rewriting `.env`.
 
 Try “Open Calculator and File Explorer”, “What is my uptime?” or “What can you do?”
 See [local file workflows](local-file-workflow.md) for file requests and
@@ -71,13 +71,11 @@ See [local file workflows](local-file-workflow.md) for file requests and
 The visual frontend starts separately:
 
 ```powershell
-npm ci
-cd ultron-ui
-npm ci
-npm run dev
+npm ci --prefix .\ultron-ui
+npm run dev --prefix .\ultron-ui
 ```
 
-The root install supplies the NATS browser client. Open the URL printed by Vite
+The frontend package supplies the NATS browser client. Open the URL printed by Vite
 (usually `http://localhost:5173`). See the [UI guide](../ultron-ui/README.md).
 
 To run components manually, start `docker compose up -d`, ensure Ollama is running,
