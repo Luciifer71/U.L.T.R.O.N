@@ -1,12 +1,4 @@
 @echo off
-setlocal
-rem Stop existing ULTRON components before using this separate trial profile.
-set "LLM_MODEL=qwen3:8b"
-set "LLM_THINKING=off"
-set "LLM_CONTEXT=4096"
-set "LLM_TEMPERATURE=0"
-set "LLM_SEED=42"
-echo Starting Qwen3 trial: thinking off, context 4096, temperature 0, seed 42.
-echo This does not edit .env. Stop all components before returning to the normal launcher.
-call "%~dp0..\..\start-ultron.cmd" %*
+rem Compatibility wrapper. Use start-ultron.cmd for normal startup.
+call "%~dp0..\..\start-ultron.cmd" --qwen3 %*
 exit /b %errorlevel%
