@@ -7,7 +7,8 @@ from ultron.control import spotify_api as api
 
 
 def test_playback_http_200_non_json_body_is_accepted(monkeypatch):
-    import requests
+    import sys
+    from types import SimpleNamespace
 
     class Response:
         status_code = 200
@@ -32,7 +33,11 @@ def test_playback_http_200_non_json_body_is_accepted(monkeypatch):
         def request(self, *args, **kwargs):
             return Response()
 
-    monkeypatch.setattr(requests, "Session", Session)
+    monkeypatch.setitem(
+        sys.modules,
+        "requests",
+        SimpleNamespace(Session=Session, RequestException=OSError),
+    )
 
     status, body = api._request(
         "PUT",
