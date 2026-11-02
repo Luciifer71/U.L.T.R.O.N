@@ -587,6 +587,10 @@ def test_youtube_playback_bypasses_model_and_uses_verified_ledger(tmp_path, monk
     ('Play Sunflower by Post Malone on Spotify', 'open_spotify_search:Sunflower by Post Malone'),
 ])
 def test_music_routes_without_model_and_only_stages(tmp_path, monkeypatch, prompt, name):
+    monkeypatch.setattr(
+        'ultron.agents.brain_agent.spotify_configured',
+        lambda: False,
+    )
     brain = make_brain(tmp_path, monkeypatch, [])
     async def forbidden(**kw):
         pytest.fail('Named music shortcut should not call the model')
