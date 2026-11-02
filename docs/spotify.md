@@ -19,11 +19,13 @@ From the repository root, with Ultron stopped:
 
 Enter the app's **Client ID** at the prompt and approve access in the browser within two minutes. Never upload Client Secrets or authorization tokens. Credentials are stored in Windows Credential Manager, outside the repository and support bundles. Only a nonsecret enabled marker and device preference are stored under `%LOCALAPPDATA%\Ultron\spotify`.
 
-Open Spotify on your laptop and start a track once so it is available to Spotify Connect. Then run:
+On Windows, a named-song playback request can launch Spotify Desktop automatically when no playback device is available. U.L.T.R.O.N. then waits up to 15 seconds for Spotify Connect device discovery. The Spotify application must be installed and authorized with the connected Premium account.
+
+Run the read-only connection diagnostic:
 
 ```powershell
 .\.venv\Scripts\python.exe .\run_ultron.py spotify doctor
-.\scripts/windows/start-qwen3-trial.cmd
+.\start-ultron.cmd
 ```
 
 The doctor makes read-only checks; an authenticated account can still have zero available devices. A Premium account and permitted app user are required. Development-mode limits and Spotify rate limits apply.
@@ -39,6 +41,14 @@ The doctor makes read-only checks; an authenticated account can still have zero 
 - “Play Sunflower by Post Malone on YouTube.”
 
 Playback, pause and resume are reported as verified only when Spotify returns the requested state for the selected device. Queue, skip and volume replies acknowledge the request without claiming an observed result. Ambiguous song matches require a more specific title/artist; no arbitrary first result is chosen.
+
+## Playback reliability
+
+Named tracks are started using their album context and the selected track offset. This addresses a Spotify Desktop case where direct track playback returned an HTTP acknowledgement without starting music.
+
+Playback, pause and resume require observed Spotify playback state before they are reported as verified. Next, previous, queue and volume commands acknowledge successful API requests without claiming that the resulting state was independently observed.
+
+Spotify Connect device availability can fluctuate during startup. If automatic discovery fails, check `spotify doctor` and `spotify devices`. An HTTP acknowledgement alone does not prove that playback started.
 
 ## Device preference and disconnect
 

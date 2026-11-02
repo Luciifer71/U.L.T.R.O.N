@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import re
 import secrets
+import subprocess
+import sys
 import threading
 import time
 from urllib.parse import urlencode
@@ -67,6 +69,16 @@ def _request(method, url, *, token=None, data=None, body=None):
                     return status, {}
                 if status >= 400 or 300 <= status < 400:
                     return status, {}  # Never expose server bodies, tokens or request URLs in errors.
+                if (
+                    method in {'PUT', 'POST'}
+                    and url.startswith('https://api.spotify.com/v1/me/player')
+                    and status in {200, 201, 202, 204}
+                ):
+                    # Playback commands acknowledge receipt; their response
+                    # bodies are not used to establish execution success.
+                    return status, {}
+                if not response.content or not response.content.strip():
+                    return status, {}
                 return status, response.json()
     except (requests.RequestException, ValueError):
         raise SpotifyError('Spotify could not be reached or returned an invalid response. Check the connection.') from None
@@ -177,6 +189,45 @@ class SpotifyClient:
             raise SpotifyError('Several Spotify devices are available but none is uniquely active. Start playback on the intended device or select it with the Spotify device command.')
         return chosen[0]
 
+    def device_for_playback(self):
+        try:
+            return self.device()
+        except SpotifyError as error:
+            if 'no available playback devices' not in str(error):
+                raise
+
+        if sys.platform != 'win32':
+            raise SpotifyError(
+                'Automatic Spotify startup currently supports Windows only.'
+            )
+
+        try:
+            subprocess.Popen(
+                [
+                    'explorer.exe',
+                    r'shell:AppsFolder\SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify',
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError:
+            raise SpotifyError(
+                'Could not launch Spotify Desktop automatically.'
+            ) from None
+
+        for _ in range(15):
+            self.sleep(1)
+            try:
+                return self.device()
+            except SpotifyError as error:
+                if 'no available playback devices' not in str(error):
+                    raise
+
+        raise SpotifyError(
+            'Spotify Desktop was launched, but no playback device '
+            'became available within 15 seconds.'
+        )
+
     def state(self):
         return self.api('GET', '/me/player')
 
@@ -234,7 +285,11 @@ class SpotifyClient:
                 raise SpotifyError('Please specify a song title and artist.')
             if action == 'volume' and (type(volume) is not int or not 0 <= volume <= 100):
                 raise SpotifyError('Spotify volume must be between 0 and 100.')
-            device = self.device()
+            device = (
+                self.device_for_playback()
+                if action == 'play'
+                else self.device()
+            )
             params = {'device_id': device['id']}
             uri = None
             if action in {'play', 'queue'}:
@@ -242,7 +297,15 @@ class SpotifyClient:
                 if action == 'queue':
                     self.api('POST', '/me/player/queue?' + urlencode({**params, 'uri': uri}))
                     return result('Spotify accepted the queue request for ' + label + '.')
-                self.api('PUT', '/me/player/play?' + urlencode(params), body={'uris': [uri]})
+                track_id = uri.rsplit(':', 1)[-1]
+                track = self.api('GET', '/tracks/' + track_id)
+                album_uri = (track.get('album') or {}).get('uri')
+                if not isinstance(album_uri, str) or not re.fullmatch(
+                    r'spotify:album:[A-Za-z0-9]{22}', album_uri
+                ):
+                    raise SpotifyError('Spotify did not provide a valid album context for this track.')
+                self.api('PUT', '/me/player/play?' + urlencode(params),
+                         body={'context_uri': album_uri, 'offset': {'uri': uri}})
             elif action in {'pause', 'resume'}:
                 self.api('PUT', '/me/player/' + ('pause' if action == 'pause' else 'play') + '?' + urlencode(params))
             elif action in {'next', 'previous'}:

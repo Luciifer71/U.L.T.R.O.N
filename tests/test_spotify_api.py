@@ -80,6 +80,7 @@ def fake_client(monkeypatch, *, state=None, rows=None, devices=None):
         calls.append((method, path, kw))
         if path == '/me/player/devices': return {'devices': [DEVICE] if devices is None else devices}
         if path.startswith('/search?'): return {'tracks': {'items': [ROW] if rows is None else rows}}
+        if path.startswith('/tracks/'): return {'album': {'uri': 'spotify:album:' + 'B' * 22}}
         if method == 'GET' and path == '/me/player':
             return state if state is not None else {'device': DEVICE, 'item': ROW, 'is_playing': True}
         return {}
@@ -92,7 +93,10 @@ def test_play_uses_track_id_and_verifies_actual_device_and_track(monkeypatch):
     result = client.perform('play', query='Sunflower by Post Malone')
     assert result.success and result.data['state'] == 'verified'
     sent = next(c for c in calls if c[0] == 'PUT')
-    assert sent[2]['body'] == {'uris': [URI]} and 'device_id=laptop' in sent[1]
+    assert sent[2]['body'] == {
+        'context_uri': 'spotify:album:' + 'B' * 22,
+        'offset': {'uri': URI},
+    } and 'device_id=laptop' in sent[1]
     assert 'Post Malone' in result.message
 
 
