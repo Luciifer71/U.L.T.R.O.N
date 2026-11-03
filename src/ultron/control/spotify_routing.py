@@ -31,8 +31,12 @@ def spotify_request(prompt, *, connected):
         'resume spotify': 'resume', 'resume the music': 'resume',
         'next song': 'next', 'next track': 'next', 'skip this song': 'next',
         'previous song': 'previous', 'previous track': 'previous',
+        'go to the previous track': 'previous',
+        'go to the previous song': 'previous',
         'what is playing on spotify': 'status', "what's playing on spotify": 'status',
         'what song is playing': 'status',
+        'tell me what spotify song is playing right now': 'status',
+        'what spotify song is playing right now': 'status',
     }
     for phrase, action in controls.items():
         if re.fullmatch(REQUEST_PREFIX + re.escape(phrase), text, re.I):

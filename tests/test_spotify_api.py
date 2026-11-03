@@ -240,3 +240,28 @@ def test_support_spotify_check_is_bounded_and_omits_raw_error_output(monkeypatch
     assert calls[0]['timeout'] == 45
     monkeypatch.setattr(diagnostics.subprocess, 'run', lambda *a, **kw: SimpleNamespace(stdout='{"connection":"ok","available_devices":0}'))
     assert diagnostics.check_spotify()['available_devices'] == 0
+
+
+def test_spotify_voice_intent_variants():
+    accepted = {
+        "Can you go to the previous track?": "previous",
+        "Can you go to the previous song?": "previous",
+        "Can you tell me what Spotify song is playing right now?": "status",
+        "What Spotify song is playing right now?": "status",
+    }
+
+    for prompt, expected in accepted.items():
+        assert spotify_request(prompt, connected=True) == {"action": expected}
+        assert spotify_request(prompt, connected=False) is None
+
+    rejected = [
+        "Don't go to the previous track.",
+        "Do not go to the previous track.",
+        "If I say go to the previous track.",
+        "Can you go to the previous track and delete a file?",
+        "Don't tell me what Spotify song is playing right now.",
+        "If I ask what Spotify song is playing right now.",
+    ]
+
+    for prompt in rejected:
+        assert spotify_request(prompt, connected=True) is None
