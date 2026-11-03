@@ -255,7 +255,7 @@ class SpotifyClient:
             if (not re.fullmatch(r'spotify:track:[A-Za-z0-9]{22}', uri) or row.get('is_playable') is False
                     or not wanted_title <= title_words
                     or not any(wanted_artist <= words(name) for name in names)
-                    or (title_words & {'remix', 'live', 'karaoke', 'cover', 'slowed'}) - wanted_title):
+                    or (title_words & {'remix', 'live', 'livestream', 'karaoke', 'cover', 'slowed'}) - wanted_title):
                 continue
             matches.append((title_words == wanted_title, row))
         if not matches:

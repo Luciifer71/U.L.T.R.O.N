@@ -265,3 +265,30 @@ def test_spotify_voice_intent_variants():
 
     for prompt in rejected:
         assert spotify_request(prompt, connected=True) is None
+
+
+def test_sunflower_original_is_preferred_over_livestream(monkeypatch):
+    original = {
+        **ROW,
+        "name": "Sunflower - Spider-Man: Into the Spider-Verse",
+        "artists": [{"name": "Post Malone"}, {"name": "Swae Lee"}],
+    }
+    livestream = {
+        **ROW,
+        "uri": "spotify:track:" + "C" * 22,
+        "name": "Sunflower - F-1Trillion Album Livestream",
+        "artists": [{"name": "Post Malone"}, {"name": "Swae Lee"}],
+    }
+
+    client, _ = fake_client(
+        monkeypatch,
+        rows=[original, livestream],
+    )
+
+    uri, _ = client.find_track("Sunflower by Post Malone")
+    assert uri == original["uri"]
+
+    uri, _ = client.find_track(
+        "Sunflower - F-1Trillion Album Livestream by Post Malone"
+    )
+    assert uri == livestream["uri"]
