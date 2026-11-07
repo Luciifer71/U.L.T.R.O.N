@@ -21,7 +21,11 @@ _RESULT_PREFIX = "ULTRON_SPEECH_RESULT="
 SYSTEM_PROMPT_VOCAB = (
     "Ultron, Hey Ultron, system command, open application, "
     "system diagnostics, task manager, terminal, lock workstation, "
-    "run process, browser, calculator, cmd."
+    "run process, browser, calculator, cmd, "
+    "Spotify, Spotify Premium, pause Spotify, resume Spotify, "
+    "play Spotify, play music on Spotify, next track, "
+    "previous track, skip track, Spotify volume, "
+    "queue on Spotify."
 )
 
 
