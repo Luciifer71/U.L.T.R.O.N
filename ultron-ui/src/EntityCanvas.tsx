@@ -23,15 +23,19 @@ import SimulationRuntime
 
 import { UltronEventBridge } from './bridge/UltronEventBridge'
 
+import UltronEntity from './scene/UltronEntity'
+
 import {
   Canvas,
 } from '@react-three/fiber'
 
-export default function WebGPUTest() {
+// The new entity is the default. Open the UI with ?legacy=1 to see the
+// earlier dot-field layers instead; they are unchanged and kept for reference.
+const SHOW_LEGACY_LAYERS =
+  new URLSearchParams(window.location.search).get('legacy') === '1'
 
-  console.log(
-    '[ULTRON] WebGPUTest MOUNTED',
-  )
+export default function EntityCanvas() {
+
 
   return (
     <div
@@ -85,17 +89,18 @@ export default function WebGPUTest() {
         
         <SimulationRuntime />
 
-        <TSLSingularityCore />
-
-        <TSLParticleField />
-
-        <TSLCircuitField />
-
-        <TSLComputationalShell />
-
-        <TSLInformationFlow />
-
-        <TSLEnergyEvents />
+        {SHOW_LEGACY_LAYERS ? (
+          <>
+            <TSLSingularityCore />
+            <TSLParticleField />
+            <TSLCircuitField />
+            <TSLComputationalShell />
+            <TSLInformationFlow />
+            <TSLEnergyEvents />
+          </>
+        ) : (
+          <UltronEntity />
+        )}
 
       </Canvas>
 

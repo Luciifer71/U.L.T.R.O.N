@@ -74,20 +74,11 @@ export default function SimulationRuntime() {
         }
 
         setUltronMode(mode)
-
-        console.log(
-          '[ULTRON MODE]',
-          mode,
-        )
       }
 
     window.addEventListener(
       'keydown',
       handleKeyDown,
-    )
-
-    console.log(
-      '[ULTRON] Keyboard mode controller active',
     )
 
     return () => {

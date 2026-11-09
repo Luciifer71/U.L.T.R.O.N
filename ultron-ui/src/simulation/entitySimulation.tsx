@@ -322,7 +322,7 @@ export function setUltronMode(
 
   state.mode = mode
 
-  console.info(
+  console.debug(
     `[ULTRON STATE] ${previousMode} → ${mode}`,
   )
 }
