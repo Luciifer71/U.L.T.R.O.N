@@ -21,7 +21,8 @@ installing this code.
    .\.venv\Scripts\python.exe .\run_ultron.py google connect --client "C:\path\client_secret.json"
    ```
 3. Sign in to the intended account and grant both read-only scopes in Google's
-   browser consent screen. Restart the normal launcher or `scripts/windows/start-qwen3-trial.cmd`.
+   browser consent screen. Google may show a checkbox per permission: tick both
+   (or **Select all**) before continuing, or the connection is refused. Restart the normal launcher or `scripts/windows/start-qwen3-trial.cmd`.
 
 Tokens are held by Windows Credential Manager, with no plaintext fallback. Local
 cache lives under `%LOCALAPPDATA%\Ultron\google`, outside the repository and support
@@ -41,6 +42,31 @@ Stop Ultron before connecting another account or disconnecting:
 Also revoke access in your Google account's third-party connections. Disconnect
 removes local credentials/cache, not the Google-side grant. In OAuth testing mode,
 Google can expire refresh tokens after seven days; reconnect when necessary.
+
+### If connect fails
+
+`google connect` reports a `code` without exposing tokens or Google's raw message:
+
+| Code | Meaning and fix |
+| --- | --- |
+| `scopes_missing` | A permission box was left unticked. Run connect again and tick both. |
+| `consent_timeout` | Sign-in was not finished within 5 minutes. Run connect again. |
+| `consent_denied` | Sign-in was cancelled, or Google said "Access blocked". Add the account as a test user (below). |
+| `consent_state` | An old sign-in tab answered. Close Google sign-in tabs and retry. |
+
+### Testing and production status
+
+Google Cloud now keeps these settings under **Google Auth Platform** (search
+"Google Auth Platform" in the console, or open **APIs & Services → OAuth consent
+screen**, which redirects there). Select the project that owns the client ID, then
+open **Audience**:
+
+- **Test users** lists the accounts allowed while the status is **Testing**.
+- **Publish app** moves the status to **In production**, which stops the
+  seven-day testing expiry. Without Google verification, sign-in shows an
+  "unverified app" warning (choose **Advanced → Continue**) and is limited to a
+  small number of users, which suits a personal assistant. Google's policies on
+  restricted Gmail scopes still apply.
 
 ## Coverage and honest limits
 

@@ -119,6 +119,17 @@ class IntentInbox:
                 'requestId': data.get('requestId'), 'statusKey': 'queue-full',
                 'execution': {'success': False, 'error': 'queue_full'}}).encode())
 
+    def clear_pending(self):
+        """Drop queued (not yet started) requests; returns how many were dropped."""
+        cleared = 0
+        while True:
+            try:
+                self.pending.get_nowait()
+            except asyncio.QueueEmpty:
+                return cleared
+            self.pending.task_done()
+            cleared += 1
+
     async def run(self):
         while True:
             msg = await self.pending.get()

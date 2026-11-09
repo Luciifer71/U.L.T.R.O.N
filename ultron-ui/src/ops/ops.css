@@ -1,0 +1,237 @@
+/* Operations panel: a translucent side panel over the WebGPU entity. */
+:root {
+  --ops-bg: rgba(6, 6, 12, 0.78);
+  --ops-surface: rgba(255, 255, 255, 0.04);
+  --ops-border: rgba(255, 255, 255, 0.09);
+  --ops-text: #e8e6ef;
+  --ops-muted: #8d8a9a;
+  --ops-accent: #ff3b3b;
+  --ops-good: #3fd58a;
+  --ops-warn: #f2b33d;
+  --ops-bad: #ff5a5a;
+  --ops-busy: #6aa8ff;
+}
+
+.ops-panel {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  width: min(380px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  overflow-y: auto;
+  background: var(--ops-bg);
+  border: 1px solid var(--ops-border);
+  border-radius: 14px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  color: var(--ops-text);
+  font: 13px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  text-align: left;
+  z-index: 10;
+}
+
+.ops-toggle {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  background: var(--ops-bg);
+  border: 1px solid var(--ops-border);
+  border-radius: 999px;
+  color: var(--ops-text);
+  font: 600 12px system-ui, sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  z-index: 10;
+}
+
+.ops-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ops-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+
+.ops-link {
+  color: var(--ops-muted);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.ops-close {
+  background: none;
+  border: none;
+  color: var(--ops-muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.ops-close:hover { color: var(--ops-text); }
+
+.ops-stop {
+  padding: 11px;
+  background: var(--ops-accent);
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  font: 700 14px system-ui, sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.ops-stop:hover:not(:disabled) { filter: brightness(1.12); }
+.ops-stop:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.ops-hint, .ops-meta, .ops-empty {
+  margin: 0;
+  color: var(--ops-muted);
+  font-size: 12px;
+}
+
+.ops-notice {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--ops-surface);
+  border-left: 3px solid var(--ops-warn);
+  border-radius: 6px;
+}
+
+.ops-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: var(--ops-surface);
+  border: 1px solid var(--ops-border);
+  border-radius: 10px;
+}
+
+.ops-section h2 {
+  margin: 0;
+  color: var(--ops-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.ops-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--ops-muted);
+}
+
+.ops-dot--online { background: var(--ops-good); box-shadow: 0 0 6px var(--ops-good); }
+.ops-dot--offline { background: var(--ops-bad); }
+.ops-dot--no-brain, .ops-dot--warn { background: var(--ops-warn); }
+.ops-dot--connecting { background: var(--ops-muted); }
+
+.ops-pill {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.ops-pill--good { color: var(--ops-good); }
+.ops-pill--bad { color: var(--ops-bad); }
+.ops-pill--busy { color: var(--ops-busy); }
+.ops-pill--muted { color: var(--ops-muted); }
+
+.ops-current-head { display: flex; gap: 8px; align-items: baseline; }
+.ops-current-prompt { overflow-wrap: anywhere; }
+
+.ops-steps, .ops-health, .ops-recent {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ops-steps { margin-top: 6px; }
+
+.ops-steps li, .ops-health li, .ops-recent li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ops-health .ops-meta, .ops-recent-prompt {
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ops-recent-prompt { margin-left: 0; color: var(--ops-text); }
+
+.ops-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.ops-line { display: flex; flex-direction: column; gap: 1px; }
+.ops-line-who { color: var(--ops-muted); font-size: 11px; display: flex; gap: 6px; }
+.ops-line--ultron .ops-line-who { color: var(--ops-accent); }
+.ops-line-text { overflow-wrap: anywhere; }
+
+.ops-tag { color: var(--ops-muted); }
+.ops-tag--bad { color: var(--ops-bad); }
+
+.ops-command { display: flex; gap: 6px; }
+
+.ops-command input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 10px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--ops-border);
+  border-radius: 8px;
+  color: var(--ops-text);
+  font: inherit;
+}
+
+.ops-command input:focus { outline: 1px solid var(--ops-accent); }
+
+.ops-command button {
+  padding: 0 14px;
+  background: var(--ops-surface);
+  border: 1px solid var(--ops-border);
+  border-radius: 8px;
+  color: var(--ops-text);
+  font: 600 13px system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.ops-command button:disabled, .ops-command input:disabled { opacity: 0.45; cursor: not-allowed; }

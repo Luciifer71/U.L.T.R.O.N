@@ -310,3 +310,40 @@ def test_doctor_closes_clients_after_api_failure(monkeypatch):
     report = module.connection_diagnostics()
     assert report['calendar']['status'] == 'failed'
     assert closed == ['mail', 'calendar']
+
+
+def test_consent_failures_name_the_cause_without_secrets():
+    import json
+    pytest.importorskip('google_auth_oauthlib')
+    from oauthlib.oauth2.rfc6749.errors import AccessDeniedError, MismatchingStateError
+    from google_auth_oauthlib.flow import WSGITimeoutError
+    from ultron.control.google_updates import failure_details, GoogleStageError, GoogleScopeError
+    cases = {
+        'consent_denied': AccessDeniedError('secret'),
+        'consent_timeout': WSGITimeoutError('secret'),
+        'scopes_missing': Warning('Scope has changed from "secret" to "other".'),
+        'consent_state': MismatchingStateError(),
+    }
+    cases_scope = GoogleScopeError('secret')
+    for code, error in [*cases.items(), ('scopes_missing', cases_scope)]:
+        result = failure_details(GoogleStageError('consent', error))
+        assert result['stage'] == 'consent' and result['code'] == code
+        assert 'secret' not in json.dumps(result)
+    # Outside the consent step the same classes keep their previous meaning.
+    assert failure_details(Warning('x'))['code'] == 'unknown'
+
+
+def test_connect_wraps_consent_errors(tmp_path, monkeypatch):
+    import json
+    flow_module = pytest.importorskip('google_auth_oauthlib.flow')
+    from ultron.control import google_updates as updates
+    client = tmp_path / 'client.json'
+    client.write_text(json.dumps({'installed': {
+        'client_id': 'id', 'client_secret': 'x', 'redirect_uris': ['http://127.0.0.1'],
+        'auth_uri': 'https://accounts.google.com/o/oauth2/auth', 'token_uri': 'https://oauth2.googleapis.com/token'}}))
+    def refuse(self, **kwargs):
+        raise Warning('Scope has changed')
+    monkeypatch.setattr(flow_module.InstalledAppFlow, 'run_local_server', refuse)
+    with pytest.raises(updates.GoogleStageError) as caught:
+        updates.connect(client)
+    assert updates.failure_details(caught.value)['code'] == 'scopes_missing'

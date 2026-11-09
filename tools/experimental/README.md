@@ -15,6 +15,11 @@ from the repository root only when needed, with their optional dependencies inst
 .\.venv\Scripts\python.exe .\tools\experimental\ingest.py
 ```
 
+The action daemon reacts to a fixed set of events, each only on its own subject:
+`clap_detected` on `ultron.audio` opens google.com; `PALM OPEN` and `FIST DETECTED`
+on `ultron.gestures` open Notepad and lock the workstation. It does not run app
+names or commands taken from bus messages.
+
 Start only the utility you intend to use. Camera/clap experiments require NATS;
 ingestion requires Ollama and the configured embedding model. The gesture model
 lives in `assets/models/`. Ingestion paths remain anchored to the repository root.
