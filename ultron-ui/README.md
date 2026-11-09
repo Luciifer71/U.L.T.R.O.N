@@ -6,16 +6,14 @@ The UI does not run the brain or prove that a desktop action succeeded.
 
 ## Development
 
-From the repository root, install both dependency sets:
+From the repository root:
 
 ```powershell
-npm ci
-cd ultron-ui
-npm ci
-npm run dev
+npm ci --prefix .\ultron-ui
+npm run dev --prefix .\ultron-ui
 ```
 
-The root package supplies `@nats-io/nats-core`. Open Vite's printed URL. Start the
+This package includes the NATS browser client (`@nats-io/nats-core`). Open Vite's printed URL. Start the
 backend separately using the [main setup guide](../README.md#run).
 The default WebSocket endpoint is `ws://127.0.0.1:9222`; override it with
 `VITE_ULTRON_NATS_WS_URL` when needed. Do not expose an unauthenticated NATS server
@@ -25,6 +23,12 @@ publicly.
 npm run build
 npm run lint
 ```
+
+`npm run lint` should report no warnings. Per-frame shader uniform updates inside
+`useFrame` are standard React Three Fiber practice, so the `react/immutability`
+rule is turned off for `src/scene/**` only (see `.oxlintrc.json`). The production
+bundle is about 2 MB because it includes the WebGPU build of three.js; Vite's
+large-chunk notice is expected and has little effect when served locally.
 
 ## States and troubleshooting
 
