@@ -17,7 +17,8 @@
   "overrides": [
     {
       "files": [
-        "src/scene/**"
+        "src/scene/**",
+        "src/entity/**"
       ],
       "rules": {
         "react/immutability": "off"

@@ -42,10 +42,27 @@ The scene responds to listening, thinking, executing, alert and idle events.
 Keyboard keys 1–7 exercise idle, listening, thinking, executing, alert, focus and
 sleep locally. Keyboard animation alone does not verify the backend connection.
 
-`App.tsx` currently mounts `WebGPUTest.tsx`. The scene includes a central core,
-particles, circuits, a computational shell, information flow and energy effects.
-The existing `RenderRuntime` performance controller is not mounted by that active
-scene. Adaptive rendering is unfinished; this guide does not claim it is enabled.
+`App.tsx` mounts `WebGPUTest.tsx`, which renders the computational entity from
+`src/scene/UltronEntity.tsx` and `src/entity/`:
+
+| Layer | What it is |
+| --- | --- |
+| Particle core | ~26k particles, each on its own orbit around a white-hot centre |
+| Gyroscope rings | 8 segmented rings (lines, dashes, tick bands), each spinning on its own tilted axis |
+| Arc cage | 90 short arcs on spheres around the core, each spinning independently |
+| Neural shell | ~280 nodes linked to their nearest neighbours, with pulses travelling along the links |
+| Dust | faint sparks on wide orbits for depth |
+| Glow | a bloom pass over the whole scene |
+
+Every particle and arc position is computed in the vertex shader from one shared
+"entity clock" (`src/entity/entityUniforms.ts`). Nothing depends on anything else and
+there is no per-frame simulation pass, so cost stays low. Busy states speed the clock
+up smoothly. Colours follow the ULTRON state: red idle, blue listening, red and blue
+thinking, gold executing.
+
+The earlier dot-field layers (`src/scene/TSL*.tsx`, `EnergyEvents.tsx`) are unchanged.
+Open the UI with `?legacy=1` (for example `http://localhost:5173/?legacy=1`) to show
+them instead. The `RenderRuntime` performance controller is still not mounted.
 
 If animation stutters, record browser/version, display resolution, frame timing
 and whether model/speech inference was active. If animation is smooth but fails
