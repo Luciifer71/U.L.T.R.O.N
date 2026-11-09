@@ -24,6 +24,10 @@ class GoogleNotConnectedError(RuntimeError):
     pass
 
 
+class GoogleScopeError(ValueError):
+    pass
+
+
 class GoogleStageError(RuntimeError):
     def __init__(self, stage, cause):
         self.stage, self.cause = stage, cause
@@ -41,6 +45,17 @@ def failure_details(error):
                   {'invalid_grant', 'invalid_client', 'unauthorized_client', 'temporarily_unavailable'}), None)
     if isinstance(error, GoogleNotConnectedError):
         code, advice = 'not_connected', 'No saved Google credentials were found.'
+    elif stage == 'consent' and ('oauthlib.oauth2.rfc6749.errors', 'AccessDeniedError') in classes:
+        code, advice = 'consent_denied', ('Google sign-in was cancelled or blocked. If Google said "Access blocked", '
+                                          'add this account as a test user under Google Auth Platform > Audience.')
+    elif stage == 'consent' and ('google_auth_oauthlib.flow', 'WSGITimeoutError') in classes:
+        code, advice = 'consent_timeout', 'Google sign-in was not finished within 5 minutes. Run connect again and complete it in the browser.'
+    elif stage == 'consent' and (isinstance(error, GoogleScopeError) or type(error) is Warning):
+        # oauthlib raises a bare Warning when Google grants fewer scopes than requested.
+        code, advice = 'scopes_missing', ('Both permissions are required. On Google\'s consent screen, tick "Read your Gmail" '
+                                          'and "View events on your calendars" (or "Select all"), then continue.')
+    elif stage == 'consent' and ('oauthlib.oauth2.rfc6749.errors', 'MismatchingStateError') in classes:
+        code, advice = 'consent_state', 'The browser returned an old sign-in page. Close Google sign-in tabs and run connect again.'
     elif isinstance(error, ImportError):
         code, advice = 'dependency', 'Install requirements/google.txt with the Ultron Python interpreter.'
     elif ('google.auth.exceptions', 'RefreshError') in classes:
@@ -186,10 +201,13 @@ def connect(client_file):
             or installed.get('token_uri') != 'https://oauth2.googleapis.com/token'):
         raise ValueError('Use an original Google Desktop OAuth client JSON.')
     flow = InstalledAppFlow.from_client_config(config, SCOPES, autogenerate_code_verifier=True)
-    creds = flow.run_local_server(host='127.0.0.1', port=0, timeout_seconds=300,
-                                  access_type='offline', prompt='consent')
-    if not creds.has_scopes(SCOPES):
-        raise ValueError('Both read-only permissions are required.')
+    try:
+        creds = flow.run_local_server(host='127.0.0.1', port=0, timeout_seconds=300,
+                                      access_type='offline', prompt='consent')
+        if not creds.has_scopes(SCOPES):
+            raise GoogleScopeError('Both read-only permissions are required.')
+    except Exception as error:
+        raise GoogleStageError('consent', error) from None
     # Reset old account cache before storing a new account's credentials.
     db = private_dir() / 'updates.sqlite3'
     db.unlink(missing_ok=True)
