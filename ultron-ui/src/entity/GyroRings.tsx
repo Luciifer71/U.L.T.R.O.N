@@ -3,7 +3,8 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three/webgpu'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
 import { atan, float, fract, positionLocal, smoothstep, step } from 'three/tsl'
-import { entityUniforms, stateColor } from './entityUniforms'
+import { entityUniforms, shockAt, stateColor, WHITE_HOT } from './entityUniforms'
+import { mood, spinRings } from './mood'
 
 /* =========================================================
    GYROSCOPE RINGS
@@ -40,7 +41,7 @@ const RINGS: RingSpec[] = [
 ]
 
 function ringMaterial(spec: RingSpec, offset: number) {
-  const { clock, intensity } = entityUniforms
+  const { clock, intensity, cageScale } = entityUniforms
   const material = new MeshBasicNodeMaterial({
     transparent: true,
     depthWrite: false,
@@ -66,7 +67,10 @@ function ringMaterial(spec: RingSpec, offset: number) {
       : float(1)
 
   const level = float(spec.brightness).mul(float(0.85).add(sweep)).mul(intensity).mul(1.8)
-  material.colorNode = stateColor().mul(level)
+  // The whole ring flares as a shockwave front passes through its radius.
+  const wave = shockAt(cageScale.mul(spec.radius))
+  const base = stateColor()
+  material.colorNode = base.mul(level).add(base.mul(0.6).add(WHITE_HOT.mul(0.25)).mul(wave.mul(2.2)))
   material.opacityNode = segment.mul(edge)
   return material
 }
@@ -76,7 +80,18 @@ function ringGeometry(spec: RingSpec) {
   return new THREE.RingGeometry(spec.radius - spec.width / 2, spec.radius + spec.width / 2, 720, 1)
 }
 
+const SPIN_SPEEDS = RINGS.map((spec) => spec.spin)
+
+// When executing, every ring swings into nearly the same plane, slightly
+// fanned, and spins together like a turbine.
+const ALIGNED = RINGS.map((_, i) => new THREE.Quaternion().setFromEuler(new THREE.Euler(1.22 + i * 0.035, 0.18, i * 0.02)))
+const OWN = RINGS.map((spec) => new THREE.Quaternion().setFromEuler(new THREE.Euler(...spec.tilt)))
+const scratchQ = new THREE.Quaternion()
+const wobbleQ = new THREE.Quaternion()
+const wobbleE = new THREE.Euler()
+
 export default function GyroRings() {
+  const tilts = useRef<(THREE.Group | null)[]>([])
   const spinners = useRef<(THREE.Mesh | null)[]>([])
   const holder = useRef<THREE.Group | null>(null)
 
@@ -97,23 +112,40 @@ export default function GyroRings() {
     }
   }, [rings])
 
-  useFrame(() => {
+  useFrame((_, delta) => {
+    const dt = Math.min(delta, 0.05)
     const t = entityUniforms.clock.value as number
-    rings.forEach((ring, index) => {
+    spinRings(SPIN_SPEEDS, dt)
+    rings.forEach((_ring, index) => {
       const mesh = spinners.current[index]
-      if (mesh) mesh.rotation.z = t * ring.spec.spin
+      if (mesh) mesh.rotation.z = mood.ringAngle[index]
+      const tilt = tilts.current[index]
+      if (tilt) {
+        // Own gyroscope tilt, blended toward the aligned "turbine" plane,
+        // plus a spring wobble that rings after kicks and settles.
+        scratchQ.copy(OWN[index]).slerp(ALIGNED[index], mood.align)
+        const [wx, wy] = mood.ringWobble[index]
+        wobbleQ.setFromEuler(wobbleE.set(wx, wy, 0))
+        tilt.quaternion.copy(scratchQ).multiply(wobbleQ)
+      }
     })
-    // The whole gyroscope slowly turns so the rings never look static.
     if (holder.current) {
+      // The whole gyroscope slowly turns, and breathes with the cage scale.
       holder.current.rotation.y = t * 0.035
       holder.current.rotation.x = Math.sin(t * 0.05) * 0.15
+      holder.current.scale.setScalar(mood.cage)
     }
   })
 
   return (
     <group ref={holder}>
       {rings.map((ring, index) => (
-        <group key={index} rotation={ring.spec.tilt}>
+        <group
+          key={index}
+          ref={(group) => {
+            tilts.current[index] = group
+          }}
+        >
           <mesh
             ref={(mesh) => {
               spinners.current[index] = mesh

@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react'
 import * as THREE from 'three/webgpu'
 import { LineBasicNodeMaterial } from 'three/webgpu'
 import { attribute, cos, float, fract, sin, smoothstep } from 'three/tsl'
-import { entityUniforms, stateColor, WHITE_HOT } from './entityUniforms'
+import { entityUniforms, shockAt, stateColor, WHITE_HOT } from './entityUniforms'
 
 /* =========================================================
    ARC CAGE
@@ -61,7 +61,7 @@ function buildArcs() {
 
 export default function ArcCage() {
   const lines = useMemo(() => {
-    const { clock, intensity, motion } = entityUniforms
+    const { clock, intensity, motion, cageScale } = entityUniforms
     const arcU = attribute('arcU', 'vec3')
     const arcW = attribute('arcW', 'vec3')
     const arcP = attribute('arcP', 'vec4')
@@ -70,7 +70,10 @@ export default function ArcCage() {
     const angle = arcP.x.add(clock.mul(arcP.z))
     const material = new LineBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending })
     material.toneMapped = false
-    material.positionNode = arcU.mul(cos(angle)).add(arcW.mul(sin(angle))).mul(arcP.y)
+    const radius = arcP.y.mul(cageScale)
+    // A passing shockwave pushes each arc outward and lights it up.
+    const wave = shockAt(radius)
+    material.positionNode = arcU.mul(cos(angle)).add(arcW.mul(sin(angle))).mul(radius.add(wave.mul(0.12)))
 
     // Arcs fade in at both ends; a bright pulse runs along each one.
     const along = arcP.w
@@ -80,7 +83,8 @@ export default function ArcCage() {
     const flicker = float(0.7).add(sin(clock.mul(2.0).add(seed.mul(60.0))).mul(0.3))
     const base = stateColor()
     const color = base.mul(float(0.55).mul(flicker)).add(base.mul(0.5).add(WHITE_HOT.mul(0.4)).mul(pulse))
-    material.colorNode = color.mul(ends).mul(intensity).mul(1.5)
+    const flash = base.mul(0.6).add(WHITE_HOT.mul(0.3)).mul(wave.mul(2.0))
+    material.colorNode = color.mul(intensity).mul(1.5).add(flash).mul(ends)
     const object = new THREE.LineSegments(buildArcs(), material)
     object.frustumCulled = false
     return object

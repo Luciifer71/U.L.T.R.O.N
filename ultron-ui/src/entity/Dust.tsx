@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react'
 import * as THREE from 'three/webgpu'
 import { SpriteNodeMaterial } from 'three/webgpu'
 import { cos, float, fract, sin, vec2 } from 'three/tsl'
-import { buildOrbits, entityUniforms, softDisc, stateColor } from './entityUniforms'
+import { buildOrbits, entityUniforms, shockAt, softDisc, stateColor } from './entityUniforms'
 
 /* =========================================================
    DUST
@@ -26,11 +26,12 @@ export default function Dust() {
     const theta = orbit.p.y.add(clock.mul(orbit.p.z))
     const material = new SpriteNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending })
     material.toneMapped = false
-    material.positionNode = orbit.u.mul(cos(theta)).add(orbit.w.mul(sin(theta))).mul(radius)
+    const wave = shockAt(radius)
+    material.positionNode = orbit.u.mul(cos(theta)).add(orbit.w.mul(sin(theta))).mul(radius.add(wave.mul(0.25)))
     material.scaleNode = vec2(float(0.006).add(fract(seed.mul(13.7)).mul(0.01)))
     const flicker = float(0.4).add(sin(clock.mul(2.3).add(seed.mul(70.0))).mul(0.6)).clamp(0, 1)
     const fade = float(1).sub(radius.sub(1.55).div(1.4)).clamp(0.15, 1)
-    material.colorNode = stateColor().mul(flicker).mul(fade).mul(intensity).mul(0.9)
+    material.colorNode = stateColor().mul(flicker.mul(fade).mul(intensity).mul(0.9).add(wave.mul(1.2)))
     material.opacityNode = softDisc()
     const instanced = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), material, DUST_COUNT)
     instanced.frustumCulled = false

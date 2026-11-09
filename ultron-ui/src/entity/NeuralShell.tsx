@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three/webgpu'
 import { LineBasicNodeMaterial, SpriteNodeMaterial } from 'three/webgpu'
-import { attribute, float, fract, instancedBufferAttribute, mix, select, sin, smoothstep, vec2 } from 'three/tsl'
-import { BLUE, entityUniforms, softDisc, stateColor, WHITE_HOT } from './entityUniforms'
+import { acos, attribute, dot, exp, float, fract, instancedBufferAttribute, mix, positionLocal, select, sin, smoothstep, vec2 } from 'three/tsl'
+import type { Node } from 'three/webgpu'
+import { BLUE, entityUniforms, shockAt, softDisc, stateColor, WHITE_HOT } from './entityUniforms'
+import { mood } from './mood'
 
 /* =========================================================
    NEURAL SHELL
@@ -65,11 +67,25 @@ function buildNetwork() {
   return { lines, nodeData }
 }
 
+/**
+ * Extra light at a point of the shell: the shockwave passing its radius, and
+ * an idle "thought" cascade spreading across the sphere from a random origin
+ * like neurons firing one after another.
+ */
+function shellEvents(point: Node<'vec3'>) {
+  const { shellScale, thoughtAge, thoughtStrength, thoughtDir } = entityUniforms
+  const wave = shockAt(point.length().mul(shellScale))
+  const angle = acos(dot(point.normalize(), thoughtDir).clamp(-1, 1))
+  const front = angle.sub(thoughtAge.mul(0.85)).div(0.16)
+  const cascade = thoughtStrength.mul(exp(thoughtAge.mul(-0.55))).mul(exp(front.mul(front).negate()))
+  return wave.mul(1.6).add(cascade.mul(1.4))
+}
+
 export default function NeuralShell() {
   const holder = useRef<THREE.Group | null>(null)
 
   const { lineObject, nodeMesh } = useMemo(() => {
-    const { clock, intensity, information } = entityUniforms
+    const { clock, intensity, information, blue } = entityUniforms
     const { lines, nodeData } = buildNetwork()
 
     // ---- lines with travelling pulses
@@ -82,9 +98,16 @@ export default function NeuralShell() {
     const head = smoothstep(0.12, 0.0, position.sub(travel).abs())
     const pulseGain = float(0.5).add(information.mul(1.4))
     const base = stateColor()
-    // Information pulses lean blue, like data moving through the network.
-    const pulseColor = mix(base, BLUE, information.mul(0.5)).mul(0.75).add(WHITE_HOT.mul(0.08))
-    lineMaterial.colorNode = base.mul(0.05).add(pulseColor.mul(head).mul(pulseGain)).mul(intensity).mul(1.2)
+    // Pulses lean blue only while ULTRON is actually taking in information.
+    const pulseColor = mix(base, BLUE, information.mul(blue).mul(0.6)).mul(0.75).add(WHITE_HOT.mul(0.08))
+    const lineEvents = shellEvents(positionLocal)
+    const eventColor = base.mul(0.7).add(WHITE_HOT.mul(0.2))
+    lineMaterial.colorNode = base
+      .mul(0.05)
+      .add(pulseColor.mul(head).mul(pulseGain))
+      .mul(intensity)
+      .mul(1.2)
+      .add(eventColor.mul(lineEvents))
     const lineObject = new THREE.LineSegments(lines, lineMaterial)
     lineObject.frustumCulled = false
 
@@ -95,7 +118,11 @@ export default function NeuralShell() {
     nodeMaterial.positionNode = node.xyz
     const twinkle = float(0.55).add(sin(clock.mul(1.7).add(node.w.mul(40.0))).mul(0.45))
     nodeMaterial.scaleNode = vec2(float(0.016).add(node.w.mul(0.018)))
-    nodeMaterial.colorNode = base.mul(0.7).add(WHITE_HOT.mul(0.15)).mul(twinkle).mul(intensity).mul(1.1)
+    const nodeEvents = shellEvents(node.xyz)
+    nodeMaterial.colorNode = base
+      .mul(0.7)
+      .add(WHITE_HOT.mul(0.15))
+      .mul(twinkle.mul(intensity).mul(1.1).add(nodeEvents.mul(1.5)))
     nodeMaterial.opacityNode = softDisc()
     const nodeMesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), nodeMaterial, NODE_COUNT)
     nodeMesh.frustumCulled = false
@@ -115,6 +142,7 @@ export default function NeuralShell() {
     if (holder.current) {
       holder.current.rotation.y = -t * 0.025
       holder.current.rotation.z = Math.sin(t * 0.03) * 0.1
+      holder.current.scale.setScalar(mood.shell)
     }
   })
 

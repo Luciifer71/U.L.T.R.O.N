@@ -1,6 +1,9 @@
 import * as THREE from 'three/webgpu'
-import { float, instancedBufferAttribute, uniform, uv, vec3 } from 'three/tsl'
+import { exp, float, instancedBufferAttribute, uniform, uv, vec3 } from 'three/tsl'
+import type { Node } from 'three/webgpu'
 import { getEntityVisualState } from '../state/entityStore'
+import { getUltronEntityState } from '../simulation/entitySimulation'
+import { mood, updateMood } from './mood'
 
 /* =========================================================
    SHARED ENTITY UNIFORMS
@@ -26,6 +29,28 @@ export const entityUniforms = {
   turbulence: uniform(0.18),
   information: uniform(0.08),
   events: uniform(0.035),
+  // Body language (see mood.ts): spring-driven scales and fluid strength.
+  coreScale: uniform(0.15),
+  cageScale: uniform(0.35),
+  shellScale: uniform(0.6),
+  flow: uniform(0.3),
+  // Latest shockwave and idle "thought" (age in real seconds).
+  shockAge: uniform(99),
+  shockStrength: uniform(0),
+  thoughtAge: uniform(99),
+  thoughtStrength: uniform(0),
+  thoughtDir: uniform(new THREE.Vector3(0, 1, 0)),
+}
+
+const SHOCK_SPEED = 0.95 // units per second: slow and heavy
+const SHOCK_WIDTH = 0.16
+
+/** Brightness/push of the current shockwave at a given distance from the centre (0..~1.5). */
+export function shockAt(radius: Node<'float'>) {
+  const u = entityUniforms
+  const front = u.shockAge.mul(SHOCK_SPEED)
+  const offset = radius.sub(front).div(SHOCK_WIDTH)
+  return u.shockStrength.mul(exp(u.shockAge.mul(-0.9))).mul(exp(offset.mul(offset).negate()))
 }
 
 // Palette (linear, HDR-friendly). Bloom does the softening.
@@ -57,6 +82,17 @@ export function syncEntityUniforms(dt: number) {
   u.turbulence.value = v.turbulence
   u.information.value = v.informationDensity
   u.events.value = v.eventDensity
+
+  updateMood(getUltronEntityState().mode, dt)
+  u.coreScale.value = mood.core
+  u.cageScale.value = mood.cage
+  u.shellScale.value = mood.shell
+  u.flow.value = mood.flow
+  u.shockAge.value = mood.shock.age
+  u.shockStrength.value = mood.shock.strength
+  u.thoughtAge.value = mood.thought.age
+  u.thoughtStrength.value = mood.thought.strength
+  ;(u.thoughtDir.value as THREE.Vector3).set(mood.thought.x, mood.thought.y, mood.thought.z)
   return clockSeconds
 }
 

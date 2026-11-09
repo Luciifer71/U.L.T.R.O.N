@@ -60,6 +60,19 @@ there is no per-frame simulation pass, so cost stays low. Busy states speed the 
 up smoothly. Colours follow the ULTRON state: red idle, blue listening, red and blue
 thinking, gold executing.
 
+Body language (`src/entity/mood.ts`) uses heavy, slightly under-damped springs:
+
+- **Shape per state:** listening draws in, thinking expands and separates the layers,
+  executing compresses and swings the rings into one plane to spin like a turbine,
+  sleep collapses to a dim ember.
+- **Shockwaves:** a slow wave rolls outward on the wake word (listening), on starting
+  and finishing a task, and on alerts. It pushes particles and lights each layer as
+  it passes. Rings wobble a few degrees and settle.
+- **Idle thoughts:** every few seconds (more while thinking, rarely asleep) a cascade
+  of light spreads across the neural shell from a random point, and one ring twitches.
+- **Fluid core:** a drifting noise field bends the core particles' orbits like smoke.
+- **Awakening:** on load the entity starts collapsed, unfolds and releases a first pulse.
+
 The earlier dot-field layers (`src/scene/TSL*.tsx`, `EnergyEvents.tsx`) are unchanged.
 Open the UI with `?legacy=1` (for example `http://localhost:5173/?legacy=1`) to show
 them instead. The `RenderRuntime` performance controller is still not mounted.
