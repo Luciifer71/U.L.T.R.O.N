@@ -40,6 +40,8 @@ The doctor makes read-only checks; an authenticated account can still have zero 
 - “What is playing on Spotify?”
 - “Play Sunflower by Post Malone on YouTube.”
 
+Common variations also work while Spotify is connected: “Next” / “Skip”, “Go back to the previous track”, “Stop the music”, “Play some music” (resumes the current track), “What's playing right now?”, “Turn Spotify volume to 40 percent” and “Spotify volume up” / “Make Spotify quieter” (10-point steps). A bare “Volume up” still controls system volume. Requests with anything extra, such as “Skip this song and delete files” or “Don't skip”, are not treated as Spotify commands.
+
 Playback, pause and resume are reported as verified only when Spotify returns the requested state for the selected device. Queue, skip and volume replies acknowledge the request without claiming an observed result. Ambiguous song matches require a more specific title/artist; no arbitrary first result is chosen.
 
 ## Playback reliability

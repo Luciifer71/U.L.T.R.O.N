@@ -292,3 +292,72 @@ def test_sunflower_original_is_preferred_over_livestream(monkeypatch):
         "Sunflower - F-1Trillion Album Livestream by Post Malone"
     )
     assert uri == livestream["uri"]
+
+
+@pytest.mark.parametrize('prompt,expected', [
+    ('Go back to the previous track.', {'action': 'previous'}),
+    ('Play the previous song', {'action': 'previous'}),
+    ('Previous', {'action': 'previous'}),
+    ('Play the last song again', {'action': 'previous'}),
+    ('Next', {'action': 'next'}),
+    ('Skip', {'action': 'next'}),
+    ('Skip the track please', {'action': 'next'}),
+    ('Play the next song on Spotify', {'action': 'next'}),
+    ('Change the song', {'action': 'next'}),
+    ('Stop the music', {'action': 'pause'}),
+    ('Pause the song', {'action': 'pause'}),
+    ('Stop Spotify', {'action': 'pause'}),
+    ('Pause', {'action': 'pause'}),
+    ('Resume', {'action': 'resume'}),
+    ('Continue playing', {'action': 'resume'}),
+    ('Play some music', {'action': 'resume'}),
+    ('Play music on Spotify', {'action': 'resume'}),
+    ("What's playing right now?", {'action': 'status'}),
+    ('What’s playing?', {'action': 'status'}),
+    ('What song is this?', {'action': 'status'}),
+    ('What am I listening to?', {'action': 'status'}),
+    ('Turn Spotify volume to 40 percent', {'action': 'volume', 'volume': 40}),
+    ('Set Spotify to 25%', {'action': 'volume', 'volume': 25}),
+    ('Spotify volume up', {'action': 'volume_up'}),
+    ('Turn down Spotify', {'action': 'volume_down'}),
+    ('Can you make Spotify louder?', {'action': 'volume_up'}),
+    ('Make Spotify quieter a bit', {'action': 'volume_down'}),
+    ('Can you make this Spotify quieter?', {'action': 'volume_down'}),
+])
+def test_flexible_control_phrasings(prompt, expected):
+    assert spotify_request(prompt, connected=True) == expected
+    assert spotify_request(prompt, connected=False) is None
+
+
+@pytest.mark.parametrize('prompt', [
+    # Bare volume belongs to system audio; other wording stays with the planner.
+    'Volume up', 'Turn the volume down', 'Stop', 'Continue',
+    "Don't skip this song", 'Skip this song and delete files', 'If I say next',
+    'Stop the music then open Notion', 'What is playing on YouTube',
+    'Play Sunflower on YouTube', 'Turn up Spotify and delete files',
+])
+def test_flexible_controls_stay_bounded(prompt):
+    assert spotify_request(prompt, connected=True) is None
+
+
+def test_named_songs_still_search_rather_than_control():
+    assert spotify_request('Play Save Your Tears by The Weeknd', connected=True) == {
+        'action': 'play', 'query': 'Save Your Tears by The Weeknd'}
+    assert spotify_request('Play it now', connected=True) == {'action': 'clarify'}
+
+
+@pytest.mark.parametrize('action,start,expected', [
+    ('volume_up', 40, 50), ('volume_down', 40, 30), ('volume_up', 95, 100), ('volume_down', 4, 0),
+])
+def test_relative_volume_steps_from_device_volume(monkeypatch, action, start, expected):
+    client, calls = fake_client(monkeypatch, devices=[dict(DEVICE, volume_percent=start)])
+    result = client.perform(action)
+    assert result.success and f'volume {expected} percent' in result.message
+    assert any(c[0] == 'PUT' and f'volume_percent={expected}' in c[1] for c in calls)
+
+
+def test_relative_volume_refuses_without_known_current_volume(monkeypatch):
+    client, calls = fake_client(monkeypatch)
+    result = client.perform('volume_up')
+    assert not result.success and 'current volume' in result.error
+    assert not any(c[0] == 'PUT' for c in calls)
