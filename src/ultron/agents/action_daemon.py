@@ -15,6 +15,7 @@ import psutil
 import pygame
 from nats.aio.client import Client as NATS
 from ultron.control.reply_delivery import SpeechQueue
+from ultron.control.operations import OPS_PREFIX, heartbeat_loop
 
 NATS_URL = os.getenv("NATS_URL", "nats://127.0.0.1:4222")
 SUBJECT = "ultron.>"
@@ -243,6 +244,9 @@ class ActionDaemon:
 
             if msg.subject in {"ultron.voice.cancel", "ultron.voice.state"}:
                 return
+            # Dashboard traffic is never speech or an action, whatever its fields.
+            if msg.subject.startswith(OPS_PREFIX):
+                return
 
             # Standalone voice channel message
             if msg.subject == "ultron.voice":
@@ -319,11 +323,13 @@ class ActionDaemon:
         await self.nc.subscribe("ultron.voice.state", cb=voice_state)
         await self.nc.subscribe(self.subject, cb=self.message_handler)
         await self.nc.flush()
+        heartbeat = asyncio.create_task(heartbeat_loop(self.nc, "action_daemon"))
         logger.info(f"[ULTRON] Action daemon online. Subscribed to '{self.subject}'...")
         self.speech_queue.submit("Ultron core action daemon online.")
         try:
             await self._shutdown_event.wait()
         finally:
+            heartbeat.cancel()
             speech_worker.cancel()
             try:
                 await speech_worker

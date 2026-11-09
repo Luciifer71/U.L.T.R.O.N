@@ -30,6 +30,12 @@ rule is turned off for `src/scene/**` only (see `.oxlintrc.json`). The productio
 bundle is about 2 MB because it includes the WebGPU build of three.js; Vite's
 large-chunk notice is expected and has little effect when served locally.
 
+## Operations panel
+
+Press `` ` `` (backtick) or the **Ops** button for the operations panel: current task,
+transcript, a typed command box, component health, recent tasks and a **Stop**
+button. See [operations dashboard](../docs/operations-dashboard.md).
+
 ## States and troubleshooting
 
 The scene responds to listening, thinking, executing, alert and idle events.

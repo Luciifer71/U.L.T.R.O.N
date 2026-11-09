@@ -19,6 +19,7 @@ import sounddevice as sd
 
 from ultron.audio.microphone_runtime import inventory, fingerprint, microphone_candidates, probe_inventory
 from ultron.audio.speech_activity import create_speech_activity
+from ultron.control.operations import heartbeat_loop
 from ultron.core.visual_events import publish_visual_event
 from ultron.audio.audio_pipeline import AudioFrame, AudioMailbox, UtteranceSegmenter, TranscriptionWorker
 
@@ -494,6 +495,8 @@ async def main():
             await acoustic_gate.set_speaking(True)
 
     await nc.subscribe("ultron.status.speaking", cb=status_speaking_handler)
+    # Liveness for the operations dashboard; kept referenced for the process lifetime.
+    heartbeat_task = asyncio.create_task(heartbeat_loop(nc, "listener"))  # noqa: F841
 
     async def refresh_speaking():
         try:

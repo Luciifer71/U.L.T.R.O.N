@@ -155,3 +155,18 @@ def test_playback_evidence_and_no_automatic_replay(daemon_module, caplog, audio,
         assert len(plays) == bool(audio)
         assert not voice.speaking
     asyncio.run(run())
+
+
+def test_action_daemon_never_speaks_or_acts_on_ops_messages(daemon_module):
+    daemon = object.__new__(daemon_module.ActionDaemon)
+    spoken, executed = [], []
+    daemon.speech_queue = SimpleNamespace(submit=lambda *a, **k: spoken.append(a))
+    async def execute(task):
+        executed.append(task)
+    daemon.execute_single_action = execute
+    daemon.event_handlers = {}
+    for subject in ('ultron.ops.status', 'ultron.ops.heartbeat', 'ultron.ops.stop'):
+        msg = SimpleNamespace(subject=subject, data=json.dumps(
+            {'text': 'say this', 'action': 'lock_workstation', 'event': 'x'}).encode())
+        asyncio.run(daemon.message_handler(msg))
+    assert spoken == [] and executed == []

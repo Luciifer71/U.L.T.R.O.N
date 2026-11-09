@@ -89,6 +89,10 @@ from ultron.control.intent_guard import (
 
 
 
+from ultron.control.operations import (
+    STATUS_SUBJECT, STOP_SUBJECT, HEARTBEAT_SUBJECT,
+    OperationsState, recent_task_rows,
+)
 from ultron.core.memory_db import (
 
     init_memory_db,
@@ -107,6 +111,8 @@ from ultron.core.memory_db import (
     update_task,
 
     get_latest_task,
+
+    get_recent_tasks,
 
 )
 
@@ -1013,6 +1019,7 @@ class UltronBrain:
         )
 
         self.task_lock = asyncio.Lock()
+        self.operations = OperationsState()
 
         # Centralized Windows capability control plane.
         # Physical system actions should flow through the broker rather than
@@ -1240,7 +1247,25 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
         errors: list[str] = []
         outcomes: list[dict[str, Any]] = []
 
+        operations = getattr(self, "operations", None)
+        if operations:
+            operations.stage(task_id, "executing")
+
         for action in actions:
+            if operations and operations.stop_requested(task_id):
+                # Cooperative stop: steps already run are kept and reported;
+                # nothing is undone and no further step starts.
+                for skipped in actions[len(outcomes):]:
+                    outcomes.append({
+                        "name": skipped.name, "success": False, "state": "cancelled",
+                        "error": "Stopped from the dashboard before this step started.",
+                        "message": "Stopped from the dashboard before this step started.",
+                    })
+                    operations.step(task_id, skipped.name, "cancelled")
+                errors.append("Stopped from the dashboard.")
+                print(f"[ACTION STOPPED] [task={task_id}] remaining steps cancelled")
+                break
+
             outcome: dict[str, Any] = {
                 "name": action.name,
                 "success": False,
@@ -1256,6 +1281,8 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
                     f"[ACTION START] [task={task_id}] "
                     f"{action.name}"
                 )
+                if operations:
+                    operations.step(task_id, action.name, "running")
 
                 if inspect.iscoroutinefunction(action.execute):
                     result = await action.execute()
@@ -1356,6 +1383,9 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
                 )
 
             outcomes.append(outcome)
+            if operations:
+                operations.step(task_id, action.name, outcome.get("state") or (
+                    "completed" if outcome["success"] else "failed"), outcome.get("error"))
             if not outcome['success'] and action.stop_on_failure:
                 for skipped in actions[len(outcomes):]:
                     outcomes.append({'name': skipped.name, 'success': False, 'state': 'not_started',
@@ -2758,6 +2788,7 @@ async def main():
                     f"\n[ULTRON INTENT RECEIVED] "
                     f"[task={task_id}]: '{prompt}'"
                 )
+                brain.operations.begin(task_id, prompt)
 
                 log_chat("user", prompt)
 
@@ -2776,6 +2807,7 @@ async def main():
 
                 else:
                     planning_started = time.perf_counter()
+                    brain.operations.stage(task_id, "planning")
                     reply_text, pending_actions = await brain.process_intent(
                         prompt,
                         task_id,
@@ -2837,8 +2869,17 @@ async def main():
 
                 log_chat("assistant", reply_text)
 
+                stopped = brain.operations.stop_requested(task_id)
+                if stopped and pending_actions:
+                    ledger = brain.execution_ledger.get(task_id) or []
+                    ran = [entry for entry in ledger if entry.get("state") != "cancelled"]
+                    reply_text = (
+                        f"Stopped. {len(ran)} of {len(ledger)} steps had already run"
+                        + (": " + ", ".join(brain._friendly_action_name(e["name"]) for e in ran) if ran else "")
+                        + ". Nothing was undone."
+                    )
                 if local_reply is None:
-                    final_status = "completed" if action_ok else "failed"
+                    final_status = "cancelled" if stopped else ("completed" if action_ok else "failed")
                     update_task(
                         task_id,
                         final_status,
@@ -2846,7 +2887,9 @@ async def main():
                         error_text=action_error,
                         execution=brain.execution_ledger.get(task_id),
                         event_message=(
-                            "Task completed successfully."
+                            "Task stopped from the dashboard."
+                            if stopped
+                            else "Task completed successfully."
                             if action_ok
                             else "Task completed with execution failures."
                         ),
@@ -2862,6 +2905,9 @@ async def main():
                         "speech": reply_text,
                         "taskId": task_id,
                         "requestId": data.get("requestId") if isinstance(data.get("requestId"), str) else None,
+                        # A stopped task's reply is shown on the dashboard, not spoken.
+                        "silent": stopped,
+                        "cancelled": stopped,
                         "execution": {
                             "success": action_ok,
                             "error": action_error,
@@ -2961,6 +3007,8 @@ async def main():
                     "idle",
                     task_id=task_id,
                 )
+            finally:
+                brain.operations.finish(task_id)
 
     async def google_notify(text):
         await nc.publish("ultron.voice", json.dumps({"text": text, "speech": text, "statusKey": "google-background", "speechTtl": 20}).encode())
@@ -2969,6 +3017,49 @@ async def main():
 
     inbox = IntentInbox(brain, nc, intent_handler, google_request_kind)
     intent_worker = asyncio.create_task(inbox.run())
+
+    # -----------------------------------------------------------------
+    # OPERATIONS DASHBOARD: status, stop and component heartbeats
+    # -----------------------------------------------------------------
+    def services_status():
+        google = brain.google_updates
+        return {
+            "ollama": {"ok": brain.ollama.is_ready, "detail": MODEL_NAME},
+            "spotify": {"ok": bool(spotify_configured()),
+                        "detail": "connected" if spotify_configured() else "not connected"},
+            "google": {"ok": bool(google.enabled) and "unavailable" not in google.status.lower()
+                       and "failed" not in google.status.lower(),
+                       "detail": google.status[:160]},
+        }
+
+    async def ops_status(msg):
+        if not msg.reply:
+            return
+        try:
+            rows = await asyncio.to_thread(get_recent_tasks, 20)
+            recent = recent_task_rows(rows)
+        except Exception as exc:
+            recent = []
+            print(f"[OPS STATUS] recent tasks unavailable: {type(exc).__name__}")
+        snapshot = brain.operations.snapshot(
+            queued=inbox.pending.qsize(), recent=recent, services=services_status())
+        await nc.publish(msg.reply, json.dumps(snapshot, default=str).encode())
+
+    async def ops_stop(msg):
+        await nc.publish("ultron.voice.cancel", b"{}")
+        cleared = inbox.clear_pending()
+        stopped = brain.operations.request_stop()
+        print(f"[OPS STOP] task={stopped} cleared_queued={cleared}", flush=True)
+        if msg.reply:
+            await nc.publish(msg.reply, json.dumps(
+                {"stoppedTask": stopped, "clearedQueued": cleared}).encode())
+
+    async def ops_heartbeat(msg):
+        brain.operations.record_heartbeat(msg.data)
+
+    await nc.subscribe(STATUS_SUBJECT, cb=ops_status)
+    await nc.subscribe(STOP_SUBJECT, cb=ops_stop)
+    await nc.subscribe(HEARTBEAT_SUBJECT, cb=ops_heartbeat)
     await nc.subscribe(
 
         "ultron.intent",

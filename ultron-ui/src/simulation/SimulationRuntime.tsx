@@ -18,6 +18,16 @@ export default function SimulationRuntime() {
     const handleKeyDown =
       (event: KeyboardEvent) => {
 
+        // Typing in the operations panel must not switch animation modes.
+        const target = event.target as HTMLElement | null
+        if (
+          target &&
+          (target.isContentEditable ||
+            ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+        ) {
+          return
+        }
+
         let mode:
           | 'idle'
           | 'listening'
