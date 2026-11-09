@@ -2,7 +2,8 @@ import { useEffect, useMemo } from 'react'
 import * as THREE from 'three/webgpu'
 import { LineBasicNodeMaterial } from 'three/webgpu'
 import { attribute, cos, float, fract, sin, smoothstep } from 'three/tsl'
-import { entityUniforms, shockAt, stateColor, WHITE_HOT } from './entityUniforms'
+import { depthFade, entityUniforms, shockAt, stateColor, WHITE_HOT } from './entityUniforms'
+import { randomOrbitBasis } from './entityConfig'
 
 /* =========================================================
    ARC CAGE
@@ -23,26 +24,19 @@ function buildArcs() {
   // angle along the arc, radius, spin speed, 0..1 position along the arc
   const params = new Float32Array(vertices * 4)
   const seeds = new Float32Array(vertices)
-  const axis = new THREE.Vector3()
-  const a = new THREE.Vector3()
-  const b = new THREE.Vector3()
-  const helper = new THREE.Vector3()
   let v = 0
   for (let arc = 0; arc < ARC_COUNT; arc++) {
-    axis.randomDirection()
-    helper.set(Math.abs(axis.x) < 0.9 ? 1 : 0, Math.abs(axis.x) < 0.9 ? 0 : 1, 0)
-    a.crossVectors(axis, helper).normalize()
-    b.crossVectors(axis, a).normalize()
+    const { u: a, w: b } = randomOrbitBasis()
     const radius = 0.86 + Math.pow(Math.random(), 0.8) * 0.62
-    const length = (0.25 + Math.random() * 1.6) // radians
+    const length = 0.25 + Math.random() * 1.6 // radians
     const start = Math.random() * Math.PI * 2
     const speed = (0.08 + Math.random() * 0.3) * (Math.random() < 0.5 ? -1 : 1)
     const seed = Math.random()
     for (let s = 0; s < ARC_SEGMENTS; s++) {
       for (const k of [s, s + 1]) {
         const f = k / ARC_SEGMENTS
-        u.set([a.x, a.y, a.z], v * 3)
-        w.set([b.x, b.y, b.z], v * 3)
+        u.set(a, v * 3)
+        w.set(b, v * 3)
         params.set([start + f * length, radius, speed, f], v * 4)
         seeds[v] = seed
         v++
@@ -84,7 +78,7 @@ export default function ArcCage() {
     const base = stateColor()
     const color = base.mul(float(0.55).mul(flicker)).add(base.mul(0.5).add(WHITE_HOT.mul(0.4)).mul(pulse))
     const flash = base.mul(0.6).add(WHITE_HOT.mul(0.3)).mul(wave.mul(2.0))
-    material.colorNode = color.mul(intensity).mul(1.5).add(flash).mul(ends)
+    material.colorNode = color.mul(intensity).mul(1.5).add(flash).mul(ends).mul(depthFade())
     const object = new THREE.LineSegments(buildArcs(), material)
     object.frustumCulled = false
     return object

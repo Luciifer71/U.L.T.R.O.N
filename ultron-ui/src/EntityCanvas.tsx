@@ -34,11 +34,8 @@ import {
 const SHOW_LEGACY_LAYERS =
   new URLSearchParams(window.location.search).get('legacy') === '1'
 
-export default function WebGPUTest() {
+export default function EntityCanvas() {
 
-  console.log(
-    '[ULTRON] WebGPUTest MOUNTED',
-  )
 
   return (
     <div

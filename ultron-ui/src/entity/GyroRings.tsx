@@ -3,8 +3,9 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three/webgpu'
 import { MeshBasicNodeMaterial } from 'three/webgpu'
 import { atan, float, fract, positionLocal, smoothstep, step } from 'three/tsl'
-import { entityUniforms, shockAt, stateColor, WHITE_HOT } from './entityUniforms'
+import { depthFade, entityUniforms, shockAt, stateColor, WHITE_HOT } from './entityUniforms'
 import { mood, spinRings } from './mood'
+import { RINGS, type RingSpec } from './entityConfig'
 
 /* =========================================================
    GYROSCOPE RINGS
@@ -14,31 +15,6 @@ import { mood, spinRings } from './mood'
    every ring. All patterns are drawn in the fragment shader
    from the angle around the ring, so a ring costs one draw.
    ========================================================= */
-
-type RingKind = 'line' | 'band'
-
-type RingSpec = {
-  kind: RingKind
-  radius: number
-  width: number // tube radius for lines, band width for bands
-  count: number // segments around the ring (0 = continuous)
-  duty: number // lit fraction of each segment
-  spin: number // radians per entity-clock second
-  tilt: [number, number, number]
-  brightness: number
-  sweep: number // highlight sweep speed (turns per clock second)
-}
-
-const RINGS: RingSpec[] = [
-  { kind: 'line', radius: 0.8, width: 0.0028, count: 0, duty: 1, spin: 0.35, tilt: [1.2, 0.2, 0], brightness: 1.0, sweep: 0.22 },
-  { kind: 'band', radius: 0.9, width: 0.035, count: 120, duty: 0.2, spin: -0.22, tilt: [0.35, 1.1, 0.2], brightness: 0.55, sweep: 0.15 },
-  { kind: 'line', radius: 1.0, width: 0.0024, count: 36, duty: 0.72, spin: 0.18, tilt: [-0.6, 0.4, 0.9], brightness: 0.9, sweep: -0.18 },
-  { kind: 'band', radius: 1.08, width: 0.022, count: 6, duty: 0.62, spin: -0.12, tilt: [1.55, 0.0, 0.5], brightness: 0.75, sweep: 0.12 },
-  { kind: 'line', radius: 1.18, width: 0.002, count: 90, duty: 0.45, spin: 0.1, tilt: [0.15, -0.9, -0.3], brightness: 0.7, sweep: 0.1 },
-  { kind: 'band', radius: 1.27, width: 0.06, count: 240, duty: 0.1, spin: -0.07, tilt: [0.9, 0.7, -0.6], brightness: 0.45, sweep: -0.08 },
-  { kind: 'line', radius: 1.38, width: 0.0022, count: 3, duty: 0.82, spin: 0.08, tilt: [-1.1, -0.3, 0.2], brightness: 0.8, sweep: 0.07 },
-  { kind: 'line', radius: 1.5, width: 0.0016, count: 0, duty: 1, spin: -0.05, tilt: [0.5, 1.4, 0.9], brightness: 0.35, sweep: -0.05 },
-]
 
 function ringMaterial(spec: RingSpec, offset: number) {
   const { clock, intensity, cageScale } = entityUniforms
@@ -70,7 +46,7 @@ function ringMaterial(spec: RingSpec, offset: number) {
   // The whole ring flares as a shockwave front passes through its radius.
   const wave = shockAt(cageScale.mul(spec.radius))
   const base = stateColor()
-  material.colorNode = base.mul(level).add(base.mul(0.6).add(WHITE_HOT.mul(0.25)).mul(wave.mul(2.2)))
+  material.colorNode = base.mul(level).add(base.mul(0.6).add(WHITE_HOT.mul(0.25)).mul(wave.mul(2.2))).mul(depthFade())
   material.opacityNode = segment.mul(edge)
   return material
 }

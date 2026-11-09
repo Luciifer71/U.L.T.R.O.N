@@ -22,7 +22,14 @@ publicly.
 ```powershell
 npm run build
 npm run lint
+npm test
 ```
+
+`npm test` runs the unit tests in `tests/` with Node's built-in test runner (Node
+22.18 or newer runs TypeScript directly; no extra test framework is installed). They
+cover the mood engine (springs, shockwaves, idle thoughts, reduced motion), the ring
+config and orbit maths, and the visual-event contract. GitHub Actions runs lint (with
+warnings as errors), the type-checked build and the tests on every push.
 
 `npm run lint` should report no warnings. Per-frame shader uniform updates inside
 `useFrame` are standard React Three Fiber practice, so the `react/immutability`
@@ -42,7 +49,7 @@ The scene responds to listening, thinking, executing, alert and idle events.
 Keyboard keys 1–7 exercise idle, listening, thinking, executing, alert, focus and
 sleep locally. Keyboard animation alone does not verify the backend connection.
 
-`App.tsx` mounts `WebGPUTest.tsx`, which renders the computational entity from
+`App.tsx` mounts `EntityCanvas.tsx`, which renders the computational entity from
 `src/scene/UltronEntity.tsx` and `src/entity/`:
 
 | Layer | What it is |
@@ -72,6 +79,9 @@ Body language (`src/entity/mood.ts`) uses heavy, slightly under-damped springs:
   of light spreads across the neural shell from a random point, and one ring twitches.
 - **Fluid core:** a drifting noise field bends the core particles' orbits like smoke.
 - **Awakening:** on load the entity starts collapsed, unfolds and releases a first pulse.
+- **Depth:** the far half of the entity is dimmed so the glow reads as a 3D object.
+- **Reduced motion:** if the operating system asks to reduce motion, shockwaves and
+  wobble are softer and idle thoughts rarer; shape changes still show the state.
 
 The earlier dot-field layers (`src/scene/TSL*.tsx`, `EnergyEvents.tsx`) are unchanged.
 Open the UI with `?legacy=1` (for example `http://localhost:5173/?legacy=1`) to show

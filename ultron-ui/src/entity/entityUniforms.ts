@@ -1,9 +1,10 @@
 import * as THREE from 'three/webgpu'
-import { exp, float, instancedBufferAttribute, uniform, uv, vec3 } from 'three/tsl'
+import { exp, float, instancedBufferAttribute, positionView, smoothstep, uniform, uv, vec3 } from 'three/tsl'
 import type { Node } from 'three/webgpu'
 import { getEntityVisualState } from '../state/entityStore'
 import { getUltronEntityState } from '../simulation/entitySimulation'
 import { mood, updateMood } from './mood'
+import { randomOrbitBasis } from './entityConfig'
 
 /* =========================================================
    SHARED ENTITY UNIFORMS
@@ -40,6 +41,19 @@ export const entityUniforms = {
   thoughtAge: uniform(99),
   thoughtStrength: uniform(0),
   thoughtDir: uniform(new THREE.Vector3(0, 1, 0)),
+}
+
+/** Camera distance to the entity centre (see EntityCanvas). */
+export const CAMERA_DISTANCE = 4.8
+
+/**
+ * Additive glow has no occlusion, so the far side of the entity would be as
+ * bright as the near side and the whole thing would read flat. Dimming the
+ * far half gives a strong sense of depth for almost no cost.
+ */
+export function depthFade() {
+  const distance = positionView.z.negate()
+  return float(1).sub(smoothstep(CAMERA_DISTANCE - 0.6, CAMERA_DISTANCE + 1.9, distance).mul(0.55))
 }
 
 const SHOCK_SPEED = 0.95 // units per second: slow and heavy
@@ -109,17 +123,10 @@ export function buildOrbits(count: number, radius: (r: number) => number, speed:
   const u = new Float32Array(count * 3)
   const w = new Float32Array(count * 3)
   const p = new Float32Array(count * 4)
-  const axis = new THREE.Vector3()
-  const a = new THREE.Vector3()
-  const b = new THREE.Vector3()
-  const helper = new THREE.Vector3()
   for (let i = 0; i < count; i++) {
-    axis.randomDirection()
-    helper.set(Math.abs(axis.x) < 0.9 ? 1 : 0, Math.abs(axis.x) < 0.9 ? 0 : 1, 0)
-    a.crossVectors(axis, helper).normalize()
-    b.crossVectors(axis, a).normalize()
-    u.set([a.x, a.y, a.z], i * 3)
-    w.set([b.x, b.y, b.z], i * 3)
+    const basis = randomOrbitBasis()
+    u.set(basis.u, i * 3)
+    w.set(basis.w, i * 3)
     const r = radius(Math.random())
     const seed = Math.random()
     p.set([r, Math.random() * Math.PI * 2, speed(r, Math.random()), seed], i * 4)

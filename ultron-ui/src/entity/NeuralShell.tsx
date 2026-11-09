@@ -4,7 +4,7 @@ import * as THREE from 'three/webgpu'
 import { LineBasicNodeMaterial, SpriteNodeMaterial } from 'three/webgpu'
 import { acos, attribute, dot, exp, float, fract, instancedBufferAttribute, mix, positionLocal, select, sin, smoothstep, vec2 } from 'three/tsl'
 import type { Node } from 'three/webgpu'
-import { BLUE, entityUniforms, shockAt, softDisc, stateColor, WHITE_HOT } from './entityUniforms'
+import { BLUE, depthFade, entityUniforms, shockAt, softDisc, stateColor, WHITE_HOT } from './entityUniforms'
 import { mood } from './mood'
 
 /* =========================================================
@@ -108,6 +108,7 @@ export default function NeuralShell() {
       .mul(intensity)
       .mul(1.2)
       .add(eventColor.mul(lineEvents))
+      .mul(depthFade())
     const lineObject = new THREE.LineSegments(lines, lineMaterial)
     lineObject.frustumCulled = false
 
@@ -123,6 +124,7 @@ export default function NeuralShell() {
       .mul(0.7)
       .add(WHITE_HOT.mul(0.15))
       .mul(twinkle.mul(intensity).mul(1.1).add(nodeEvents.mul(1.5)))
+      .mul(depthFade())
     nodeMaterial.opacityNode = softDisc()
     const nodeMesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), nodeMaterial, NODE_COUNT)
     nodeMesh.frustumCulled = false

@@ -50,9 +50,6 @@ export function UltronEventBridge() {
           // endpoints that may not be browser-accessible.
           ignoreClusterUpdates: true,
 
-          // Temporary diagnostic visibility.
-          // We will disable this after the bridge is verified.
-          debug: true,
         })
 
         if (disposed) {
@@ -64,19 +61,10 @@ export function UltronEventBridge() {
           `[ULTRON BUS] Connected to ${NATS_WS_URL}`,
         )
 
-        console.info(
-          '[ULTRON BUS] Server:',
-          connection.getServer(),
-        )
-
         const subscription =
           connection.subscribe(
             ULTRON_VISUAL_SUBJECT,
           )
-
-        console.info(
-          `[ULTRON BUS] Subscribed to ${ULTRON_VISUAL_SUBJECT}`,
-        )
 
         for await (const message of subscription) {
           if (disposed) {
@@ -102,10 +90,6 @@ export function UltronEventBridge() {
 
             setUltronMode(event.event)
 
-            console.debug(
-              '[ULTRON BUS] Applied visual event',
-              event,
-            )
           } catch (error) {
             console.error(
               '[ULTRON BUS] Failed to process visual event',
@@ -113,10 +97,6 @@ export function UltronEventBridge() {
             )
           }
         }
-
-        console.info(
-          '[ULTRON BUS] Subscription loop ended',
-        )
 
       } catch (error) {
         if (!disposed) {
