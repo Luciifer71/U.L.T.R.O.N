@@ -119,6 +119,9 @@ def disconnect():
         (private_dir() / 'device.json').unlink(missing_ok=True)
 
 
+VOLUME_STEP = 10  # Percentage points for "Spotify volume up/down".
+
+
 class SpotifyClient:
     def __init__(self, request=None, clock=time.time, sleep=time.sleep):
         self.request = request or _request
@@ -279,7 +282,7 @@ class SpotifyClient:
                 if not item:
                     return result('Spotify has no current track.')
                 return result(('Playing: ' if state.get('is_playing') else 'Paused: ') + safe_text(item.get('name', 'unknown track')) + '.', True)
-            if action not in {'play', 'pause', 'resume', 'next', 'previous', 'queue', 'volume'}:
+            if action not in {'play', 'pause', 'resume', 'next', 'previous', 'queue', 'volume', 'volume_up', 'volume_down'}:
                 raise SpotifyError('Unsupported Spotify command.')
             if action in {'play', 'queue'} and (not isinstance(query, str) or not query.strip() or len(query) > 200):
                 raise SpotifyError('Please specify a song title and artist.')
@@ -311,9 +314,14 @@ class SpotifyClient:
             elif action in {'next', 'previous'}:
                 self.api('POST', '/me/player/' + action + '?' + urlencode(params))
                 return result('Spotify accepted the ' + action + '-track request.')
-            elif action == 'volume':
+            elif action in {'volume', 'volume_up', 'volume_down'}:
                 if not device.get('supports_volume', True):
                     raise SpotifyError('This Spotify device does not support API volume control.')
+                if action != 'volume':
+                    current = device.get('volume_percent')
+                    if type(current) is not int:
+                        raise SpotifyError('Spotify did not report the current volume. Say a volume percentage instead.')
+                    volume = max(0, min(100, current + (VOLUME_STEP if action == 'volume_up' else -VOLUME_STEP)))
                 self.api('PUT', '/me/player/volume?' + urlencode({**params, 'volume_percent': volume}))
                 return result(f'Spotify accepted volume {volume} percent.')
             # A 204 acknowledges the command; it does not prove playback started.
