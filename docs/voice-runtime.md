@@ -143,8 +143,9 @@ rejections are logged without treating room noise as a user request.
 
 Frames captured while TTS is gated stay muted even if consumed after playback.
 If TTS interrupts an utterance, its remaining tail is discarded until quiet.
-Calibration skips gated, stale and discontinuous frames, has a ten-second overall
-deadline, and fails if audio stops arriving. The running listener also reports
+Calibration skips gated, stale and discontinuous frames and needs ten seconds of
+ungated audio. Gated frames (Ultron speaking, such as startup announcements) restart
+that window, within a 45-second overall limit. It fails if audio stops arriving. The running listener also reports
 an error and closes its stream if no frame arrives within five seconds.
 
 Inference/audio consumption is still serial. A slow CPU inference can exceed the

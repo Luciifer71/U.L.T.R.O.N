@@ -152,14 +152,41 @@ def test_calibration_ignores_tts_and_damaged_audio(listener):
     asyncio.run(run())
 
 
+class StepClock:
+    """Each read advances the fake clock by one second."""
+    def __init__(self):
+        self.now = -1.0
+
+    def __call__(self):
+        self.now += 1.0
+        return self.now
+
+
 def test_calibration_is_bounded_even_if_tts_never_releases_gate(listener, monkeypatch):
-    clock = iter([0, 0, 11])
-    monkeypatch.setattr(listener, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    clock = StepClock()
+    monkeypatch.setattr(listener, "time", SimpleNamespace(monotonic=clock))
     async def run():
         queue = asyncio.Queue()
-        await queue.put(listener.AudioFrame(np.ones(1024), 0, 1, muted=True))
+        for n in range(200):
+            await queue.put(listener.AudioFrame(np.ones(1024), 0, n, muted=True))
         with pytest.raises(RuntimeError, match="No clean"):
             await listener.calibrate_ambient_noise(queue, samples=1)
+        # Speech extends the window, but never past the overall maximum.
+        assert clock.now <= listener.CALIBRATION_MAX_SEC + 2
+    asyncio.run(run())
+
+
+def test_calibration_survives_startup_speech_longer_than_clean_window(listener, monkeypatch):
+    # Reported crash: startup announcements kept the mic muted for most of the
+    # 10 s window, so calibration failed although the microphone worked.
+    clock = StepClock()
+    monkeypatch.setattr(listener, "time", SimpleNamespace(monotonic=clock))
+    async def run():
+        queue = asyncio.Queue()
+        for n in range(12):  # about 12 s of Ultron speaking
+            await queue.put(listener.AudioFrame(np.ones(1024), 0, n, muted=True))
+        await queue.put(listener.AudioFrame(np.zeros(1024), 10**6, 99))  # fresh, quiet audio
+        assert await listener.calibrate_ambient_noise(queue, samples=1) == 0.008
     asyncio.run(run())
 
 

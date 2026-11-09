@@ -57,6 +57,10 @@ SESSION_TIMEOUT_SEC = 25.0
 PREROLL_BLOCKS = 8
 POST_TTS_BUFFER_PADDING = 0.6
 MAX_AUDIO_BACKLOG_SEC = 2.0
+# Calibration needs this much unmuted time; muted frames (Ultron speaking)
+# restart the window, but the whole calibration never exceeds the maximum.
+CALIBRATION_CLEAN_SEC = 10.0
+CALIBRATION_MAX_SEC = 45.0
 AUDIO_MAILBOX_BLOCKS = max(1, int(MAX_AUDIO_BACKLOG_SEC * SAMPLE_RATE / AUDIO_BLOCK_SIZE))
 
 
@@ -318,15 +322,22 @@ async def calibrate_ambient_noise(
     )
 
     rms_values = []
-    deadline = time.monotonic() + 10.0
+    started = time.monotonic()
+    hard_deadline = started + CALIBRATION_MAX_SEC
+    deadline = started + CALIBRATION_CLEAN_SEC
     while len(rms_values) < samples:
-        remaining = deadline - time.monotonic()
+        remaining = min(deadline, hard_deadline) - time.monotonic()
         if remaining <= 0:
             raise RuntimeError("No clean microphone audio available during calibration")
         block = await asyncio.wait_for(audio_queue.get(), timeout=min(5.0, remaining))
 
         if isinstance(block, AudioFrame):
-            if block.muted or block.discontinuity or time.monotonic() - block.captured_at > MAX_AUDIO_BACKLOG_SEC:
+            if block.muted:
+                # Ultron is speaking (e.g. startup announcements), so the mic is
+                # muted. The mic is alive; restart the quiet window after speech.
+                deadline = max(deadline, time.monotonic() + CALIBRATION_CLEAN_SEC)
+                continue
+            if block.discontinuity or time.monotonic() - block.captured_at > MAX_AUDIO_BACKLOG_SEC:
                 continue
             block = block.samples
 
