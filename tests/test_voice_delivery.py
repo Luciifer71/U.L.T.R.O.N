@@ -170,3 +170,49 @@ def test_action_daemon_never_speaks_or_acts_on_ops_messages(daemon_module):
             {'text': 'say this', 'action': 'lock_workstation', 'event': 'x'}).encode())
         asyncio.run(daemon.message_handler(msg))
     assert spoken == [] and executed == []
+
+
+def _bare_daemon(module):
+    daemon = module.ActionDaemon()  # builds the real handler table; does not connect
+    daemon.speech_queue = SimpleNamespace(submit=lambda *a, **k: None)
+    return daemon
+
+
+def test_bus_messages_cannot_launch_processes_or_urls(daemon_module, monkeypatch):
+    launched = []
+    monkeypatch.setattr(daemon_module.subprocess, 'Popen', lambda *a, **k: launched.append(('popen', a, k)))
+    monkeypatch.setattr(daemon_module.webbrowser, 'open', lambda *a, **k: launched.append(('url', a)))
+    daemon = _bare_daemon(daemon_module)
+    hostile = [
+        {'action': 'open_app', 'app': 'calc & whoami'},
+        {'actions': ['lock_pc', {'action': 'launch_app', 'target': 'cmd /c echo pwned'}]},
+        {'action': 'get_diagnostics'},
+    ]
+    for subject in ('ultron.voice', 'ultron.intent', 'ultron.visual', 'ultron.anything', 'ultron.gestures', 'ultron.audio'):
+        for payload in hostile:
+            msg = SimpleNamespace(subject=subject, data=json.dumps(payload).encode())
+            asyncio.run(daemon.message_handler(msg))
+    assert launched == []
+    assert not hasattr(daemon_module.ActionDaemon, 'execute_single_action')
+    assert not hasattr(daemon_module.ActionDaemon, 'open_application')
+    assert 'ultron.>' not in daemon_module.SUBJECTS
+
+
+def test_experimental_events_only_run_on_their_own_subject(daemon_module):
+    daemon = _bare_daemon(daemon_module)
+    ran = []
+    async def handler():
+        ran.append('ran')
+    daemon.event_handlers = {key: handler for key in daemon.event_handlers}
+    cases = [
+        ('ultron.voice', {'gesture': 'FIST DETECTED'}),     # wrong subject
+        ('ultron.audio', {'gesture': 'FIST DETECTED'}),     # gesture on the clap subject
+        ('ultron.gestures', {'event': 'clap_detected'}),    # clap on the gesture subject
+        ('ultron.visual', {'event': 'clap_detected'}),      # not subscribed
+    ]
+    for subject, payload in cases:
+        asyncio.run(daemon.message_handler(SimpleNamespace(subject=subject, data=json.dumps(payload).encode())))
+    assert ran == []
+    asyncio.run(daemon.message_handler(SimpleNamespace(subject='ultron.gestures', data=b'{"gesture": "FIST DETECTED"}')))
+    asyncio.run(daemon.message_handler(SimpleNamespace(subject='ultron.audio', data=b'{"event": "clap_detected"}')))
+    assert ran == ['ran', 'ran']

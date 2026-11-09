@@ -8,17 +8,22 @@ import subprocess
 import sys
 import time
 import webbrowser
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import edge_tts
-import psutil
 import pygame
 from nats.aio.client import Client as NATS
 from ultron.control.reply_delivery import SpeechQueue
 from ultron.control.operations import OPS_PREFIX, heartbeat_loop
 
 NATS_URL = os.getenv("NATS_URL", "nats://127.0.0.1:4222")
-SUBJECT = "ultron.>"
+# The daemon speaks replies and handles the experimental gesture/clap events.
+# It deliberately does not subscribe to "ultron.>": a wildcard let any bus
+# message reach speech or desktop actions without the brain's checks.
+VOICE_SUBJECT = "ultron.voice"
+GESTURE_SUBJECT = "ultron.gestures"  # tools/experimental/gesture.py
+AUDIO_EVENT_SUBJECT = "ultron.audio"  # tools/experimental/audio_listen.py
+SUBJECTS = (VOICE_SUBJECT, GESTURE_SUBJECT, AUDIO_EVENT_SUBJECT)
 
 # Voice configuration tuned for Ultron's dark, imposing tone
 ULTRON_VOICE = "en-US-ChristopherNeural"
@@ -107,18 +112,18 @@ class UltronVoiceEngine:
 
 class ActionDaemon:
 
-    def __init__(self, nats_url: str = NATS_URL, subject: str = SUBJECT):
+    def __init__(self, nats_url: str = NATS_URL):
         self.nats_url = nats_url
-        self.subject = subject
         self.nc = NATS()
         self.voice: UltronVoiceEngine = None
         self.cooldowns: Dict[str, float] = {}
         self._shutdown_event = asyncio.Event()
 
+        # Each experimental event is accepted only on the subject its tool uses.
         self.event_handlers = {
-            "clap_detected": self._handle_clap,
-            "PALM OPEN": self._handle_palm_open,
-            "FIST DETECTED": self._handle_fist,
+            (AUDIO_EVENT_SUBJECT, "clap_detected"): self._handle_clap,
+            (GESTURE_SUBJECT, "PALM OPEN"): self._handle_palm_open,
+            (GESTURE_SUBJECT, "FIST DETECTED"): self._handle_fist,
         }
 
     async def speak_and_wait(self, text: str):
@@ -134,58 +139,6 @@ class ActionDaemon:
             self.cooldowns[event_type] = now
             return True
         return False
-
-    async def get_diagnostics(self):
-        try:
-            cpu = psutil.cpu_percent(interval=0.3)
-            ram = psutil.virtual_memory().percent
-            battery = psutil.sensors_battery()
-            power_str = (
-                f"{battery.percent} percent remaining"
-                if battery
-                else "direct power grid"
-            )
-
-            diag_msg = (
-                f"Core diagnostics verified. Processing utilization at {cpu} percent. "
-                f"Memory capacity at {ram} percent. Operational on {power_str}."
-            )
-            logger.info(f"[DIAGNOSTICS]: {diag_msg}")
-            await self.speak_and_wait(diag_msg)
-        except Exception as e:
-            logger.error(f"[DIAGNOSTICS ERROR]: {e}")
-
-    async def open_application(self, app_name: str):
-        if not app_name:
-            return
-
-        app_clean = app_name.lower().strip()
-        app_map = {
-            "task manager": "taskmgr.exe",
-            "taskmanager": "taskmgr.exe",
-            "chrome": "chrome.exe",
-            "google chrome": "chrome.exe",
-            "browser": "https://www.google.com",
-            "notepad": "notepad.exe",
-            "calculator": "calc.exe",
-            "calc": "calc.exe",
-            "cmd": "cmd.exe",
-            "terminal": "wt.exe",
-        }
-
-        target = app_map.get(app_clean, app_clean)
-
-        # Confirm verbally before process launch
-        await self.speak_and_wait(f"Executing sequence. Initializing {app_name}.")
-
-        logger.info(f"[LAUNCH]: Launching '{target}' for app '{app_name}'...")
-        try:
-            if target.startswith("http://") or target.startswith("https://"):
-                webbrowser.open(target)
-            else:
-                subprocess.Popen(target, shell=True)
-        except Exception as e:
-            logger.error(f"[LAUNCH ERROR]: Could not launch '{app_name}': {e}")
 
     async def _handle_clap(self):
         if self.is_cooled_down("clap"):
@@ -203,53 +156,19 @@ class ActionDaemon:
             if sys.platform == "win32":
                 ctypes.windll.user32.LockWorkStation()
 
-    async def execute_single_action(self, action_item: Dict[str, Any]):
-        """Executes a single step in the task sequence strictly to completion."""
-        action_type = action_item.get("action")
-        action_data = action_item
-
-        if action_type in [
-            "get_diagnostics",
-            "diagnostics",
-            "system_diagnostics",
-        ]:
-            await self.get_diagnostics()
-
-        elif action_type in [
-            "open_app",
-            "launch_app",
-            "open_application",
-        ]:
-            app_name = (
-                action_data.get("app")
-                or action_data.get("target")
-                or action_data.get("name")
-            )
-            await self.open_application(app_name)
-
-        elif action_type == "lock_pc":
-            if sys.platform == "win32":
-                await self.speak_and_wait("Locking workstation. Strings off.")
-                ctypes.windll.user32.LockWorkStation()
-
-        elif action_type == "custom_speech":
-            speech_text = action_data.get("speech") or action_data.get("text")
-            if speech_text:
-                await self.speak_and_wait(speech_text)
-
     async def message_handler(self, msg):
-        """Processes incoming messages through a strict sequential task queue."""
+        """Speak replies and run the fixed experimental event handlers. Nothing else."""
+        if msg.subject not in SUBJECTS or msg.subject.startswith(OPS_PREFIX):
+            return
         try:
             payload: Dict[str, Any] = json.loads(msg.data.decode())
-
-            if msg.subject in {"ultron.voice.cancel", "ultron.voice.state"}:
-                return
-            # Dashboard traffic is never speech or an action, whatever its fields.
-            if msg.subject.startswith(OPS_PREFIX):
-                return
-
-            # Standalone voice channel message
-            if msg.subject == "ultron.voice":
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            logger.error(f"[DAEMON ERROR] Invalid JSON on subject '{msg.subject}'")
+            return
+        if not isinstance(payload, dict):
+            return
+        try:
+            if msg.subject == VOICE_SUBJECT:
                 speech_text = payload.get("speech") if "speech" in payload else payload.get("text")
                 if speech_text and not payload.get("silent"):
                     key = payload.get("statusKey")
@@ -257,45 +176,11 @@ class ActionDaemon:
                                              ttl=20 if key else None)
                 return
 
-            # Construct ordered execution pipeline
-            task_pipeline: List[Dict[str, Any]] = []
-
-            # Step 1: Add intro speech if present alongside action list
-            intro_speech = payload.get("speech") or payload.get("text")
-            if intro_speech and "actions" in payload:
-                task_pipeline.append({"action": "custom_speech", "speech": intro_speech})
-
-            # Step 2: Add actions array or single action payload
-            if "actions" in payload and isinstance(payload["actions"], list):
-                for act in payload["actions"]:
-                    if isinstance(act, str):
-                        task_pipeline.append({"action": act})
-                    elif isinstance(act, dict):
-                        task_pipeline.append(act)
-
-            elif "action" in payload:
-                task_pipeline.append(payload)
-
-            elif intro_speech:
-                task_pipeline.append({"action": "custom_speech", "speech": intro_speech})
-
-            # --- STRICT SEQUENTIAL EXECUTION LOOP ---
-            for step_idx, task in enumerate(task_pipeline, start=1):
-                logger.info(
-                    f"[PIPELINE STEP {step_idx}/{len(task_pipeline)}]: Executing {task}"
-                )
-                await self.execute_single_action(task)
-
-            # Gesture Events Handling
-            event_type = payload.get("event") or payload.get("gesture")
-            if event_type:
+            event_type = payload.get("event") if msg.subject == AUDIO_EVENT_SUBJECT else payload.get("gesture")
+            handler = self.event_handlers.get((msg.subject, event_type))
+            if handler:
                 logger.info(f"[ACTION EVENT] Event='{event_type}'")
-                handler = self.event_handlers.get(event_type)
-                if handler:
-                    await handler()
-
-        except json.JSONDecodeError:
-            logger.error(f"[DAEMON ERROR] Invalid JSON on subject '{msg.subject}'")
+                await handler()
         except Exception as e:
             logger.error(f"[DAEMON ERROR] Failed to process message: {e}")
 
@@ -321,10 +206,11 @@ class ActionDaemon:
 
         await self.nc.subscribe("ultron.voice.cancel", cb=cancel_speech)
         await self.nc.subscribe("ultron.voice.state", cb=voice_state)
-        await self.nc.subscribe(self.subject, cb=self.message_handler)
+        for subject in SUBJECTS:
+            await self.nc.subscribe(subject, cb=self.message_handler)
         await self.nc.flush()
         heartbeat = asyncio.create_task(heartbeat_loop(self.nc, "action_daemon"))
-        logger.info(f"[ULTRON] Action daemon online. Subscribed to '{self.subject}'...")
+        logger.info(f"[ULTRON] Action daemon online. Subscribed to {', '.join(SUBJECTS)}.")
         self.speech_queue.submit("Ultron core action daemon online.")
         try:
             await self._shutdown_event.wait()

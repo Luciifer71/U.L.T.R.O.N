@@ -45,8 +45,8 @@ The panel talks to the brain over the existing local NATS WebSocket
 | `ultron.ops.heartbeat` | publish | Liveness from the listener and action daemon. |
 | `ultron.intent`, `ultron.voice` | subscribe / publish | Transcript and typed commands. |
 
-The action daemon ignores every `ultron.ops.*` message, so dashboard traffic is
-never spoken or executed. The NATS WebSocket has no authentication: keep it bound
+The action daemon listens only to `ultron.voice` (speech) and the two experimental
+event subjects below, so dashboard traffic is never spoken or executed. The NATS WebSocket has no authentication: keep it bound
 to `127.0.0.1` (as in `docker-compose.yml`) and do not expose it on a network.
 
 If the 3D entity fails to start (no WebGPU), the page shows a short notice and the
