@@ -72,7 +72,7 @@ def control_request(text):
     # with the existing system-volume control.
     step = re.fullmatch(
         REQUEST_PREFIX + rf"(?:(?:(?:turn|set|put) )?(?:{_SPOTIFY_VOLUME}|spotify) (up|down)"
-        rf"|turn (up|down) (?:{_SPOTIFY_VOLUME}|spotify)|make spotify (louder|quieter))"
+        rf"|turn (up|down) (?:{_SPOTIFY_VOLUME}|spotify)|make (?:this |the )?spotify (louder|quieter))"
         r"(?: a (?:bit|little))?(?: for me)?(?: please)?", lowered)
     if step:
         word = next(group for group in step.groups() if group)

@@ -322,6 +322,7 @@ def test_sunflower_original_is_preferred_over_livestream(monkeypatch):
     ('Turn down Spotify', {'action': 'volume_down'}),
     ('Can you make Spotify louder?', {'action': 'volume_up'}),
     ('Make Spotify quieter a bit', {'action': 'volume_down'}),
+    ('Can you make this Spotify quieter?', {'action': 'volume_down'}),
 ])
 def test_flexible_control_phrasings(prompt, expected):
     assert spotify_request(prompt, connected=True) == expected
