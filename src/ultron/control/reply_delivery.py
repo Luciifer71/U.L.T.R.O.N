@@ -5,6 +5,7 @@ import json
 import time
 
 from ultron.control.read_requests import read_request_kinds, read_request_reply
+from ultron.gestures.activation import CONTROL_SUBJECT as VISION_CONTROL, gesture_command
 
 
 class SpeechQueue:
@@ -85,6 +86,11 @@ class IntentInbox:
                 return
         except (ValueError, UnicodeError):
             return
+        gesture = gesture_command(prompt)
+        if gesture:
+            await self._gesture_mode(gesture, data.get('requestId'))
+            print(f'[FAST REPLY] kind={gesture} handler_seconds={time.perf_counter() - started:.3f}', flush=True)
+            return
         stop = prompt.lower().strip(' .!?') in {'stop speaking', 'cancel speech', 'be quiet'}
         reads = read_request_kinds(prompt) if not stop else None
         kind = '+'.join(reads) if reads else self.classify(prompt)
@@ -118,6 +124,26 @@ class IntentInbox:
                 'text': 'The command queue is full. Please wait before trying again.',
                 'requestId': data.get('requestId'), 'statusKey': 'queue-full',
                 'execution': {'success': False, 'error': 'queue_full'}}).encode())
+
+    async def _gesture_mode(self, command, request_id):
+        """Ask the vision service to switch gesture mode and say what happened."""
+        try:
+            reply = await self.nc.request(VISION_CONTROL, json.dumps(
+                {'command': command, 'source': 'voice'}).encode(), timeout=1.5)
+            state = json.loads(reply.data.decode())
+            if state.get('gesture'):
+                text = 'Gesture mode on. Show me your hands.'
+            elif command == 'gesture_on':
+                text = "I couldn't start gesture mode: " + str(state.get('error') or 'the camera is unavailable') + '.'
+            else:
+                text = 'Gesture mode off.'
+            ok = bool(state.get('gesture')) == (command == 'gesture_on')
+        except Exception:
+            text = 'The vision service is not running, so gesture mode is unavailable.'
+            ok = False
+        await self.nc.publish('ultron.voice', json.dumps({
+            'text': text, 'speech': text, 'requestId': request_id,
+            'execution': {'success': ok, 'error': None if ok else 'gesture_mode'}}).encode())
 
     def clear_pending(self):
         """Drop queued (not yet started) requests; returns how many were dropped."""

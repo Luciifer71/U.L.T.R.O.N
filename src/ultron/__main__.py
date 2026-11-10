@@ -3,7 +3,7 @@ import os
 import runpy
 import sys
 
-COMMANDS = {'start': 'cli.start_ultron', 'verify': 'cli.verify_ultron', 'report': 'cli.collect_ultron_report', 'accept': 'cli.ultron_acceptance', 'diagnose': 'cli.ultron_diagnostics', 'speech': 'cli.speech_diagnostics', 'google': 'cli.google_connect', 'spotify': 'cli.spotify_connect', 'resources': 'cli.resource_cli', 'send': 'cli.send_intent', 'benchmark': 'cli.model_benchmark', 'brain_agent': 'agents.brain_agent', 'action_daemon': 'agents.action_daemon', 'voice_listener': 'agents.voice_listener', 'presence': 'agents.presence_watcher'}
+COMMANDS = {'start': 'cli.start_ultron', 'verify': 'cli.verify_ultron', 'report': 'cli.collect_ultron_report', 'accept': 'cli.ultron_acceptance', 'diagnose': 'cli.ultron_diagnostics', 'speech': 'cli.speech_diagnostics', 'google': 'cli.google_connect', 'spotify': 'cli.spotify_connect', 'resources': 'cli.resource_cli', 'send': 'cli.send_intent', 'benchmark': 'cli.model_benchmark', 'brain_agent': 'agents.brain_agent', 'action_daemon': 'agents.action_daemon', 'voice_listener': 'agents.voice_listener', 'vision': 'agents.vision_service', 'presence': 'agents.vision_service'}
 
 
 def main():
@@ -15,7 +15,9 @@ def main():
     if command not in COMMANDS:
         print(f"Unknown command: {command}", file=sys.stderr)
         return 2
-    if command in {"brain_agent", "action_daemon", "voice_listener", "presence"}:
+    if command == "presence":
+        os.environ["ULTRON_PRESENCE"] = "1"  # vision service with face presence on
+    if command in {"brain_agent", "action_daemon", "voice_listener", "vision", "presence"}:
         from ultron.paths import project_root
         os.chdir(project_root())
     sys.argv = [sys.argv[0], *sys.argv[2:]]

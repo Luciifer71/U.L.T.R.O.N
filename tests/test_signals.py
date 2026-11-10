@@ -93,7 +93,12 @@ def test_vitals_loop_publishes_periodically():
     async def run():
         recorder = Recorder()
         task = asyncio.create_task(vitals_loop(recorder, interval=0.01, reader=lambda: {'cpu': 0.1, 'memory': 0.2}))
-        await asyncio.sleep(0.06)
+        # Wait for the condition rather than a fixed time: Windows timers tick
+        # about every 15 ms, so a short fixed sleep can see a single publish.
+        for _ in range(200):
+            if len(recorder.sent) >= 2:
+                break
+            await asyncio.sleep(0.01)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task

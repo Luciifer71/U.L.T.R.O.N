@@ -177,6 +177,7 @@
 import EntityCanvas from './EntityCanvas'
 import SceneBoundary from './SceneBoundary'
 import OpsPanel from './ops/OpsPanel'
+import GestureHud from './ops/GestureHud'
 
 export default function App() {
   return (
@@ -184,6 +185,7 @@ export default function App() {
       <SceneBoundary>
         <EntityCanvas />
       </SceneBoundary>
+      <GestureHud />
       <OpsPanel />
     </>
   )

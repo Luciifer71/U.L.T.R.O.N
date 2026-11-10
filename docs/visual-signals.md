@@ -11,11 +11,15 @@ publish small, content-free display hints on NATS under `ultron.signal.<kind>`
 | `ultron.signal.voice` | listener, while you speak (max 15/s, then a final 0) | `level` 0..1 | ripples through the core |
 | `ultron.signal.model` | brain, around each model request | `phase` start/end, `seconds` | rapid neural cascades that build up while the model thinks |
 | `ultron.signal.vitals` | brain, every 2 s | `cpu`, `memory` 0..1 | core pressure: hotter core and shivering rings, only under real strain |
-| `ultron.signal.gaze` | optional presence watcher (camera, off by default) | `present`, `x`, `y`, `near` | the entity turns toward you and notices you arrive ([camera presence](camera-presence.md)) |
+| `ultron.signal.gaze` | vision service, presence mode (camera, off by default) | `present`, `x`, `y`, `near` | the entity notices you arrive with a shockwave ([camera presence](camera-presence.md)) |
+| `ultron.signal.hands` | vision service, gesture mode (~30/s) | `hands`: up to two of `side`, `pose`, `engaged`, `pinch`, `points` (21 landmarks) | glowing holographic hand skeletons in front of the entity ([hand gestures](gestures.md)) |
+| `ultron.signal.gesture` | vision service, gesture mode, when a pose changes | `type` pose, `hand`, `pose`, `previous` | the pose name in the GESTURE MODE heading |
 
 The UI also reads existing subjects: `ultron.status.speaking` (the core swells in a
 speech rhythm while ULTRON talks), `ultron.intent` (each word of a request streams
-into the core) and `ultron.voice` (each word of a reply streams out).
+into the core), `ultron.voice` (each word of a reply streams out) and
+`ultron.vision.state` (whether gesture mode is on, shown as the GESTURE MODE heading
+and the Ops panel button).
 
 ## Guarantees
 

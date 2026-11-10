@@ -108,8 +108,14 @@ or minimised tabs stop rendering. On the backend, live signals cost one `psutil`
 every 2 s plus small messages while you speak or a task runs.
 
 Camera presence (Phase D, optional, off by default; see
-[camera presence](../docs/camera-presence.md)): the entity turns toward you, its core
-drifts toward you and it notices you arrive.
+[camera presence](../docs/camera-presence.md)): the entity notices you arrive with a
+shockwave.
+
+Gesture mode (see [hand gestures](../docs/gestures.md)): your tracked hands appear in
+front of the entity as glowing holographic skeletons (`src/entity/HoloHands.tsx`), with
+a GESTURE MODE heading showing the latest pose (`src/ops/GestureHud.tsx`). The Ops
+panel has a Gesture mode button and shows the vision service's health. Hands cost 42
+points written per frame and nothing at all while gesture mode is off.
 
 The earlier dot-field layers (`src/scene/TSL*.tsx`, `EnergyEvents.tsx`) are unchanged.
 Open the UI with `?legacy=1` (for example `http://localhost:5173/?legacy=1`) to show

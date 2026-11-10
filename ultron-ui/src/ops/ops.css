@@ -235,3 +235,76 @@
 }
 
 .ops-command button:disabled, .ops-command input:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Gesture mode toggle (Ops panel) */
+.ops-gesture {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ops-gesture-button {
+  padding: 7px 12px;
+  background: var(--ops-surface);
+  border: 1px solid var(--ops-border);
+  border-radius: 8px;
+  color: var(--ops-text);
+  font: 600 12px system-ui, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ops-gesture-button--on {
+  border-color: var(--ops-busy);
+  color: var(--ops-busy);
+  box-shadow: 0 0 12px rgba(106, 168, 255, 0.35);
+}
+
+.ops-gesture-button:hover:not(:disabled) { filter: brightness(1.15); }
+.ops-gesture-button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Gesture HUD (over the entity) */
+.gesture-hud {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+  font: 600 12px system-ui, sans-serif;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: #8fbaff;
+  text-shadow: 0 0 10px rgba(80, 140, 255, 0.8);
+  z-index: 20;
+}
+
+.gesture-hud-pose {
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  color: #d8e6ff;
+  opacity: 0.85;
+  transition: opacity 0.3s;
+}
+
+.gesture-hud-pose--stale { opacity: 0.35; }
+
+.gesture-hud-error {
+  letter-spacing: 0.08em;
+  text-transform: none;
+  color: var(--ops-warn, #f2b33d);
+  text-shadow: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .gesture-hud-title { animation: gesture-hud-breathe 2.6s ease-in-out infinite; }
+}
+
+@keyframes gesture-hud-breathe {
+  50% { opacity: 0.6; }
+}

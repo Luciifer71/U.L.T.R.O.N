@@ -21,6 +21,7 @@ const LIVE_SUBJECTS = [
   'ultron.status.speaking',
   'ultron.intent',
   'ultron.voice',
+  'ultron.vision.state',
 ] as const
 
 async function feedLiveSignals(

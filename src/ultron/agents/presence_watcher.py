@@ -1,24 +1,15 @@
-"""Optional camera presence for the visual entity. Off unless explicitly started.
+"""Face-presence helpers for the vision service (``vision_service.py``).
 
-Reads the webcam at low resolution, finds the largest face with OpenCV's YuNet
-detector (small bundled model, no download), and publishes only three numbers on
-``ultron.signal.gaze``: whether someone is present and where their face is
-(``x`` left/right and ``y`` up/down in -1..1, from the viewer's side).
+With ``ULTRON_PRESENCE=1`` the vision service checks for a face 10 times a second
+at low resolution so the entity can notice you sit down. These helpers find the
+largest face (OpenCV YuNet, bundled model; Haar cascade fallback) and decide what
+to publish on ``ultron.signal.gaze``: only whether someone is present and where.
 
-Privacy: frames stay in memory for one detection and are then discarded. No image,
-face crop or identity is stored, logged or sent. The camera is released on exit.
-This is display-only: nothing acts on the signal except the UI.
-
-Start it with ``run_ultron.py presence``, or ``start-ultron.cmd --presence``, or set
-``ULTRON_PRESENCE=1`` in ``.env`` to start it with the other components.
+Privacy: frames are discarded after detection; no image, crop or identity is ever
+stored, logged or sent.
 """
-import asyncio
-import logging
-import os
-import time
 from pathlib import Path
 
-from ultron.control.signals import SignalPublisher
 
 FRAME_WIDTH = 320
 FRAME_HEIGHT = 240
@@ -29,7 +20,6 @@ SMOOTHING = 0.45  # weight of the newest position (exponential moving average)
 # OpenCV Zoo YuNet face detector (MIT licence, see assets/models/face_detection_yunet_LICENSE.txt).
 YUNET_MODEL = 'face_detection_yunet_2023mar.onnx'
 
-logger = logging.getLogger('ultron.presence')
 
 
 def largest_face(boxes):
@@ -100,17 +90,6 @@ class PresenceTracker:
         return {'present': self.present, 'x': round(self.x, 3), 'y': round(self.y, 3), 'near': round(self.near, 3)}
 
 
-def open_camera(index):
-    import cv2
-    backend = cv2.CAP_DSHOW if os.name == 'nt' else cv2.CAP_ANY
-    capture = cv2.VideoCapture(index, backend)
-    if not capture.isOpened():
-        raise RuntimeError(f'Camera {index} could not be opened (in use, missing, or blocked by privacy settings).')
-    capture.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_WIDTH)
-    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_HEIGHT)
-    return capture
-
-
 def face_detector(model_path=None):
     """Return detect(frame) -> list of (x, y, w, h) face boxes.
 
@@ -139,53 +118,3 @@ def face_detector(model_path=None):
             return detect
     raise RuntimeError(f'No face detector available: {YUNET_MODEL} is missing from assets/models '
                        'and this OpenCV build has no Haar cascade.')
-
-
-async def run_presence(capture, detect, publisher, *, clock=time.monotonic, sleep=asyncio.sleep,
-                       max_frames=None, tracker=None):
-    """Read frames, detect, publish. Returns when ``max_frames`` is reached (tests) or on cancel."""
-    tracker = tracker or PresenceTracker()
-    frames = 0
-    while max_frames is None or frames < max_frames:
-        started = clock()
-        ok, frame = await asyncio.to_thread(capture.read)
-        frames += 1
-        if ok and frame is not None:
-            height, width = frame.shape[:2]
-            box = largest_face(await asyncio.to_thread(detect, frame))
-            payload = tracker.update(box, width, height, clock())
-            if payload is not None:
-                publisher.emit('gaze', payload)
-            del frame  # nothing about the image outlives this iteration
-        else:
-            payload = tracker.update(None, FRAME_WIDTH, FRAME_HEIGHT, clock())
-            if payload is not None:
-                publisher.emit('gaze', payload)
-        await sleep(max(0.0, 1.0 / RATE_HZ - (clock() - started)))
-
-
-async def main():
-    from nats.aio.client import Client as NATS
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-    nc = NATS()
-    await nc.connect(os.getenv('NATS_URL', 'nats://127.0.0.1:4222'), max_reconnect_attempts=-1,
-                     reconnect_time_wait=2)
-    publisher = SignalPublisher(nc)
-    capture = open_camera(int(os.getenv('ULTRON_CAMERA_INDEX', '0')))
-    logger.info('[PRESENCE] Camera on at %dx%d, %d checks/s. Only face position numbers are sent; '
-                'no images are stored or transmitted. Stop with Ctrl+C.', FRAME_WIDTH, FRAME_HEIGHT, RATE_HZ)
-    try:
-        await run_presence(capture, face_detector(), publisher)
-    finally:
-        capture.release()
-        publisher.emit('gaze', {'present': False, 'x': 0, 'y': 0, 'near': 0})
-        await asyncio.sleep(0.1)
-        await nc.drain()
-        logger.info('[PRESENCE] Camera released.')
-
-
-if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        pass

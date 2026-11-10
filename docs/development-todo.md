@@ -29,7 +29,19 @@ not endless inference, unlimited retries or an assistant that cannot be stopped.
 - [x] Phase A: body language (springs, shockwaves, idle thoughts, awakening).
 - [x] Phase B: live data (task steps as rings, voice, words, model activity, system load).
 - [x] Phase C: cinematic lens pass, glitches, hologram scan, lightning.
-- [x] Phase D: optional camera presence (the entity turns toward the user; off by default).
+- [x] Phase D: optional camera presence (the entity notices the user arrive; off by default).
+
+## Hand gestures (see `gestures.md` for the mapping table)
+- [x] G1: vision service (sole camera owner), hand tracking and pose recognition,
+      gesture mode on by double clap / voice / Ops button, off by both palms / voice /
+      button / 3 min idle; holographic hands and GESTURE MODE heading in the UI.
+- [ ] G2: air mouse: pointer, click, double-click, drag, scroll.
+- [ ] G3: windows: grab and move, throw to the monitor in any direction (real monitor
+      layout), two-hand resize.
+- [ ] G4: clipboard grab/release, swipes, twist volume, palm pause, frame screenshot,
+      fist lock (always confirmed), both-palms push to stop.
+- [ ] G5: holographic workspace (panels you can grab in the UI).
+- [ ] G6: custom gestures and per-user calibration; later a hologram output mode.
 
 ## Adopt OpenJarvis ideas (see `openjarvis-review.md`; independent implementations)
 - [ ] Phase E: automatic long-term memory; scheduler and reminders.

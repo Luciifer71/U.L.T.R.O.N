@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { createLiveSignals, PACKET_SLOTS, STEP_RING_ORDER, wordCount } from '../src/entity/liveSignals.ts'
+import { createLiveSignals, PACKET_SLOTS, parseHands, STEP_RING_ORDER, wordCount } from '../src/entity/liveSignals.ts'
 import { RING_COUNT } from '../src/entity/entityConfig.ts'
 
 function seeded(seed = 1) {
@@ -153,7 +153,7 @@ describe('model, vitals and words', () => {
 })
 
 describe('camera presence', () => {
-  test('arriving is noticed once, the entity turns toward the viewer, and settles back when they leave', () => {
+  test('arriving is noticed once and presence fades when they leave', () => {
     const live = createLiveSignals(seeded())
     live.handle('ultron.signal.gaze', { present: true, x: 0.8, y: -0.4, near: 0.3 }, 0)
     assert.equal(live.state.notices, 1, 'the first arrival is noticed')
@@ -163,13 +163,13 @@ describe('camera presence', () => {
       if (i % 6 === 0) live.handle('ultron.signal.gaze', { present: true, x: 0.8, y: -0.4 }, now)
       live.update(now, 1 / 60)
     }
-    assert.ok(live.state.presence > 0.95 && live.state.gazeX > 0.75 && live.state.gazeY < -0.35)
+    assert.ok(live.state.presence > 0.95)
     live.handle('ultron.signal.gaze', { present: true, x: 0.8, y: -0.4 }, now)
     assert.equal(live.state.notices, 1, 'staying present is not noticed again')
 
     live.handle('ultron.signal.gaze', { present: false, x: 0, y: 0 }, now)
     now = settle(live, now, 5)
-    assert.ok(live.state.presence < 0.01 && Math.abs(live.state.gazeX) < 0.01, 'turns back to neutral')
+    assert.ok(live.state.presence < 0.01, 'presence fades when they leave')
     live.handle('ultron.signal.gaze', { present: true, x: 0, y: 0 }, now)
     assert.equal(live.state.notices, 2, 'coming back after a while is noticed')
   })
@@ -185,5 +185,47 @@ describe('camera presence', () => {
     live.handle('ultron.signal.gaze', { present: true, x: 'left', y: Number.NaN }, 20)
     assert.equal(live.state.gazeTarget.x, 0)
     assert.equal(live.state.gazeTarget.y, 0)
+  })
+})
+
+describe('gesture mode', () => {
+  const hand = (side: string, pose = 'point') => ({
+    side, pose, engaged: true, pinch: 0.8,
+    points: Array.from({ length: 21 }, (_, i) => [0.4 + i * 0.005, 0.5 - i * 0.01, 0]),
+  })
+
+  test('vision state, hands and poses are tracked; hands vanish when stale or mode ends', () => {
+    const live = createLiveSignals(seeded())
+    live.handle('ultron.vision.state', { gesture: true, presence: false, camera: true, error: null }, 0)
+    assert.equal(live.state.gestureMode, true)
+    live.handle('ultron.signal.hands', { hands: [hand('Right'), hand('Left', 'open_palm')] }, 0.1)
+    assert.equal(live.state.hands.length, 2)
+    live.handle('ultron.signal.gesture', { type: 'pose', hand: 'Right', pose: 'pinch', previous: 'point' }, 0.2)
+    assert.deepEqual(live.state.lastGesture, { hand: 'Right', pose: 'pinch', at: 0.2 })
+    live.update(1, 1 / 60)
+    assert.equal(live.state.hands.length, 0, 'stale hands are hidden')
+    live.handle('ultron.signal.hands', { hands: [hand('Right')] }, 1)
+    live.handle('ultron.vision.state', { gesture: false, error: 'Camera 0 could not be opened' }, 1.1)
+    assert.equal(live.state.gestureMode, false)
+    assert.equal(live.state.gestureError, 'Camera 0 could not be opened')
+    assert.equal(live.state.hands.length, 0)
+    assert.equal(live.state.gestureErrorAt, 1.1)
+  })
+
+  test('turning gesture mode on clears the pose from last time', () => {
+    const live = createLiveSignals(seeded())
+    live.handle('ultron.vision.state', { gesture: true }, 0)
+    live.handle('ultron.signal.gesture', { type: 'pose', hand: 'Right', pose: 'fist', previous: 'point' }, 1)
+    live.handle('ultron.vision.state', { gesture: false }, 2)
+    live.handle('ultron.vision.state', { gesture: true }, 3)
+    assert.equal(live.state.lastGesture, null)
+  })
+
+  test('malformed hands are dropped, never drawn', () => {
+    assert.deepEqual(parseHands('nope'), [])
+    assert.equal(parseHands([hand('Middle')]).length, 0)
+    assert.equal(parseHands([{ ...hand('Right'), points: [[0, 0, 0]] }]).length, 0)
+    assert.equal(parseHands([{ ...hand('Right'), points: Array(21).fill([0, 'x', 0]) }]).length, 0)
+    assert.equal(parseHands([hand('Right'), hand('Left'), hand('Right')]).length, 2, 'at most two hands')
   })
 })
