@@ -13,6 +13,31 @@ import {
   setUltronMode,
 } from '../simulation/entitySimulation'
 
+import { liveSignals } from '../entity/liveSignals'
+
+// Live data the entity reacts to (see src/entity/liveSignals.ts).
+const LIVE_SUBJECTS = [
+  'ultron.signal.>',
+  'ultron.status.speaking',
+  'ultron.intent',
+  'ultron.voice',
+] as const
+
+async function feedLiveSignals(
+  connection: NatsConnection,
+  subject: string,
+  isDisposed: () => boolean,
+) {
+  for await (const message of connection.subscribe(subject)) {
+    if (isDisposed()) break
+    try {
+      liveSignals.handle(message.subject, JSON.parse(message.string()), performance.now() / 1000)
+    } catch {
+      // Malformed messages are ignored; they only ever drive visuals.
+    }
+  }
+}
+
 const NATS_WS_URL =
   import.meta.env.VITE_ULTRON_NATS_WS_URL ??
   'ws://127.0.0.1:9222'
@@ -60,6 +85,10 @@ export function UltronEventBridge() {
         console.info(
           `[ULTRON BUS] Connected to ${NATS_WS_URL}`,
         )
+
+        for (const subject of LIVE_SUBJECTS) {
+          void feedLiveSignals(connection, subject, () => disposed)
+        }
 
         const subscription =
           connection.subscribe(

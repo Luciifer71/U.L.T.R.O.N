@@ -24,6 +24,7 @@ import SimulationRuntime
 import { UltronEventBridge } from './bridge/UltronEventBridge'
 
 import UltronEntity from './scene/UltronEntity'
+import FrameLimiter from './entity/FrameLimiter'
 
 import {
   Canvas,
@@ -47,6 +48,8 @@ export default function EntityCanvas() {
     >
 
       <Canvas
+        // Rendering is driven by FrameLimiter (60 fps cap by default).
+        frameloop="never"
         camera={{
           position: [
             0,
@@ -85,6 +88,8 @@ export default function EntityCanvas() {
           return renderer
         }}
       >
+        <FrameLimiter />
+
         <UltronEventBridge />
         
         <SimulationRuntime />

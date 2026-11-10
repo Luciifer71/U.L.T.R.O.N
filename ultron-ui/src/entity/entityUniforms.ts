@@ -4,6 +4,7 @@ import type { Node } from 'three/webgpu'
 import { getEntityVisualState } from '../state/entityStore'
 import { getUltronEntityState } from '../simulation/entitySimulation'
 import { mood, updateMood } from './mood'
+import { liveSignals } from './liveSignals'
 import { randomOrbitBasis } from './entityConfig'
 
 /* =========================================================
@@ -41,6 +42,12 @@ export const entityUniforms = {
   thoughtAge: uniform(99),
   thoughtStrength: uniform(0),
   thoughtDir: uniform(new THREE.Vector3(0, 1, 0)),
+  // Live data (see liveSignals.ts), all 0..1, plus wall-clock seconds.
+  voice: uniform(0),
+  speak: uniform(0),
+  model: uniform(0),
+  pressure: uniform(0),
+  now: uniform(0),
 }
 
 /** Camera distance to the entity centre (see EntityCanvas). */
@@ -97,7 +104,16 @@ export function syncEntityUniforms(dt: number) {
   u.information.value = v.informationDensity
   u.events.value = v.eventDensity
 
-  updateMood(getUltronEntityState().mode, dt)
+  const now = performance.now() / 1000
+  liveSignals.update(now, dt)
+  const live = liveSignals.state
+  u.voice.value = live.voice
+  u.speak.value = live.speak
+  u.model.value = live.model
+  u.pressure.value = live.pressure
+  u.now.value = now
+
+  updateMood(getUltronEntityState().mode, dt, live.model)
   u.coreScale.value = mood.core
   u.cageScale.value = mood.cage
   u.shellScale.value = mood.shell

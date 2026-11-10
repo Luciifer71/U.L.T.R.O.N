@@ -140,8 +140,11 @@ export function createMood({ ringCount = RING_COUNT, random = Math.random, reduc
     if (ringCount > 0) wobble[Math.floor(random() * ringCount)][0].kick((random() - 0.5) * 0.6 * strength * motionScale)
   }
 
-  /** Advance by dt seconds of real time in the given mode. */
-  function update(mode: UltronMode, dt: number) {
+  /**
+   * Advance by dt seconds of real time in the given mode. `model` (0..1) is how
+   * hard the language model is working right now (see liveSignals).
+   */
+  function update(mode: UltronMode, dt: number, model = 0) {
     elapsed += dt
 
     // Awakening: everything starts collapsed and unfolds, then a first pulse.
@@ -164,7 +167,8 @@ export function createMood({ ringCount = RING_COUNT, random = Math.random, reduc
     state.shell = shape.shell.step(target.shell, dt)
     state.align = Math.max(0, Math.min(1, shape.align.step(target.align, dt)))
     state.spin = shape.spin.step(target.spin, dt)
-    state.flow = shape.flow.step(target.flow, dt)
+    // Inference stirs the core like a current through it.
+    state.flow = shape.flow.step(target.flow + model * 0.6, dt)
 
     wobble.forEach((pair, i) => {
       state.ringWobble[i][0] = pair[0].step(0, dt)
@@ -175,12 +179,18 @@ export function createMood({ ringCount = RING_COUNT, random = Math.random, reduc
     state.thought.age += dt
 
     // Rare idle thoughts; more frequent while thinking, almost none asleep.
+    // While the model is actually working, cascades fire in quick succession
+    // and grow stronger the longer it thinks.
     nextThought -= dt
+    if (model > 0.05 && nextThought > 0.9) nextThought = 0.9 * random()
     if (nextThought <= 0) {
       const busy = mode === 'thinking' || mode === 'focus'
       const asleep = mode === 'sleep' || mode === 'offline'
-      if (!asleep || random() < 0.25) thought(busy ? 1 : 0.7)
-      const gap = busy ? 1.5 + random() * 2.5 : asleep ? 12 + random() * 10 : 3.5 + random() * 4
+      if (model > 0.05) thought(0.8 + model * 0.7)
+      else if (!asleep || random() < 0.25) thought(busy ? 1 : 0.7)
+      const gap = model > 0.05
+        ? 0.35 + random() * 0.5
+        : busy ? 1.5 + random() * 2.5 : asleep ? 12 + random() * 10 : 3.5 + random() * 4
       nextThought = gap / motionScale
     }
   }
@@ -190,7 +200,15 @@ export function createMood({ ringCount = RING_COUNT, random = Math.random, reduc
     for (let i = 0; i < ringCount; i++) state.ringAngle[i] += (speeds[i] ?? 0) * state.spin * dt
   }
 
-  return { state, update, spinRings }
+  /** Knock one ring off balance (a task step started, finished or failed). */
+  function kickRing(index: number, strength: number) {
+    const pair = wobble[index]
+    if (!pair) return
+    pair[0].kick((random() - 0.5) * strength * motionScale)
+    pair[1].kick((random() - 0.5) * strength * motionScale)
+  }
+
+  return { state, update, spinRings, kickRing }
 }
 
 function prefersReducedMotion() {
@@ -207,3 +225,4 @@ const engine = createMood({ reducedMotion: prefersReducedMotion() })
 export const mood = engine.state
 export const updateMood = engine.update
 export const spinRings = engine.spinRings
+export const kickRing = engine.kickRing

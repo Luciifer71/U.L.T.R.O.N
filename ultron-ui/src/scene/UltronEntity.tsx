@@ -5,6 +5,7 @@ import GyroRings from '../entity/GyroRings'
 import ArcCage from '../entity/ArcCage'
 import NeuralShell from '../entity/NeuralShell'
 import Dust from '../entity/Dust'
+import DataStream from '../entity/DataStream'
 import EntityGlow from '../entity/EntityGlow'
 
 /* =========================================================
@@ -15,6 +16,7 @@ import EntityGlow from '../entity/EntityGlow'
      arc cage       → many short spinning arcs forming a gyroscopic sphere
      neural shell   → nodes and links with travelling pulses
      dust           → faint sparks for depth
+     data stream    → words flowing in to the core and replies flowing out
    plus a bloom pass for the holographic glow.
    ========================================================= */
 
@@ -35,6 +37,7 @@ export default function UltronEntity() {
       <ArcCage />
       <NeuralShell />
       <Dust />
+      <DataStream />
       <EntityGlow />
     </>
   )

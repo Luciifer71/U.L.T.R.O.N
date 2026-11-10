@@ -58,3 +58,12 @@ function normalize(v: Vec3): Vec3 {
   const length = Math.hypot(v[0], v[1], v[2]) || 1
   return [v[0] / length, v[1] / length, v[2] / length]
 }
+
+/** Default frame-rate cap: smooth motion without rendering every refresh of a 144 Hz monitor. */
+export const DEFAULT_MAX_FPS = 60
+
+/** Frame-rate cap from the page URL (`?fps=30` … `?fps=240`), otherwise the default. */
+export function parseMaxFps(search: string) {
+  const value = Number(new URLSearchParams(search).get('fps'))
+  return Number.isFinite(value) && value >= 30 && value <= 240 ? Math.round(value) : DEFAULT_MAX_FPS
+}

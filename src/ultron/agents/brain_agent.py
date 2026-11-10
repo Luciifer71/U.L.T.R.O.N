@@ -89,6 +89,7 @@ from ultron.control.intent_guard import (
 
 
 
+from ultron.control.signals import ModelActivity, SignalPublisher, step_signal, vitals_loop
 from ultron.control.operations import (
     STATUS_SUBJECT, STOP_SUBJECT, HEARTBEAT_SUBJECT,
     OperationsState, recent_task_rows,
@@ -1020,6 +1021,9 @@ class UltronBrain:
 
         self.task_lock = asyncio.Lock()
         self.operations = OperationsState()
+        # Display-only live signals for the visual entity (content-free).
+        self.signals = SignalPublisher(nc)
+        self.ollama.activity = ModelActivity(self.signals)
 
         # Centralized Windows capability control plane.
         # Physical system actions should flow through the broker rather than
@@ -1206,6 +1210,11 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
             return "Understood. Please state the action you want me to perform."
         return None
 
+    def _signal_step(self, task_id, index, total, name, state):
+        signals = getattr(self, "signals", None)
+        if signals is not None:
+            signals.emit("step", step_signal(task_id, index, total, name, state))
+
     async def _run_pending_actions(
         self,
         actions: list[PendingAction],
@@ -1262,6 +1271,7 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
                         "message": "Stopped from the dashboard before this step started.",
                     })
                     operations.step(task_id, skipped.name, "cancelled")
+                    self._signal_step(task_id, len(outcomes) - 1, len(actions), skipped.name, "cancelled")
                 errors.append("Stopped from the dashboard.")
                 print(f"[ACTION STOPPED] [task={task_id}] remaining steps cancelled")
                 break
@@ -1283,6 +1293,7 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
                 )
                 if operations:
                     operations.step(task_id, action.name, "running")
+                self._signal_step(task_id, len(outcomes), len(actions), action.name, "running")
 
                 if inspect.iscoroutinefunction(action.execute):
                     result = await action.execute()
@@ -1386,11 +1397,14 @@ TARGET FIDELITY: Copy resource names and paths from the current request, preserv
             if operations:
                 operations.step(task_id, action.name, outcome.get("state") or (
                     "completed" if outcome["success"] else "failed"), outcome.get("error"))
+            self._signal_step(task_id, len(outcomes) - 1, len(actions), action.name,
+                              (outcome.get("state") or "completed") if outcome["success"] else "failed")
             if not outcome['success'] and action.stop_on_failure:
                 for skipped in actions[len(outcomes):]:
                     outcomes.append({'name': skipped.name, 'success': False, 'state': 'not_started',
                                      'error': 'Not started because an earlier step failed.',
                                      'message': 'Not started because an earlier step failed.'})
+                    self._signal_step(task_id, len(outcomes) - 1, len(actions), skipped.name, "not_started")
                 break
 
         self.execution_ledger[task_id] = outcomes
@@ -3014,6 +3028,7 @@ async def main():
         await nc.publish("ultron.voice", json.dumps({"text": text, "speech": text, "statusKey": "google-background", "speechTtl": 20}).encode())
 
     google_worker = asyncio.create_task(brain.google_updates.run(google_notify))
+    vitals_worker = asyncio.create_task(vitals_loop(brain.signals))
 
     inbox = IntentInbox(brain, nc, intent_handler, google_request_kind)
     intent_worker = asyncio.create_task(inbox.run())
@@ -3097,6 +3112,7 @@ async def main():
 
 
     finally:
+        vitals_worker.cancel()
         intent_worker.cancel()
         try:
             await intent_worker

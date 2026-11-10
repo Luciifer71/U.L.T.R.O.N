@@ -142,3 +142,28 @@ def test_qwen3_default_profile_and_explicit_override(monkeypatch):
     monkeypatch.setenv('LLM_CONTEXT', '8192')
     config = OllamaRuntimeConfig.from_env()
     assert config.think is True and config.num_ctx == 8192
+
+
+def test_chat_reports_model_activity_even_when_the_request_fails():
+    import asyncio
+    from ultron.core.ollama_runtime import OllamaRuntime, OllamaRuntimeConfig
+
+    events = []
+    runtime = OllamaRuntime(OllamaRuntimeConfig.from_env())
+    runtime.activity = type('A', (), {'start': lambda self: events.append('start'),
+                                      'end': lambda self: events.append('end')})()
+
+    async def ok(**kwargs):
+        return {'message': {'content': 'hi'}}
+
+    async def boom(**kwargs):
+        raise RuntimeError('model down')
+
+    runtime._chat = ok
+    assert asyncio.run(runtime.chat(messages=[])) == {'message': {'content': 'hi'}}
+    runtime._chat = boom
+    try:
+        asyncio.run(runtime.chat(messages=[]))
+    except RuntimeError:
+        pass
+    assert events == ['start', 'end', 'start', 'end']
