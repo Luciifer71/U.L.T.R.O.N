@@ -20,6 +20,7 @@ import sounddevice as sd
 from ultron.audio.microphone_runtime import inventory, fingerprint, microphone_candidates, probe_inventory
 from ultron.audio.speech_activity import create_speech_activity
 from ultron.control.operations import heartbeat_loop
+from ultron.control.signals import SignalPublisher, VoiceLevelMeter
 from ultron.core.visual_events import publish_visual_event
 from ultron.audio.audio_pipeline import AudioFrame, AudioMailbox, UtteranceSegmenter, TranscriptionWorker
 
@@ -508,6 +509,9 @@ async def main():
     await nc.subscribe("ultron.status.speaking", cb=status_speaking_handler)
     # Liveness for the operations dashboard; kept referenced for the process lifetime.
     heartbeat_task = asyncio.create_task(heartbeat_loop(nc, "listener"))  # noqa: F841
+    # Live voice level for the visual entity: a number only, never audio or text.
+    signals = SignalPublisher(nc)
+    voice_meter = VoiceLevelMeter()
 
     async def refresh_speaking():
         try:
@@ -943,6 +947,10 @@ async def main():
                     logging.warning("[VISUAL EVENT WARNING]: Failed to publish LISTENING: %s", e)
                 status_str = "SESSION ACTIVE" if is_active_session else "STANDBY - AWAITING WAKE WORD"
                 print(f"\n[MIC ACTIVATED ({status_str}) - RMS: {rms_energy:.4f}]: Listening to sentence...")
+            user_speaking = segmenter.recording and not acoustic_gate.is_speaking and not frame.muted
+            level = voice_meter.update(rms_energy, silence_threshold, user_speaking)
+            if level is not None:
+                signals.emit("voice", {"level": level})
             if segmenter.recording and rms_energy > silence_threshold and now - last_meter_time > 0.1:
                 bars = int(min((rms_energy / silence_threshold) * 8, 25))
                 print(f"\r[AUDIO IN]: {'█' * bars:<25}", end="", flush=True)

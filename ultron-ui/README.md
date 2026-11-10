@@ -83,6 +83,12 @@ Body language (`src/entity/mood.ts`) uses heavy, slightly under-damped springs:
 - **Reduced motion:** if the operating system asks to reduce motion, shockwaves and
   wobble are softer and idle thoughts rarer; shape changes still show the state.
 
+Live data (Phase B, see [visual signals](../docs/visual-signals.md)): each task step
+lights its own ring (running, done, failed, skipped), your voice ripples the core,
+the core swells while ULTRON speaks, words stream in and replies stream out
+(`src/entity/DataStream.tsx`), neural cascades build while the model thinks, and real
+CPU/memory strain heats the core and makes the rings shiver.
+
 The earlier dot-field layers (`src/scene/TSL*.tsx`, `EnergyEvents.tsx`) are unchanged.
 Open the UI with `?legacy=1` (for example `http://localhost:5173/?legacy=1`) to show
 them instead. The `RenderRuntime` performance controller is still not mounted.

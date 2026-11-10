@@ -107,3 +107,28 @@ def test_heartbeat_loop_publishes_component_and_survives_send_errors():
         task.cancel()
     asyncio.run(run())
     assert sent and sent[0] == ('ultron.ops.heartbeat', {'component': 'listener'})
+
+
+def test_steps_emit_content_free_signals(monkeypatch):
+    monkeypatch.setattr('ultron.agents.brain_agent.update_task', lambda *a, **k: None)
+    monkeypatch.setattr('ultron.agents.brain_agent.EXECUTION_MIN_HOLD_SEC', 0)
+    brain = object.__new__(UltronBrain)
+    brain.execution_ledger = {}
+    brain.operations = OperationsState()
+    sent = []
+    brain.signals = SimpleNamespace(emit=lambda kind, payload: sent.append((kind, payload)))
+    async def publish_visual(*a, **k):
+        return None
+    brain._publish_visual = publish_visual
+    def ok():
+        return SimpleNamespace(success=True, message='done', data={'state': 'verified'}, error=None)
+    def bad():
+        raise RuntimeError('nope')
+    actions = [PendingAction(name='open_resource:Secret App', execute=ok),
+               PendingAction(name='open_resource:Other', execute=bad, stop_on_failure=True),
+               PendingAction(name='open_resource:Never', execute=ok)]
+    asyncio.run(brain._run_pending_actions(actions, 'task'))
+    states = [(p['index'], p['state']) for kind, p in sent if kind == 'step']
+    assert states == [(0, 'running'), (0, 'verified'), (1, 'running'), (1, 'failed'), (2, 'not_started')]
+    assert all(p['total'] == 3 and p['kind'] == 'open_resource' for _, p in sent)
+    assert 'Secret' not in json.dumps(sent)

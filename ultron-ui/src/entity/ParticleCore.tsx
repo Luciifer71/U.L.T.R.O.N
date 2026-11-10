@@ -21,7 +21,7 @@ const CORE_RADIUS = 0.62
 
 export default function ParticleCore() {
   const { mesh, corona } = useMemo(() => {
-    const { clock, intensity, coreGlow, turbulence, coreScale, flow } = entityUniforms
+    const { clock, intensity, coreGlow, turbulence, coreScale, flow, voice, speak, pressure, now } = entityUniforms
 
     // Denser towards the centre; inner particles orbit faster.
     const orbit = buildOrbits(
@@ -47,7 +47,13 @@ export default function ParticleCore() {
     // Shockwaves push particles outward and light them up as they pass.
     const distance = orbitPosition.length()
     const wave = shockAt(distance)
-    const position = orbitPosition.add(fluid).add(orbitPosition.normalize().mul(wave.mul(0.14)))
+    // Live: your voice sends ripples outward through the nucleus; while ULTRON
+    // speaks the whole core swells in a speech-like rhythm.
+    const ripple = sin(distance.mul(26.0).sub(now.mul(9.0))).mul(voice).mul(0.03)
+    const swell = speak.mul(0.06).mul(distance.add(0.2))
+    const position = orbitPosition
+      .add(fluid)
+      .add(orbitPosition.normalize().mul(wave.mul(0.14).add(ripple).add(swell)))
 
     const material = new SpriteNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending })
     material.toneMapped = false
@@ -58,10 +64,12 @@ export default function ParticleCore() {
     const coreness = float(1).sub(smoothstep(0.04, CORE_RADIUS + 0.05, radius))
     const base = stateColor()
     const hot = base.mul(0.35).add(WHITE_HOT.mul(0.65))
-    const color = mix(base, hot, coreness.pow(4.0).mul(0.55))
+    // Real system strain runs the core hotter (whiter) and brighter.
+    const color = mix(base, hot, coreness.pow(4.0).mul(0.55).add(pressure.mul(0.25)))
     const twinkle = float(0.75).add(sin(clock.mul(3.0).add(seed.mul(50.0))).mul(0.25))
     const energy = float(0.3).add(coreness.pow(1.5).mul(0.85)).mul(intensity).mul(float(0.55).add(coreGlow.mul(0.6))).mul(twinkle)
-    material.colorNode = color.mul(energy).add(base.mul(0.5).add(WHITE_HOT.mul(0.3)).mul(wave.mul(1.6)))
+    const liveGlow = float(1).add(voice.mul(0.7)).add(speak.mul(0.6)).add(pressure.mul(0.2))
+    material.colorNode = color.mul(energy).mul(liveGlow).add(base.mul(0.5).add(WHITE_HOT.mul(0.3)).mul(wave.mul(1.6)))
     material.opacityNode = softDisc()
 
     const instanced = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), material, CORE_COUNT)
@@ -87,7 +95,9 @@ export default function ParticleCore() {
   }, [mesh, corona])
 
   useFrame(() => {
-    corona.scale.setScalar(1.9 * mood.core)
+    const live = entityUniforms
+    const pulse = 1 + (live.speak.value as number) * 0.12 + (live.voice.value as number) * 0.1
+    corona.scale.setScalar(1.9 * mood.core * pulse)
   })
 
   return (

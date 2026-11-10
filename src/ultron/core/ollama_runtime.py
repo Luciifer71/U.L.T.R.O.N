@@ -63,6 +63,9 @@ class OllamaRuntime:
         self._ready = False
         self._ready_lock = asyncio.Lock()
         self._last_error: str | None = None
+        # Optional observer with start()/end(), e.g. signals.ModelActivity, so the
+        # visual entity can show inference. Never given request content.
+        self.activity = None
 
     @property
     def is_ready(self) -> bool:
@@ -130,8 +133,18 @@ class OllamaRuntime:
 
                     await asyncio.sleep(self.config.startup_retry_sec)
 
-    async def chat(self, *, diagnostic_task_id=None, diagnostic_phase="chat", **kwargs):
+    async def chat(self, **kwargs):
         """Execute a chat request with bounded retries and recovery."""
+        activity = self.activity
+        if activity is not None:
+            activity.start()
+        try:
+            return await self._chat(**kwargs)
+        finally:
+            if activity is not None:
+                activity.end()
+
+    async def _chat(self, *, diagnostic_task_id=None, diagnostic_phase="chat", **kwargs):
         # A configured trial profile applies to every brain request, including
         # retries and follow-up summaries. Never mutate a caller's options.
         kwargs = dict(kwargs)
