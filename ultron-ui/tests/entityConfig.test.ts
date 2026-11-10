@@ -21,3 +21,11 @@ test('ring specs are sane', () => {
     assert.ok(ring.width > 0 && ring.width < ring.radius)
   }
 })
+
+test('frame-rate cap defaults to 60 and accepts only sensible overrides', async () => {
+  const { parseMaxFps } = await import('../src/entity/entityConfig.ts')
+  assert.equal(parseMaxFps(''), 60)
+  assert.equal(parseMaxFps('?fps=30'), 30)
+  assert.equal(parseMaxFps('?fps=144'), 144)
+  for (const bad of ['?fps=5', '?fps=1000', '?fps=abc', '?fps=']) assert.equal(parseMaxFps(bad), 60, bad)
+})
