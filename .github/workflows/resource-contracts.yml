@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install pytest psutil
-      - run: python -m pytest -q tests/test_spotify_api.py tests/test_package_layout.py tests/test_microphone_runtime.py tests/test_reply_delivery.py tests/test_google_updates.py tests/test_file_workflow.py tests/test_support_bundle.py tests/test_system_info.py tests/test_resource_catalog.py tests/test_resource_cli.py tests/test_exact_app_discovery.py tests/test_request_planning.py tests/test_intent_guard.py tests/test_model_benchmark.py tests/test_signals.py tests/test_presence_watcher.py
+      - run: python -m pytest -q tests/test_spotify_api.py tests/test_package_layout.py tests/test_microphone_runtime.py tests/test_reply_delivery.py tests/test_google_updates.py tests/test_file_workflow.py tests/test_support_bundle.py tests/test_system_info.py tests/test_resource_catalog.py tests/test_resource_cli.py tests/test_exact_app_discovery.py tests/test_request_planning.py tests/test_intent_guard.py tests/test_model_benchmark.py tests/test_signals.py tests/test_presence_watcher.py tests/test_gestures.py
   brain:
     runs-on: windows-latest
     steps:
@@ -29,7 +29,7 @@ jobs:
       - run: python -m pip install faster-whisper==1.2.1
       - run: python -m pytest -q tests/test_speech_activity.py
       - run: python -c "from google_auth_oauthlib.flow import InstalledAppFlow; from keyring.backends.Windows import WinVaultKeyring; import googleapiclient.discovery"
-      - run: python -m pytest -q tests/test_voice_delivery.py tests/test_reply_delivery.py tests/test_google_updates.py tests/test_acceptance.py tests/test_send_intent.py tests/test_resource_integration.py tests/test_execution_truth.py tests/test_resource_execution.py tests/test_task_memory.py tests/test_audio_pipeline.py tests/test_start_ultron.py tests/test_verify_ultron.py tests/test_ollama_runtime.py tests/test_voice_listener.py tests/test_operations.py
+      - run: python -m pytest -q tests/test_voice_delivery.py tests/test_reply_delivery.py tests/test_google_updates.py tests/test_acceptance.py tests/test_send_intent.py tests/test_resource_integration.py tests/test_execution_truth.py tests/test_resource_execution.py tests/test_task_memory.py tests/test_audio_pipeline.py tests/test_start_ultron.py tests/test_verify_ultron.py tests/test_ollama_runtime.py tests/test_voice_listener.py tests/test_operations.py tests/test_gestures.py
 
   acceptance:
     runs-on: windows-latest

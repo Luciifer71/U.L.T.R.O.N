@@ -16,7 +16,7 @@ HEARTBEAT_SUBJECT = 'ultron.ops.heartbeat'
 HEARTBEAT_INTERVAL_SEC = 5.0
 # A component counts as offline after missing about three heartbeats.
 HEARTBEAT_STALE_SEC = 16.0
-COMPONENTS = ('listener', 'action_daemon')
+COMPONENTS = ('listener', 'action_daemon', 'vision')
 _TEXT_LIMIT = 300
 
 

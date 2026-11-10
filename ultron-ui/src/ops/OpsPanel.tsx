@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import './ops.css'
-import { useOps, type Link, type OpsSnapshot, type TranscriptEntry } from './useOps'
+import { useOps, type Link, type OpsSnapshot, type TranscriptEntry, type VisionState } from './useOps'
 
 const STORAGE_KEY = 'ultron.ops.open'
 
@@ -15,6 +15,7 @@ const COMPONENT_NAMES: Record<string, string> = {
   brain: 'Brain',
   listener: 'Listener',
   action_daemon: 'Action daemon',
+  vision: 'Vision',
 }
 
 const SERVICE_NAMES: Record<string, string> = {
@@ -60,7 +61,7 @@ function isTypingTarget(target: EventTarget | null) {
 
 export default function OpsPanel() {
   const [open, setOpen] = useState(readOpen)
-  const { link, snapshot, transcript, notice, setNotice, sendCommand, stop } = useOps(true)
+  const { link, snapshot, transcript, notice, setNotice, sendCommand, stop, vision, toggleGesture } = useOps(true)
 
   useEffect(() => {
     try {
@@ -111,12 +112,33 @@ export default function OpsPanel() {
       <p className="ops-hint">Stops speech, drops queued requests and stops the current task before its next step. A step already running finishes; nothing is undone.</p>
       {notice && <p className="ops-notice" role="status">{notice}</p>}
 
+      <GestureToggle vision={vision} disabled={link === 'offline'} onToggle={() => void toggleGesture()} />
+
       <CurrentSection snapshot={snapshot} />
       <TranscriptSection transcript={transcript} />
       <CommandBox disabled={link === 'offline'} onSend={sendCommand} />
       <HealthSection snapshot={snapshot} link={link} />
       <RecentSection snapshot={snapshot} />
     </aside>
+  )
+}
+
+function GestureToggle({ vision, disabled, onToggle }: { vision: VisionState | null; disabled: boolean; onToggle: () => void }) {
+  const on = vision?.gesture === true
+  const status = !vision ? 'Vision service not running' : on ? 'Camera on · tracking your hands' : 'Camera off'
+  return (
+    <div className="ops-gesture">
+      <button
+        className={`ops-gesture-button${on ? ' ops-gesture-button--on' : ''}`}
+        onClick={onToggle}
+        disabled={disabled}
+        aria-pressed={on}
+        title="Also: double clap, or say “Ultron, gesture mode”. Both palms for 1 s turns it off."
+      >
+        Gesture mode {on ? 'on' : 'off'}
+      </button>
+      <span className="ops-meta">{status}</span>
+    </div>
   )
 }
 

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "dominant_hand": "Right",
+  "mappings": [
+    {"gesture": "point", "hands": "dominant", "action": "pointer.move", "stage": "G2", "description": "Move the mouse pointer (air mouse)"},
+    {"gesture": "pinch_tap", "hands": "dominant", "action": "pointer.click", "stage": "G2", "description": "Click"},
+    {"gesture": "double_pinch", "hands": "dominant", "action": "pointer.double_click", "stage": "G2", "description": "Double-click"},
+    {"gesture": "pinch_hold", "hands": "dominant", "action": "pointer.drag", "stage": "G2", "description": "Drag while held"},
+    {"gesture": "two_finger_scroll", "hands": "dominant", "action": "pointer.scroll", "stage": "G2", "description": "Scroll (victory sign moved up or down)"},
+    {"gesture": "grab_move", "hands": "dominant", "action": "window.move", "stage": "G3", "description": "Pinch a window's title bar and move it"},
+    {"gesture": "grab_throw", "hands": "dominant", "action": "window.throw", "stage": "G3", "description": "Throw the grabbed window to the monitor in that direction"},
+    {"gesture": "two_hand_stretch", "hands": "both", "action": "window.resize", "stage": "G3", "description": "Pinch with both hands and pull apart / together to enlarge / shrink"},
+    {"gesture": "grab_release", "hands": "dominant", "action": "clipboard.copy_paste", "stage": "G4", "description": "Grab over a selection to copy, release where you want to paste"},
+    {"gesture": "swipe_left", "hands": "dominant", "action": "media.previous", "stage": "G4", "description": "Previous (track, tab or page)"},
+    {"gesture": "swipe_right", "hands": "dominant", "action": "media.next", "stage": "G4", "description": "Next (track, tab or page)"},
+    {"gesture": "twist", "hands": "dominant", "action": "volume.adjust", "stage": "G4", "description": "Turn like a knob: volume up / down"},
+    {"gesture": "palm_hold", "hands": "dominant", "action": "media.play_pause", "stage": "G4", "description": "Hold an open palm: pause / play"},
+    {"gesture": "frame", "hands": "both", "action": "screen.screenshot", "stage": "G4", "description": "Make a frame with both hands: screenshot"},
+    {"gesture": "fist_hold", "hands": "dominant", "action": "system.lock", "stage": "G4", "confirm": true, "description": "Hold a fist for 2 s: lock the PC (asks to confirm)"},
+    {"gesture": "both_palms", "hands": "both", "action": "gesture.exit", "stage": "G1", "description": "Both palms to the camera for 1 s: leave gesture mode"},
+    {"gesture": "both_palms_push", "hands": "both", "action": "system.stop", "stage": "G4", "description": "Both palms pushed toward the camera: STOP everything (Ops Stop)"}
+  ]
+}

@@ -21,6 +21,7 @@ from ultron.audio.microphone_runtime import inventory, fingerprint, microphone_c
 from ultron.audio.speech_activity import create_speech_activity
 from ultron.control.operations import heartbeat_loop
 from ultron.control.signals import SignalPublisher, VoiceLevelMeter
+from ultron.gestures.activation import CONTROL_SUBJECT as VISION_CONTROL, DoubleClapDetector
 from ultron.core.visual_events import publish_visual_event
 from ultron.audio.audio_pipeline import AudioFrame, AudioMailbox, UtteranceSegmenter, TranscriptionWorker
 
@@ -512,6 +513,8 @@ async def main():
     # Live voice level for the visual entity: a number only, never audio or text.
     signals = SignalPublisher(nc)
     voice_meter = VoiceLevelMeter()
+    # A double clap toggles gesture mode (ULTRON_CLAP=0 turns this off).
+    clap_detector = DoubleClapDetector() if os.getenv("ULTRON_CLAP", "1").strip() != "0" else None
 
     async def refresh_speaking():
         try:
@@ -948,6 +951,13 @@ async def main():
                 status_str = "SESSION ACTIVE" if is_active_session else "STANDBY - AWAITING WAKE WORD"
                 print(f"\n[MIC ACTIVATED ({status_str}) - RMS: {rms_energy:.4f}]: Listening to sentence...")
             user_speaking = segmenter.recording and not acoustic_gate.is_speaking and not frame.muted
+            if clap_detector is not None and clap_detector.update(
+                    block, now, muted=acoustic_gate.is_speaking or frame.muted):
+                logging.info("[CLAP]: double clap; toggling gesture mode")
+                try:
+                    await nc.publish(VISION_CONTROL, json.dumps({"command": "gesture_toggle", "source": "clap"}).encode())
+                except Exception as error:
+                    logging.warning("[CLAP]: could not reach the vision service: %s", error)
             level = voice_meter.update(rms_energy, silence_threshold, user_speaking)
             if level is not None:
                 signals.emit("voice", {"level": level})

@@ -21,9 +21,10 @@ from urllib.request import ProxyHandler, Request, build_opener
 from ultron.paths import project_root
 
 ROOT = project_root()
-COMPONENTS = ('action_daemon', 'brain_agent', 'voice_listener')
-# Started only on request (--presence or ULTRON_PRESENCE=1): uses the webcam.
-OPTIONAL_COMPONENTS = ('presence_watcher',)
+# vision_service owns the camera but keeps it closed until gesture mode (or
+# presence, --presence / ULTRON_PRESENCE=1) asks for it.
+COMPONENTS = ('action_daemon', 'brain_agent', 'voice_listener', 'vision_service')
+OPTIONAL_COMPONENTS = ()
 LOCAL_HOSTS = {'localhost', '127.0.0.1', '::1'}
 
 
@@ -251,16 +252,11 @@ def _run_component(component):
     return code
 
 
-def presence_requested(flag, environ=os.environ):
-    """Camera presence runs only when explicitly asked for."""
-    return bool(flag) or environ.get('ULTRON_PRESENCE', '').strip() == '1'
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--component', choices=COMPONENTS + OPTIONAL_COMPONENTS, help=argparse.SUPPRESS)
     parser.add_argument('--presence', action='store_true',
-                        help='Also start camera presence (the entity turns toward you). Off by default.')
+                        help='Let the camera notice you sit down (face presence). Off by default.')
     args = parser.parse_args()
     if os.name != 'nt':
         print('This launcher currently supports Windows only.')
@@ -282,7 +278,9 @@ def main():
         load_dotenv(ROOT / '.env', override=False)
         if args.component:
             return run_component(args.component)
-        selected = COMPONENTS + (OPTIONAL_COMPONENTS if presence_requested(args.presence) else ())
+        if args.presence:
+            os.environ['ULTRON_PRESENCE'] = '1'  # inherited by the vision service window
+        selected = COMPONENTS
         for component in selected:
             if not (ROOT / 'src' / 'ultron' / 'agents' / (component + '.py')).is_file():
                 raise StartupError(f'Missing source file: {component}.py')

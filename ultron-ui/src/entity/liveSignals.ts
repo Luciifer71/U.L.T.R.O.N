@@ -12,7 +12,10 @@ import { RING_COUNT } from './entityConfig.ts'
      ultron.intent / voice  → words stream in, replies stream out
      ultron.signal.model    → neural cascades while the model thinks
      ultron.signal.vitals   → CPU / memory load becomes core pressure
-     ultron.signal.gaze     → (optional camera) the entity turns toward you
+     ultron.signal.gaze     → (optional camera) the entity notices you arrive
+     ultron.signal.hands    → tracked hands for the holographic hands (gesture mode)
+     ultron.signal.gesture  → recognised poses, shown in the gesture HUD
+     ultron.vision.state    → whether gesture mode is on
 
    Display only: nothing here ever sends a message or acts.
    With no backend connected every value rests at zero and
@@ -31,7 +34,16 @@ export type Packet = {
   seed: number
 }
 
+export type TrackedHand = {
+  side: 'Right' | 'Left'
+  pose: string
+  engaged: boolean
+  pinch: number
+  points: [number, number, number][]
+}
+
 export const PACKET_SLOTS = 48
+const HANDS_STALE = 0.4 // seconds: hands not updated this long are hidden
 const MAX_PACKETS_PER_MESSAGE = 18
 const PACKET_STAGGER = 0.07 // seconds between packets of one message
 const MODEL_TIMEOUT = 120 // seconds: clear a model "start" that never ended
@@ -58,6 +70,33 @@ function smoothstep(edge0: number, edge1: number, x: number) {
   return t * t * (3 - 2 * t)
 }
 
+/** Validate tracked hands from the vision service; anything malformed is dropped. */
+export function parseHands(value: unknown): TrackedHand[] {
+  if (!Array.isArray(value)) return []
+  const hands: TrackedHand[] = []
+  for (const item of value.slice(0, 2)) {
+    if (typeof item !== 'object' || item === null) continue
+    const hand = item as Record<string, unknown>
+    if (hand.side !== 'Right' && hand.side !== 'Left') continue
+    const points = hand.points
+    if (!Array.isArray(points) || points.length !== 21) continue
+    const parsed = points.map((p) =>
+      Array.isArray(p) && p.length >= 3 && p.slice(0, 3).every((v) => typeof v === 'number' && Number.isFinite(v))
+        ? ([p[0], p[1], p[2]] as [number, number, number])
+        : null,
+    )
+    if (parsed.some((p) => p === null)) continue
+    hands.push({
+      side: hand.side,
+      pose: typeof hand.pose === 'string' ? hand.pose : 'unknown',
+      engaged: hand.engaged === true,
+      pinch: typeof hand.pinch === 'number' && Number.isFinite(hand.pinch) ? hand.pinch : 1,
+      points: parsed as [number, number, number][],
+    })
+  }
+  return hands
+}
+
 export function wordCount(text: unknown) {
   return typeof text === 'string' ? text.trim().split(/\s+/).filter(Boolean).length : 0
 }
@@ -80,14 +119,20 @@ export function createLiveSignals(random: () => number = Math.random) {
     taskId: null as string | null,
     /** Increments on every failed step, so effects can react once per failure. */
     failures: 0,
-    // Camera presence (smoothed): 0..1 presence and where the viewer is (-1..1).
+    // Camera presence (smoothed 0..1). The entity no longer follows the viewer;
+    // presence is only used to notice someone arriving.
     presence: 0,
-    gazeX: 0,
-    gazeY: 0,
     gazeTarget: { present: false, x: 0, y: 0, at: -Infinity },
     absentSince: -Infinity,
     /** Increments when someone arrives after being away, so the entity can react once. */
     notices: 0,
+    // Gesture mode.
+    gestureMode: false,
+    gestureError: null as string | null,
+    gestureErrorAt: -Infinity,
+    hands: [] as TrackedHand[],
+    handsAt: -Infinity,
+    lastGesture: null as { hand: string; pose: string; at: number } | null,
     rings: Array.from({ length: RING_COUNT }, (): RingState => ({ status: 'idle', since: -Infinity })),
     now: 0,
   }
@@ -171,6 +216,24 @@ export function createLiveSignals(random: () => number = Math.random) {
         target.at = now
         break
       }
+      case 'ultron.signal.hands':
+        state.hands = parseHands(data.hands)
+        state.handsAt = now
+        break
+      case 'ultron.signal.gesture':
+        if (data.type === 'pose' && typeof data.pose === 'string' && typeof data.hand === 'string') {
+          state.lastGesture = { hand: data.hand, pose: data.pose, at: now }
+        }
+        break
+      case 'ultron.vision.state': {
+        const wasOn = state.gestureMode
+        state.gestureMode = data.gesture === true
+        state.gestureError = typeof data.error === 'string' && data.error ? data.error : null
+        if (state.gestureError) state.gestureErrorAt = now
+        if (state.gestureMode && !wasOn) state.lastGesture = null
+        if (!state.gestureMode) state.hands = []
+        break
+      }
       case 'ultron.intent':
         spawnPackets(data.prompt, true, now)
         break
@@ -204,9 +267,7 @@ export function createLiveSignals(random: () => number = Math.random) {
       state.absentSince = now
     }
     state.presence = approach(state.presence, gaze.present ? 1 : 0, 1.5, dt)
-    // Heavy, deliberate turn: it follows you, it does not twitch after you.
-    state.gazeX = approach(state.gazeX, gaze.present ? gaze.x : 0, 1.6, dt)
-    state.gazeY = approach(state.gazeY, gaze.present ? gaze.y : 0, 1.6, dt)
+    if (now - state.handsAt > HANDS_STALE) state.hands = []
 
     // Only real strain shows: high CPU, or memory close to full.
     const strain = Math.max(smoothstep(0.55, 0.95, state.cpu), smoothstep(0.88, 0.99, state.memory) * 0.6)

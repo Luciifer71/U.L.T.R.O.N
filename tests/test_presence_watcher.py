@@ -1,8 +1,4 @@
-import asyncio
-from types import SimpleNamespace
-
-from ultron.agents.presence_watcher import PresenceTracker, gaze_from_box, largest_face, run_presence
-from ultron.cli.start_ultron import presence_requested
+from ultron.agents.presence_watcher import PresenceTracker, gaze_from_box, largest_face
 
 
 def test_largest_face_picks_the_closest_and_ignores_junk():
@@ -43,29 +39,3 @@ def test_positions_are_smoothed_and_throttled():
     assert 4 <= len(sent) <= 6, 'about 5 updates per second'
     xs = [p['x'] for p in sent]
     assert xs == sorted(xs) and xs[0] < xs[-1] <= 0.9, 'moves gradually toward the face'
-
-
-def test_run_presence_publishes_numbers_only_and_survives_bad_frames():
-    frame = SimpleNamespace(shape=(240, 320, 3))
-    reads = iter([(True, frame), (True, frame), (False, None), (True, frame)])
-    capture = SimpleNamespace(read=lambda: next(reads))
-    sent = []
-    publisher = SimpleNamespace(emit=lambda kind, payload: sent.append((kind, payload)))
-    now = [0.0]
-    def clock():
-        now[0] += 0.05
-        return now[0]
-    async def no_sleep(_):
-        return None
-    asyncio.run(run_presence(capture, lambda f: [(144, 108, 32, 24)], publisher,
-                             clock=clock, sleep=no_sleep, max_frames=4))
-    assert sent and all(kind == 'gaze' for kind, _ in sent)
-    assert all(set(payload) == {'present', 'x', 'y', 'near'} for _, payload in sent)
-    assert sent[0][1]['present'] is True
-
-
-def test_presence_is_opt_in():
-    assert presence_requested(False, {}) is False
-    assert presence_requested(False, {'ULTRON_PRESENCE': '0'}) is False
-    assert presence_requested(False, {'ULTRON_PRESENCE': ' 1 '}) is True
-    assert presence_requested(True, {}) is True

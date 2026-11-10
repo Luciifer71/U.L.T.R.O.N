@@ -6,6 +6,9 @@ const STATUS_SUBJECT = 'ultron.ops.status'
 const STOP_SUBJECT = 'ultron.ops.stop'
 const INTENT_SUBJECT = 'ultron.intent'
 const VOICE_SUBJECT = 'ultron.voice'
+// Answered by the vision service (src/ultron/agents/vision_service.py).
+const VISION_CONTROL_SUBJECT = 'ultron.vision.control'
+const VISION_STATE_SUBJECT = 'ultron.vision.state'
 
 const NATS_WS_URL =
   import.meta.env.VITE_ULTRON_NATS_WS_URL ?? 'ws://127.0.0.1:9222'
@@ -55,6 +58,17 @@ export type TranscriptEntry = {
   cancelled?: boolean
 }
 
+export type VisionState = { gesture: boolean; camera: boolean; error: string | null }
+
+function parseVision(data: Record<string, unknown> | null): VisionState | null {
+  if (!data || typeof data.gesture !== 'boolean') return null
+  return {
+    gesture: data.gesture,
+    camera: data.camera === true,
+    error: typeof data.error === 'string' && data.error ? data.error : null,
+  }
+}
+
 // 'offline': no bus connection. 'no-brain': bus is up but the brain does not answer.
 export type Link = 'connecting' | 'offline' | 'no-brain' | 'online'
 
@@ -75,6 +89,8 @@ export function useOps(enabled: boolean) {
   const [snapshot, setSnapshot] = useState<OpsSnapshot | null>(null)
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([])
   const [notice, setNotice] = useState<string | null>(null)
+  // null: the vision service has not been heard from.
+  const [vision, setVision] = useState<VisionState | null>(null)
   const connection = useRef<NatsConnection | null>(null)
 
   const addEntry = useCallback((entry: Omit<TranscriptEntry, 'id' | 'at'>) => {
@@ -127,11 +143,34 @@ export function useOps(enabled: boolean) {
       }
     }
 
+    const watchVision = async (nc: NatsConnection) => {
+      for await (const message of nc.subscribe(VISION_STATE_SUBJECT)) {
+        if (disposed) break
+        const state = parseVision(readJson(message.data))
+        if (state) setVision(state)
+      }
+    }
+
+    const askVision = async (nc: NatsConnection) => {
+      try {
+        const reply = await nc.request(VISION_CONTROL_SUBJECT, JSON.stringify({ command: 'status', source: 'ops' }), {
+          timeout: REQUEST_TIMEOUT_MS,
+        })
+        const state = parseVision(readJson(reply.data))
+        if (!disposed && state) setVision(state)
+      } catch {
+        if (!disposed) setVision(null)
+      }
+    }
+
     const watchStatus = async (nc: NatsConnection) => {
       for await (const status of nc.status()) {
         if (disposed) break
         if (status.type === 'disconnect' || status.type === 'reconnecting') setLink('offline')
-        if (status.type === 'reconnect') void refresh()
+        if (status.type === 'reconnect') {
+          void refresh()
+          void askVision(nc)
+        }
       }
     }
 
@@ -155,6 +194,8 @@ export function useOps(enabled: boolean) {
         void listen(nc, INTENT_SUBJECT, 'you')
         void listen(nc, VOICE_SUBJECT, 'ultron')
         void watchStatus(nc)
+        void watchVision(nc)
+        void askVision(nc)
         await refresh()
         poll = window.setInterval(() => void refresh(), POLL_MS)
       } catch {
@@ -204,5 +245,28 @@ export function useOps(enabled: boolean) {
     }
   }, [])
 
-  return { link, snapshot, transcript, notice, setNotice, sendCommand, stop }
+  const toggleGesture = useCallback(async () => {
+    const nc = connection.current
+    if (!nc || nc.isClosed()) {
+      setNotice('Not connected to Ultron.')
+      return
+    }
+    try {
+      const reply = await nc.request(
+        VISION_CONTROL_SUBJECT,
+        JSON.stringify({ command: 'gesture_toggle', source: 'ops' }),
+        { timeout: REQUEST_TIMEOUT_MS },
+      )
+      const state = parseVision(readJson(reply.data))
+      if (state) {
+        setVision(state)
+        if (state.error) setNotice(`Gesture mode could not start: ${state.error}`)
+      }
+    } catch {
+      setVision(null)
+      setNotice('The vision service is not running. Start Ultron with the vision service to use gestures.')
+    }
+  }, [])
+
+  return { link, snapshot, transcript, notice, setNotice, sendCommand, stop, vision, toggleGesture }
 }

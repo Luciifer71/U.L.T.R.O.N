@@ -1,7 +1,4 @@
-import { useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
-import type { Group } from 'three/webgpu'
-import { liveSignals } from '../entity/liveSignals'
 import { syncEntityUniforms } from '../entity/entityUniforms'
 import ParticleCore from '../entity/ParticleCore'
 import GyroRings from '../entity/GyroRings'
@@ -10,6 +7,7 @@ import NeuralShell from '../entity/NeuralShell'
 import Dust from '../entity/Dust'
 import DataStream from '../entity/DataStream'
 import Lightning from '../entity/Lightning'
+import HoloHands from '../entity/HoloHands'
 import EntityGlow from '../entity/EntityGlow'
 
 /* =========================================================
@@ -22,7 +20,7 @@ import EntityGlow from '../entity/EntityGlow'
      dust           → faint sparks for depth
      data stream    → words flowing in to the core and replies flowing out
      lightning      → electric arcs while thinking or while the model works
-   all inside Gaze, which turns toward the viewer when camera presence is on,
+     holo hands     → your tracked hands as glowing skeletons in gesture mode
    plus a bloom + lens pass (light bending, colour split, streaks,
    glitches, hologram scan, vignette, grain) for the filmed look.
    ========================================================= */
@@ -35,31 +33,18 @@ function UniformSync() {
   return null
 }
 
-/** Slowly turns the whole entity toward the viewer when camera presence is on. */
-function Gaze({ children }: { children: React.ReactNode }) {
-  const group = useRef<Group | null>(null)
-  useFrame(() => {
-    const { gazeX, gazeY, presence } = liveSignals.state
-    if (!group.current) return
-    group.current.rotation.y = gazeX * 0.4 * presence
-    group.current.rotation.x = -gazeY * 0.28 * presence
-  })
-  return <group ref={group}>{children}</group>
-}
-
 export default function UltronEntity() {
   return (
     <>
       <UniformSync />
-      <Gaze>
-        <ParticleCore />
-        <GyroRings />
-        <ArcCage />
-        <NeuralShell />
-        <Dust />
-        <DataStream />
-        <Lightning />
-      </Gaze>
+      <ParticleCore />
+      <GyroRings />
+      <ArcCage />
+      <NeuralShell />
+      <Dust />
+      <DataStream />
+      <Lightning />
+      <HoloHands />
       <EntityGlow />
     </>
   )
