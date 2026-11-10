@@ -75,6 +75,8 @@ export function createLiveSignals(random: () => number = Math.random) {
     cpu: 0,
     memory: 0,
     taskId: null as string | null,
+    /** Increments on every failed step, so effects can react once per failure. */
+    failures: 0,
     rings: Array.from({ length: RING_COUNT }, (): RingState => ({ status: 'idle', since: -Infinity })),
     now: 0,
   }
@@ -117,6 +119,7 @@ export function createLiveSignals(random: () => number = Math.random) {
             : 'failed'
     ring.status = status
     ring.since = now
+    if (status === 'failed') state.failures++
   }
 
   /** Feed one bus message. Unknown subjects and malformed payloads are ignored. */
