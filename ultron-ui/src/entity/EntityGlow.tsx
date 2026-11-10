@@ -62,7 +62,7 @@ export default function EntityGlow() {
 
     // ---- chromatic aberration grows toward the edges and during glitches
     const edge = offset.length()
-    const split = offset.mul(float(0.006).mul(edge).add(glitch.mul(0.012)))
+    const split = offset.mul(float(0.004).mul(edge).add(glitch.mul(0.012)))
     const red = sceneTex.sample(uvLens.add(split)).r.add(glowTex.sample(uvLens.add(split)).r)
     const green = sceneTex.sample(uvLens).g.add(glowTex.sample(uvLens).g)
     const blue = sceneTex.sample(uvLens.sub(split)).b.add(glowTex.sample(uvLens.sub(split)).b)

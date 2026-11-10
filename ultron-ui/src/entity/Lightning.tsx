@@ -3,7 +3,7 @@ import * as THREE from 'three/webgpu'
 import { LineBasicNodeMaterial } from 'three/webgpu'
 import { attribute, cos, cross, float, floor, fract, normalize, sin, sqrt, step, vec3 } from 'three/tsl'
 import type { Node } from 'three/webgpu'
-import { BLUE, depthFade, entityUniforms, stateColor, WHITE_HOT } from './entityUniforms'
+import { depthFade, entityUniforms, stateColor, WHITE_HOT } from './entityUniforms'
 
 /* =========================================================
    LIGHTNING
@@ -77,7 +77,8 @@ export default function Lightning() {
     // Only some bolts fire on each strike; more as the lightning level rises.
     const fires = step(hash(strikeSeed.add(4.4)), lightning.mul(0.85))
     const flicker = float(0.55).add(hash(strikeSeed.add(6.6)).mul(0.9))
-    const color = stateColor().mul(0.45).add(BLUE.mul(0.25)).add(WHITE_HOT.mul(0.55))
+    // The state's colour with a hot core: red sparks in red, gold in gold.
+    const color = stateColor().mul(0.85).add(WHITE_HOT.mul(0.3))
     material.colorNode = color.mul(fires).mul(flicker).mul(lightning).mul(float(0.8).add(intensity)).mul(2.6).mul(depthFade())
 
     const object = new THREE.LineSegments(buildBolts(), material)
