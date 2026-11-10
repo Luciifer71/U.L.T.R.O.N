@@ -89,6 +89,24 @@ the core swells while ULTRON speaks, words stream in and replies stream out
 (`src/entity/DataStream.tsx`), neural cascades build while the model thinks, and real
 CPU/memory strain heats the core and makes the rings shiver.
 
+Cinematic finish (Phase C): the final frame goes through one lens pass
+(`src/entity/EntityGlow.tsx`): light bends in a ring around the core, colours split
+toward the edges, bright light throws a thin horizontal (anamorphic) streak, a vignette
+and faint film grain sit on top, and an occasional hologram scan line sweeps the frame.
+`src/entity/cinema.ts` decides when: a failed step or an alert glitches the image
+(slice tearing and colour split for a fraction of a second), and a rare, brief flicker
+happens even when idle. Electric arcs (`src/entity/Lightning.tsx`) strike from the core
+to the ring cage while ULTRON thinks or the model works. Reduced motion softens all of it.
+
+### Performance
+
+The UI is built to stay light: rendering is capped at 60 fps (`?fps=30..240` to change),
+every particle, arc and bolt is positioned in the vertex shader from a few shared values
+(no per-particle simulation), the CPU does a handful of spring updates per frame, and the
+lens pass adds one full-screen pass with about two dozen texture reads per pixel. Hidden
+or minimised tabs stop rendering. On the backend, live signals cost one `psutil` read
+every 2 s plus small messages while you speak or a task runs.
+
 The earlier dot-field layers (`src/scene/TSL*.tsx`, `EnergyEvents.tsx`) are unchanged.
 Open the UI with `?legacy=1` (for example `http://localhost:5173/?legacy=1`) to show
 them instead. The `RenderRuntime` performance controller is still not mounted.

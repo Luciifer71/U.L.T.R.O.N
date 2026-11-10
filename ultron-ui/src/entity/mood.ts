@@ -211,7 +211,7 @@ export function createMood({ ringCount = RING_COUNT, random = Math.random, reduc
   return { state, update, spinRings, kickRing }
 }
 
-function prefersReducedMotion() {
+export function prefersReducedMotion() {
   try {
     return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
   } catch {

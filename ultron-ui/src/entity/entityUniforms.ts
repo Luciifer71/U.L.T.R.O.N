@@ -5,6 +5,8 @@ import { getEntityVisualState } from '../state/entityStore'
 import { getUltronEntityState } from '../simulation/entitySimulation'
 import { mood, updateMood } from './mood'
 import { liveSignals } from './liveSignals'
+import { createCinema } from './cinema'
+import { prefersReducedMotion } from './mood'
 import { randomOrbitBasis } from './entityConfig'
 
 /* =========================================================
@@ -48,7 +50,14 @@ export const entityUniforms = {
   model: uniform(0),
   pressure: uniform(0),
   now: uniform(0),
+  // Film effects (see cinema.ts).
+  glitch: uniform(0),
+  scan: uniform(-1),
+  lightning: uniform(0),
 }
+
+const cinema = createCinema(Math.random, prefersReducedMotion())
+let failuresSeen = 0
 
 /** Camera distance to the entity centre (see EntityCanvas). */
 export const CAMERA_DISTANCE = 4.8
@@ -113,7 +122,14 @@ export function syncEntityUniforms(dt: number) {
   u.pressure.value = live.pressure
   u.now.value = now
 
-  updateMood(getUltronEntityState().mode, dt, live.model)
+  const mode = getUltronEntityState().mode
+  updateMood(mode, dt, live.model)
+
+  cinema.update(dt, { mode, model: live.model, stepFailed: live.failures !== failuresSeen })
+  failuresSeen = live.failures
+  u.glitch.value = cinema.state.glitch
+  u.scan.value = cinema.state.scan
+  u.lightning.value = cinema.state.lightning
   u.coreScale.value = mood.core
   u.cageScale.value = mood.cage
   u.shellScale.value = mood.shell

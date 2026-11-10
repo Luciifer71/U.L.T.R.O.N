@@ -6,6 +6,7 @@ import ArcCage from '../entity/ArcCage'
 import NeuralShell from '../entity/NeuralShell'
 import Dust from '../entity/Dust'
 import DataStream from '../entity/DataStream'
+import Lightning from '../entity/Lightning'
 import EntityGlow from '../entity/EntityGlow'
 
 /* =========================================================
@@ -17,7 +18,9 @@ import EntityGlow from '../entity/EntityGlow'
      neural shell   → nodes and links with travelling pulses
      dust           → faint sparks for depth
      data stream    → words flowing in to the core and replies flowing out
-   plus a bloom pass for the holographic glow.
+     lightning      → electric arcs while thinking or while the model works
+   plus a bloom + lens pass (light bending, colour split, streaks,
+   glitches, hologram scan, vignette, grain) for the filmed look.
    ========================================================= */
 
 function UniformSync() {
@@ -38,6 +41,7 @@ export default function UltronEntity() {
       <NeuralShell />
       <Dust />
       <DataStream />
+      <Lightning />
       <EntityGlow />
     </>
   )
