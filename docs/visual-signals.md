@@ -11,6 +11,7 @@ publish small, content-free display hints on NATS under `ultron.signal.<kind>`
 | `ultron.signal.voice` | listener, while you speak (max 15/s, then a final 0) | `level` 0..1 | ripples through the core |
 | `ultron.signal.model` | brain, around each model request | `phase` start/end, `seconds` | rapid neural cascades that build up while the model thinks |
 | `ultron.signal.vitals` | brain, every 2 s | `cpu`, `memory` 0..1 | core pressure: hotter core and shivering rings, only under real strain |
+| `ultron.signal.gaze` | optional presence watcher (camera, off by default) | `present`, `x`, `y`, `near` | the entity turns toward you and notices you arrive ([camera presence](camera-presence.md)) |
 
 The UI also reads existing subjects: `ultron.status.speaking` (the core swells in a
 speech rhythm while ULTRON talks), `ultron.intent` (each word of a request streams

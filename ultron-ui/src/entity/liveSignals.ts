@@ -12,6 +12,7 @@ import { RING_COUNT } from './entityConfig.ts'
      ultron.intent / voice  → words stream in, replies stream out
      ultron.signal.model    → neural cascades while the model thinks
      ultron.signal.vitals   → CPU / memory load becomes core pressure
+     ultron.signal.gaze     → (optional camera) the entity turns toward you
 
    Display only: nothing here ever sends a message or acts.
    With no backend connected every value rests at zero and
@@ -35,6 +36,8 @@ const MAX_PACKETS_PER_MESSAGE = 18
 const PACKET_STAGGER = 0.07 // seconds between packets of one message
 const MODEL_TIMEOUT = 120 // seconds: clear a model "start" that never ended
 const VOICE_TIMEOUT = 1.5 // seconds: a lost final level must not freeze the ripple
+const GAZE_TIMEOUT = 2 // seconds without camera updates → nobody known to be there
+const NOTICE_AFTER_ABSENCE = 4 // seconds away before arriving counts as "noticed"
 
 /** Inner rings first, alternating, so a three-step task lights three spread-out rings. */
 export const STEP_RING_ORDER = [0, 2, 4, 6, 1, 3, 5, 7].filter((ring) => ring < RING_COUNT)
@@ -77,6 +80,14 @@ export function createLiveSignals(random: () => number = Math.random) {
     taskId: null as string | null,
     /** Increments on every failed step, so effects can react once per failure. */
     failures: 0,
+    // Camera presence (smoothed): 0..1 presence and where the viewer is (-1..1).
+    presence: 0,
+    gazeX: 0,
+    gazeY: 0,
+    gazeTarget: { present: false, x: 0, y: 0, at: -Infinity },
+    absentSince: -Infinity,
+    /** Increments when someone arrives after being away, so the entity can react once. */
+    notices: 0,
     rings: Array.from({ length: RING_COUNT }, (): RingState => ({ status: 'idle', since: -Infinity })),
     now: 0,
   }
@@ -149,6 +160,17 @@ export function createLiveSignals(random: () => number = Math.random) {
         state.cpu = clamp01(data.cpu)
         state.memory = clamp01(data.memory)
         break
+      case 'ultron.signal.gaze': {
+        const present = data.present === true
+        const target = state.gazeTarget
+        if (present && !target.present && now - state.absentSince > NOTICE_AFTER_ABSENCE) state.notices++
+        if (!present && target.present) state.absentSince = now
+        target.present = present
+        target.x = Math.max(-1, Math.min(1, typeof data.x === 'number' && Number.isFinite(data.x) ? data.x : 0))
+        target.y = Math.max(-1, Math.min(1, typeof data.y === 'number' && Number.isFinite(data.y) ? data.y : 0))
+        target.at = now
+        break
+      }
       case 'ultron.intent':
         spawnPackets(data.prompt, true, now)
         break
@@ -174,6 +196,17 @@ export function createLiveSignals(random: () => number = Math.random) {
     // Model thinking builds up over the first few seconds of a request.
     const modelTarget = state.modelActive ? Math.min(1, 0.4 + (now - state.modelSince) * 0.2) : 0
     state.model = approach(state.model, modelTarget, 3, dt)
+
+    // Camera presence: lost updates (camera stopped) count as nobody there.
+    const gaze = state.gazeTarget
+    if (gaze.present && now - gaze.at > GAZE_TIMEOUT) {
+      gaze.present = false
+      state.absentSince = now
+    }
+    state.presence = approach(state.presence, gaze.present ? 1 : 0, 1.5, dt)
+    // Heavy, deliberate turn: it follows you, it does not twitch after you.
+    state.gazeX = approach(state.gazeX, gaze.present ? gaze.x : 0, 1.6, dt)
+    state.gazeY = approach(state.gazeY, gaze.present ? gaze.y : 0, 1.6, dt)
 
     // Only real strain shows: high CPU, or memory close to full.
     const strain = Math.max(smoothstep(0.55, 0.95, state.cpu), smoothstep(0.88, 0.99, state.memory) * 0.6)

@@ -208,7 +208,7 @@ export function createMood({ ringCount = RING_COUNT, random = Math.random, reduc
     pair[1].kick((random() - 0.5) * strength * motionScale)
   }
 
-  return { state, update, spinRings, kickRing }
+  return { state, update, spinRings, kickRing, pulse: shockwave }
 }
 
 export function prefersReducedMotion() {
@@ -226,3 +226,5 @@ export const mood = engine.state
 export const updateMood = engine.update
 export const spinRings = engine.spinRings
 export const kickRing = engine.kickRing
+/** Release a shockwave now (e.g. the entity notices someone arrive). */
+export const pulse = engine.pulse

@@ -1,9 +1,10 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three/webgpu'
 import { SpriteNodeMaterial } from 'three/webgpu'
 import { cos, cross, float, fract, mix, mx_noise_vec3, sin, smoothstep, uv, vec2, vec3 } from 'three/tsl'
 import { mood } from './mood'
+import { liveSignals } from './liveSignals'
 import { buildOrbits, entityUniforms, shockAt, softDisc, stateColor, WHITE_HOT } from './entityUniforms'
 
 /* =========================================================
@@ -94,14 +95,19 @@ export default function ParticleCore() {
     ;(corona.material as THREE.Material).dispose()
   }, [mesh, corona])
 
+  const holder = useRef<THREE.Group | null>(null)
+
   useFrame(() => {
+    // Like the pupil of an eye, the core drifts slightly toward the viewer.
+    const signals = liveSignals.state
+    holder.current?.position.set(signals.gazeX * 0.1, signals.gazeY * 0.08, signals.presence * 0.05)
     const live = entityUniforms
     const pulse = 1 + (live.speak.value as number) * 0.12 + (live.voice.value as number) * 0.1
     corona.scale.setScalar(1.9 * mood.core * pulse)
   })
 
   return (
-    <group>
+    <group ref={holder}>
       <primitive object={corona} />
       <primitive object={mesh} />
     </group>
