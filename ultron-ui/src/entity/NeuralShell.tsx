@@ -17,10 +17,13 @@ import { mood } from './mood'
    from the entity clock.
    ========================================================= */
 
-const NODE_COUNT = 280
+const NODE_COUNT = 340
 const SHELL_RADIUS = 1.78
 const LINKS_PER_NODE = 3
-const MAX_LINK = 0.62
+const MAX_LINK = 0.58
+// Each link follows the sphere's surface in this many pieces, so the shell's
+// outline reads round instead of a polygon of straight chords.
+const LINK_SEGMENTS = 6
 
 function buildNetwork() {
   const nodes: THREE.Vector3[] = []
@@ -29,7 +32,7 @@ function buildNetwork() {
     const y = 1 - (i / (NODE_COUNT - 1)) * 2
     const ring = Math.sqrt(1 - y * y)
     const angle = golden * i
-    const jitter = SHELL_RADIUS * (0.95 + Math.random() * 0.08)
+    const jitter = SHELL_RADIUS * (0.97 + Math.random() * 0.05)
     nodes.push(new THREE.Vector3(Math.cos(angle) * ring, y, Math.sin(angle) * ring).multiplyScalar(jitter))
   }
 
@@ -48,12 +51,23 @@ function buildNetwork() {
       if (seen.has(key)) continue
       seen.add(key)
       const other = nodes[j]
-      positions.push(node.x, node.y, node.z, other.x, other.y, other.z)
-      along.push(0, 1)
-      // phase, speed (signed = direction)
+      // phase, speed (signed = direction): shared by every piece of the link
       const phase = Math.random()
       const speed = (0.12 + Math.random() * 0.3) * (Math.random() < 0.5 ? -1 : 1)
-      pulse.push(phase, speed, phase, speed)
+      const pointAt = (f: number) => {
+        // Great-circle path between the two nodes, radius blended between theirs.
+        const radius = node.length() * (1 - f) + other.length() * f
+        return new THREE.Vector3().copy(node).normalize().lerp(other.clone().normalize(), f).normalize().multiplyScalar(radius)
+      }
+      for (let s = 0; s < LINK_SEGMENTS; s++) {
+        const f0 = s / LINK_SEGMENTS
+        const f1 = (s + 1) / LINK_SEGMENTS
+        const a = pointAt(f0)
+        const b = pointAt(f1)
+        positions.push(a.x, a.y, a.z, b.x, b.y, b.z)
+        along.push(f0, f1)
+        pulse.push(phase, speed, phase, speed)
+      }
     }
   })
 
