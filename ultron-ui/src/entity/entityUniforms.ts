@@ -3,7 +3,7 @@ import { exp, float, instancedBufferAttribute, positionView, smoothstep, uniform
 import type { Node } from 'three/webgpu'
 import { getEntityVisualState } from '../state/entityStore'
 import { getUltronEntityState } from '../simulation/entitySimulation'
-import { mood, updateMood } from './mood'
+import { mood, pulse, updateMood } from './mood'
 import { liveSignals } from './liveSignals'
 import { createCinema } from './cinema'
 import { prefersReducedMotion } from './mood'
@@ -58,6 +58,8 @@ export const entityUniforms = {
 
 const cinema = createCinema(Math.random, prefersReducedMotion())
 let failuresSeen = 0
+let noticesSeen = 0
+const NOTICE_SHOCK = 0.85
 
 /** Camera distance to the entity centre (see EntityCanvas). */
 export const CAMERA_DISTANCE = 4.8
@@ -124,6 +126,11 @@ export function syncEntityUniforms(dt: number) {
 
   const mode = getUltronEntityState().mode
   updateMood(mode, dt, live.model)
+  // Someone arrived in front of the camera after being away: it notices them.
+  if (live.notices !== noticesSeen) {
+    noticesSeen = live.notices
+    pulse(NOTICE_SHOCK)
+  }
 
   cinema.update(dt, { mode, model: live.model, stepFailed: live.failures !== failuresSeen })
   failuresSeen = live.failures

@@ -151,3 +151,39 @@ describe('model, vitals and words', () => {
     assert.equal(wordCount('  two   words '), 2)
   })
 })
+
+describe('camera presence', () => {
+  test('arriving is noticed once, the entity turns toward the viewer, and settles back when they leave', () => {
+    const live = createLiveSignals(seeded())
+    live.handle('ultron.signal.gaze', { present: true, x: 0.8, y: -0.4, near: 0.3 }, 0)
+    assert.equal(live.state.notices, 1, 'the first arrival is noticed')
+    let now = 0
+    for (let i = 0; i < 4 * 60; i++) {
+      now += 1 / 60
+      if (i % 6 === 0) live.handle('ultron.signal.gaze', { present: true, x: 0.8, y: -0.4 }, now)
+      live.update(now, 1 / 60)
+    }
+    assert.ok(live.state.presence > 0.95 && live.state.gazeX > 0.75 && live.state.gazeY < -0.35)
+    live.handle('ultron.signal.gaze', { present: true, x: 0.8, y: -0.4 }, now)
+    assert.equal(live.state.notices, 1, 'staying present is not noticed again')
+
+    live.handle('ultron.signal.gaze', { present: false, x: 0, y: 0 }, now)
+    now = settle(live, now, 5)
+    assert.ok(live.state.presence < 0.01 && Math.abs(live.state.gazeX) < 0.01, 'turns back to neutral')
+    live.handle('ultron.signal.gaze', { present: true, x: 0, y: 0 }, now)
+    assert.equal(live.state.notices, 2, 'coming back after a while is noticed')
+  })
+
+  test('a quick step out of frame is not a new arrival, and a stopped camera times out', () => {
+    const live = createLiveSignals(seeded())
+    live.handle('ultron.signal.gaze', { present: true, x: 0, y: 0 }, 0)
+    live.handle('ultron.signal.gaze', { present: false }, 1)
+    live.handle('ultron.signal.gaze', { present: true, x: 0, y: 0 }, 2)
+    assert.equal(live.state.notices, 1)
+    settle(live, 2, 3) // no further messages: the watcher stopped
+    assert.equal(live.state.gazeTarget.present, false)
+    live.handle('ultron.signal.gaze', { present: true, x: 'left', y: Number.NaN }, 20)
+    assert.equal(live.state.gazeTarget.x, 0)
+    assert.equal(live.state.gazeTarget.y, 0)
+  })
+})

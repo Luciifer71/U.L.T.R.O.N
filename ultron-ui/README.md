@@ -107,6 +107,10 @@ lens pass adds one full-screen pass with about two dozen texture reads per pixel
 or minimised tabs stop rendering. On the backend, live signals cost one `psutil` read
 every 2 s plus small messages while you speak or a task runs.
 
+Camera presence (Phase D, optional, off by default; see
+[camera presence](../docs/camera-presence.md)): the entity turns toward you, its core
+drifts toward you and it notices you arrive.
+
 The earlier dot-field layers (`src/scene/TSL*.tsx`, `EnergyEvents.tsx`) are unchanged.
 Open the UI with `?legacy=1` (for example `http://localhost:5173/?legacy=1`) to show
 them instead. The `RenderRuntime` performance controller is still not mounted.

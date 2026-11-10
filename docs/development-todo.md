@@ -24,3 +24,17 @@ Source of design inspiration: bilawalsidhu/gods-eye-view at
 1df2a272cf7cfbb2f1a4c637c897e90719b0af95. Retain Ultron's local-first budget and
 verified-action contracts. “Always available” means bounded recovery and user control,
 not endless inference, unlimited retries or an assistant that cannot be stopped.
+
+## Visual entity and presence
+- [x] Phase A: body language (springs, shockwaves, idle thoughts, awakening).
+- [x] Phase B: live data (task steps as rings, voice, words, model activity, system load).
+- [x] Phase C: cinematic lens pass, glitches, hologram scan, lightning.
+- [x] Phase D: optional camera presence (the entity turns toward the user; off by default).
+
+## Adopt OpenJarvis ideas (see `openjarvis-review.md`; independent implementations)
+- [ ] Phase E: automatic long-term memory; scheduler and reminders.
+- [ ] Phase F: spoken morning briefing; proactive agent with approval tiers;
+      prompt-injection scanning, taint tracking and loop guard.
+- [ ] Phase G: Telegram phone channel (paired, allow-listed).
+- [ ] Phase H: optional local Kokoro voice.
+- [ ] Phase I: allow-listed MCP tool plugins through the capability broker.
