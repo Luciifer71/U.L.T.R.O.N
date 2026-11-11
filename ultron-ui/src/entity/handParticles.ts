@@ -7,7 +7,8 @@ import type { TrackedHand } from './liveSignals.ts'
    like the entity itself. Each particle is tied once, at
    startup, to a bone, the palm or a fingertip of hand 0 or 1.
    Every frame only the 42 joint positions change; the GPU
-   places each particle from them. No three.js here, so this
+   places each particle from them. Hands can reach the whole
+   screen (see mapHand). No three.js here, so this
    is unit tested directly.
    ========================================================= */
 
@@ -37,16 +38,55 @@ export const KIND = { bone: 0, palm: 1, tip: 2 } as const
 const BONE_SHARE = 0.66
 const PALM_SHARE = 0.22
 
-// The camera picture (4:3) is laid over the view at this depth, in front of
-// the entity and its rings, so the hands never pass behind the core.
-const PLANE_Z = 1.25
-const WIDTH = 4.0
-const HEIGHT = 3.0
-const DEPTH = 2.5
+/** Depth of the hands: in front of the entity and its rings, never behind the core. */
+export const PLANE_Z = 1.25
+// Hands reach this share of the screen edge (a little margin keeps fingertips visible).
+const REACH = 0.94
+// Hand size: one camera-picture height in scene units is this share of the screen height.
+const HAND_SCALE = 0.85
+// MediaPipe depth is weak; keep a gentle sense of depth only.
+const DEPTH_SCALE = 0.6
 
-/** Image coordinates (x right, y down, z negative towards the camera) to scene space. */
-export function toScene(point: readonly [number, number, number]): [number, number, number] {
-  return [(point[0] - 0.5) * WIDTH, (0.5 - point[1]) * HEIGHT, PLANE_Z - point[2] * DEPTH]
+/** Half the visible width and height of the scene at the hands' depth. */
+export type HandView = { halfWidth: number; halfHeight: number }
+
+/** The view of a perspective camera at the hands' depth. */
+export function handView(cameraZ: number, fovDegrees: number, aspect: number): HandView {
+  const halfHeight = Math.max(0.1, cameraZ - PLANE_Z) * Math.tan((fovDegrees * Math.PI) / 360)
+  return { halfWidth: halfHeight * aspect, halfHeight }
+}
+
+const CENTRE_JOINTS = [0, 5, 9, 13, 17]
+
+/** Palm centre in image coordinates. */
+export function palmCentre(points: readonly (readonly [number, number, number])[]): [number, number, number] {
+  const c: [number, number, number] = [0, 0, 0]
+  for (const j of CENTRE_JOINTS) for (let k = 0; k < 3; k++) c[k] += points[j][k] / CENTRE_JOINTS.length
+  return c
+}
+
+/**
+ * Image landmarks (mirrored, x right, y down, 0..1) to scene positions.
+ *
+ * Where the hand is uses the whole screen: the camera picture's edges map to the
+ * screen's edges, whatever the two aspect ratios, so a hand can go anywhere the
+ * camera sees. The hand's own shape is scaled the same in every direction (using
+ * the camera's real aspect), so it is never stretched.
+ */
+export function mapHand(
+  points: readonly (readonly [number, number, number])[],
+  view: HandView,
+  cameraAspect = 16 / 9,
+): [number, number, number][] {
+  const c = palmCentre(points)
+  const x = (c[0] - 0.5) * 2 * view.halfWidth * REACH
+  const y = (0.5 - c[1]) * 2 * view.halfHeight * REACH
+  const k = 2 * view.halfHeight * HAND_SCALE // scene units per picture height
+  return points.map((p) => [
+    x + (p[0] - c[0]) * cameraAspect * k,
+    y - (p[1] - c[1]) * k,
+    PLANE_Z - (p[2] - c[2]) * cameraAspect * k * DEPTH_SCALE,
+  ])
 }
 
 /** Keep each side in a stable slot (Right → 0, Left → 1) so hands never swap mid-fade. */
@@ -113,6 +153,6 @@ export function buildHandParticles(perHand = PARTICLES_PER_HAND, random: () => n
 }
 
 /** Scene positions of one hand's 21 joints, written into `target` at the hand's slot. */
-export function writeJoints(target: Float32Array, slot: number, hand: TrackedHand) {
-  hand.points.forEach((point, j) => target.set(toScene(point), (slot * JOINTS + j) * 3))
+export function writeJoints(target: Float32Array, slot: number, hand: TrackedHand, view: HandView, cameraAspect?: number) {
+  mapHand(hand.points, view, cameraAspect).forEach((point, j) => target.set(point, (slot * JOINTS + j) * 3))
 }

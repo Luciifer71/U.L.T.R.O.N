@@ -32,8 +32,12 @@ from ultron.control.signals import SignalPublisher
 from ultron.gestures.activation import CONTROL_SUBJECT, STATE_SUBJECT
 from ultron.gestures.tracker import GestureTracker
 
-GESTURE_WIDTH = 640
-GESTURE_HEIGHT = 480
+# Most laptop webcams have a 16:9 sensor. Asking for 4:3 (640x480) makes the
+# driver crop off the left and right of the view, so hands vanished well before
+# the edge of what the camera sees. MediaPipe scales frames down internally, so
+# the larger picture costs little. Override with ULTRON_GESTURE_RESOLUTION=WxH.
+GESTURE_WIDTH = 1280
+GESTURE_HEIGHT = 720
 GESTURE_RATE_HZ = 30.0
 PRESENCE_RATE_HZ = 10.0
 HAND_MODEL = 'hand_landmarker.task'
@@ -116,6 +120,7 @@ class VisionService:
         self.tracker = GestureTracker()
         self.presence = PresenceTracker(rate_hz=PRESENCE_RATE_HZ)
         self.error = None
+        self.aspect = None  # of the current camera picture, once a frame arrives
         self.wake = asyncio.Event()
 
     # ---- control --------------------------------------------------------
@@ -149,7 +154,7 @@ class VisionService:
         if self.camera is not None and self.camera_mode == mode:
             return True
         self._release_camera()
-        width, height = (GESTURE_WIDTH, GESTURE_HEIGHT) if mode == 'gesture' else (FRAME_WIDTH, FRAME_HEIGHT)
+        width, height = gesture_resolution() if mode == 'gesture' else (FRAME_WIDTH, FRAME_HEIGHT)
         try:
             self.camera = self._open_camera(width, height)
             self.camera_mode = mode
@@ -169,6 +174,7 @@ class VisionService:
             finally:
                 self.camera = None
                 self.camera_mode = None
+                self.aspect = None
                 logger.info('[VISION] Camera released.')
 
     def close(self):
@@ -203,12 +209,17 @@ class VisionService:
         ok, frame = await asyncio.to_thread(self.camera.read)
         detections = []
         if ok and frame is not None:
+            height, width = frame.shape[:2]
+            if self.aspect is None:
+                logger.info('[VISION] Camera delivers %dx%d for hand tracking.', width, height)
+            self.aspect = round(width / height, 4) if height else None
             # detect() mirrors the coordinates, not the picture (see MediaPipeHands).
             detections = await asyncio.to_thread(self.hands.detect, frame, self.clock())
             del frame
         now = self.clock()
         events = self.tracker.update(detections, now)
-        self.publisher.emit('hands', {'hands': self.tracker.snapshot()})
+        # aspect (width / height) lets the UI keep hands in proportion.
+        self.publisher.emit('hands', {'hands': self.tracker.snapshot(), 'aspect': self.aspect or 16 / 9})
         for event in events:
             if event['type'] in ('exit', 'idle'):
                 self.control('gesture_off', 'gesture' if event['type'] == 'exit' else 'idle')
@@ -255,6 +266,18 @@ class BusPublisher(SignalPublisher):
         self._pending.add(task)
         task.add_done_callback(self._pending.discard)
         return True
+
+
+def gesture_resolution():
+    """Requested camera size for hand tracking: ULTRON_GESTURE_RESOLUTION=WxH or 1280x720."""
+    value = os.getenv('ULTRON_GESTURE_RESOLUTION', '').strip().lower()
+    try:
+        width, height = (int(part) for part in value.split('x'))
+        if 320 <= width <= 3840 and 240 <= height <= 2160:
+            return width, height
+    except ValueError:
+        pass
+    return GESTURE_WIDTH, GESTURE_HEIGHT
 
 
 def open_camera_at(width, height):

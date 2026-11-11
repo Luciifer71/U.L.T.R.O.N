@@ -9,7 +9,7 @@ import {
 import type { Node } from 'three/webgpu'
 import { entityUniforms, softDisc, stateColor, WHITE_HOT } from './entityUniforms'
 import { liveSignals, type TrackedHand } from './liveSignals'
-import { buildHandParticles, JOINTS, KIND, MAX_HANDS, pinchGlow, slotOf, toScene } from './handParticles'
+import { buildHandParticles, handView, JOINTS, KIND, MAX_HANDS, mapHand, PLANE_Z, pinchGlow, slotOf } from './handParticles'
 
 /* =========================================================
    HOLO HANDS
@@ -39,7 +39,7 @@ export default function HoloHands() {
     const layout = buildHandParticles()
 
     // Live inputs: 42 joint positions, and per hand (fade, engaged, pinch, 0).
-    const jointValues = Array.from({ length: MAX_HANDS * JOINTS }, () => new THREE.Vector3(0, 0, 1.25))
+    const jointValues = Array.from({ length: MAX_HANDS * JOINTS }, () => new THREE.Vector3(0, 0, PLANE_Z))
     const handValues = Array.from({ length: MAX_HANDS }, () => new THREE.Vector4())
     const jointsU = uniformArray(jointValues, 'vec3')
     const handsU = uniformArray(handValues, 'vec4')
@@ -129,8 +129,12 @@ export default function HoloHands() {
     [],
   )
 
-  useFrame((_, delta) => {
+  useFrame((state, delta) => {
     const dt = Math.min(delta, 0.05)
+    const camera = state.camera as THREE.PerspectiveCamera
+    const view = handView(camera.position.z, camera.fov, state.size.width / Math.max(1, state.size.height))
+    const cameraAspect = liveSignals.state.handsAspect
+    const mapped: ([number, number, number][] | null)[] = [null, null]
     const seen = new Set<number>()
     for (const hand of liveSignals.state.hands) {
       const slot = slotOf(hand.side)
@@ -147,7 +151,9 @@ export default function HoloHands() {
       }
       const hand = entry.hand
       if (hand) {
-        hand.points.forEach((point, j) => scene.jointValues[index * JOINTS + j].set(...toScene(point)))
+        const points = mapHand(hand.points, view, cameraAspect)
+        mapped[index] = points
+        points.forEach((point, j) => scene.jointValues[index * JOINTS + j].set(...point))
         visible = true
       }
       scene.handValues[index].set(entry.fade, hand?.engaged ? 1 : 0, hand ? pinchGlow(hand.pinch) : 0, 0)
@@ -159,10 +165,11 @@ export default function HoloHands() {
     const aim = right.hand && right.hand.engaged ? right.fade : 0
     const fade = scene.reticleFade.value as number
     scene.reticleFade.value = fade + (aim - fade) * (1 - Math.exp(-12 * dt))
-    if (right.hand) {
+    const rightPoints = mapped[slotOf('Right')]
+    if (right.hand && rightPoints) {
       const lock = pinchGlow(right.hand.pinch)
       scene.lock.value = lock
-      const [x, y, z] = toScene(right.hand.points[8])
+      const [x, y, z] = rightPoints[8]
       scene.reticle.position.set(x, y, z + 0.02)
       scene.reticle.scale.setScalar(RETICLE_SIZE * (1 - lock * 0.35))
     }

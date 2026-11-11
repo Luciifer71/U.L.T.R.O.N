@@ -369,7 +369,7 @@ def test_camera_stays_closed_until_gesture_mode_and_is_released_after():
     assert asyncio.run(service.step()) is None and cameras == [], 'idle: camera never opened'
     assert service.control('gesture_on', 'ops')['gesture'] is True
     asyncio.run(service.step())
-    assert cameras and cameras[0].size == (640, 480)
+    assert cameras and cameras[0].size == (1280, 720)
     service.control('gesture_off', 'voice')
     asyncio.run(service.step())
     assert cameras[0].released and service.camera is None
@@ -415,4 +415,26 @@ def test_presence_mode_uses_low_resolution_and_pauses_for_gestures():
     assert cameras[-1].size == (320, 240)
     service.control('gesture_on', 'ops')
     asyncio.run(service.step())
-    assert cameras[0].released and cameras[-1].size == (640, 480), 'one camera owner, reopened for hands'
+    assert cameras[0].released and cameras[-1].size == (1280, 720), 'one camera owner, reopened for hands'
+
+
+def test_hands_carry_the_camera_aspect_and_resolution_can_be_overridden(monkeypatch):
+    """Regression: 640x480 cropped 16:9 webcams, so hands vanished before the edge."""
+    pytest.importorskip('numpy')
+    from ultron.agents import vision_service
+    assert vision_service.gesture_resolution() == (1280, 720)
+    monkeypatch.setenv('ULTRON_GESTURE_RESOLUTION', '1920x1080')
+    assert vision_service.gesture_resolution() == (1920, 1080)
+    monkeypatch.setenv('ULTRON_GESTURE_RESOLUTION', 'huge')
+    assert vision_service.gesture_resolution() == (1280, 720)
+    monkeypatch.delenv('ULTRON_GESTURE_RESOLUTION')
+
+    recorder = Recorder()
+    service = vision_service.VisionService(
+        recorder, open_camera=lambda w, h: FakeCamera(w, h),
+        make_hands=lambda: SimpleNamespace(detect=lambda frame, now: [], close=lambda: None),
+        make_faces=lambda: (lambda frame: []), clock=lambda: 1.0)
+    service.control('gesture_on', 'ops')
+    asyncio.run(service.step())
+    hands = [payload for kind, payload in recorder.signals if kind == 'hands']
+    assert hands and abs(hands[-1]['aspect'] - 16 / 9) < 1e-3

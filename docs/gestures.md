@@ -107,6 +107,12 @@ left and a 4K monitor on the right.
 - Hand tracking uses MediaPipe's bundled `assets/models/hand_landmarker.task`, about
   20-30 ms per frame on one CPU core. Gesture mode runs at about 30 frames a second
   and stops using the camera and CPU completely when switched off.
+- Hand tracking asks the camera for 1280x720 (16:9). Most laptop webcams are 16:9;
+  asking for 4:3 makes the driver crop the sides, so hands vanished before the edge
+  of the real view. Set `ULTRON_GESTURE_RESOLUTION=WxH` in `.env` for another size;
+  the vision window logs the size the camera actually delivers. On screen, the
+  camera picture is spread over the whole window, so a hand can go anywhere the
+  camera sees, and keeps its true shape.
 - Webcam tracking has 50-100 ms of delay and needs reasonable light. It is ideal for
   grabbing, throwing, zooming, swiping and clicking large targets, not for pixel-exact
   pointing.
