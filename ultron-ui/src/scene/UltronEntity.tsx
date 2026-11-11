@@ -20,7 +20,7 @@ import EntityGlow from '../entity/EntityGlow'
      dust           → faint sparks for depth
      data stream    → words flowing in to the core and replies flowing out
      lightning      → electric arcs while thinking or while the model works
-     holo hands     → your tracked hands as glowing skeletons in gesture mode
+     holo hands     → your tracked hands as flowing particles in gesture mode
    plus a bloom + lens pass (light bending, colour split, streaks,
    glitches, hologram scan, vignette, grain) for the filmed look.
    ========================================================= */

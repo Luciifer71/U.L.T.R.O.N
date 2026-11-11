@@ -18,7 +18,16 @@ The camera stays **closed** until gesture mode is turned on.
 
 A double clap toggles: clap twice again to turn it off. Set `ULTRON_CLAP=0` in `.env`
 to disable clap detection. While gesture mode is on, the UI shows **GESTURE MODE**
-and draws your hands as glowing holographic skeletons.
+with the pose it recognises, and draws your hands in front of the entity as fine
+flowing particles in the entity's colour, with a targeting reticle on your right
+index fingertip that tightens as you pinch.
+
+## What works today
+
+Gesture mode, the hand display, pose recognition and **both palms to exit** work
+now. Every other row in the table below is recognised and shown but **does nothing
+yet**: its action goes live in the stage listed (air mouse in G2, windows in G3,
+the rest in G4).
 
 ## Mapping table
 
@@ -67,8 +76,18 @@ left and a 4K monitor on the right.
 
 ## Safety and accuracy rules
 
-- **Engagement zone:** only a hand raised into the frame and close enough counts. A
-  hand resting on the desk or passing by is ignored.
+- **Engagement:** a hand counts only when it is fully in the picture and close
+  enough to the camera, at any height. A hand cut off by the frame edge, or far
+  away, is shown dimmed and never triggers anything.
+- **No guessing:** fingers are judged from MediaPipe's 3D landmarks (real joint
+  angles in metres, so distance and hand rotation do not matter). Straight fingers
+  bend under 70°, curled ones over 100° (measured on real hands: 21-42° and
+  119-195°). A finger in between is "unclear" and the pose is reported as unknown
+  rather than guessed.
+- **Left and right:** taken from MediaPipe on the normal camera picture (verified
+  on MediaPipe's own left- and right-hand test photos). If both hands get the same
+  label, the one on the right of the mirrored picture is your right hand; a single
+  hand keeps its side while it moves.
 - **Confirmation frames:** a pose must be seen for 3 consecutive frames (~0.1 s) to
   start and 4 to end, so one bad frame never fires anything.
 - **Smoothing:** a One Euro filter steadies webcam jitter without lagging fast moves.

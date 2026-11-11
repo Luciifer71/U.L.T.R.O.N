@@ -2,9 +2,12 @@
 
 Production rules that keep gestures from firing by accident:
 
-* **Engagement zone:** a hand counts only when it is raised into the frame
-  (palm centre above ``ENGAGE_BELOW`` of the image height) and large enough to be
-  near the user, so a hand resting on the desk or passing by is ignored.
+* **Engagement:** a hand counts only when it is fully inside the picture (a hand
+  cut off by the frame edge cannot be read reliably) and close enough to the
+  camera. Height in the frame does not matter.
+* **Left and right:** MediaPipe's handedness label is used, but two hands with
+  the same label are told apart by position (your right hand is on the right of
+  the mirrored picture), and a single hand keeps its side while it moves.
 * **Hysteresis:** a pose becomes active only after ``POSE_CONFIRM_FRAMES``
   consistent frames and ends only after ``POSE_RELEASE_FRAMES`` frames of
   something else, so one bad frame never starts or ends a gesture.
@@ -14,12 +17,14 @@ Production rules that keep gestures from firing by accident:
 Pure logic (no camera, no MediaPipe), driven by ``update()`` once per frame.
 """
 from dataclasses import dataclass, field
+import math
 
 from ultron.gestures.filters import LandmarkFilter
 from ultron.gestures.hands import classify, features
 
-ENGAGE_BELOW = 0.88  # palm centre y (0 = top, 1 = bottom of the image)
+FRAME_MARGIN = 0.005  # every landmark must be at least this far inside the image
 MIN_PALM_SIZE = 0.05  # in image units: smaller means too far away
+SAME_HAND_DISTANCE = 0.15  # palm centre movement (image units) still the same hand
 POSE_CONFIRM_FRAMES = 3
 POSE_RELEASE_FRAMES = 4
 EXIT_HOLD_SEC = 1.0
@@ -31,6 +36,7 @@ LOST_AFTER_SEC = 0.35  # a hand missing this long is gone
 class HandState:
     side: str  # 'Right' or 'Left' (the user's real hand)
     landmarks: list = field(default_factory=list)  # smoothed
+    centre: tuple = (0.5, 0.5)  # raw palm centre, for keeping track of sides
     pose: str = 'unknown'  # confirmed pose
     candidate: str = 'unknown'
     candidate_frames: int = 0
@@ -64,9 +70,7 @@ class GestureTracker:
             self.last_engaged = now
         events = []
         seen = set()
-        for side, landmarks, _score in detections or ():
-            if side in seen or side not in ('Right', 'Left'):
-                continue  # one hand per side; ignore duplicates and unknowns
+        for side, landmarks, world in self._assign_sides(detections, now):
             try:
                 raw = features(landmarks)
             except ValueError:
@@ -77,10 +81,16 @@ class GestureTracker:
                 hand.filter.reset()
             self.hands[side] = hand
             hand.last_seen = now
+            hand.centre = raw.palm_center
             hand.landmarks = hand.filter(landmarks, now)
-            smooth = features(hand.landmarks)
+            # Smoothed image landmarks for position; the raw 3D landmarks for the
+            # finger angles (MediaPipe already stabilises those across frames).
+            try:
+                smooth = features(hand.landmarks, world)
+            except ValueError:
+                smooth = features(hand.landmarks)
             hand.pinch = smooth.pinch
-            hand.engaged = raw.palm_center[1] < ENGAGE_BELOW and raw.palm_size > MIN_PALM_SIZE
+            hand.engaged = raw.palm_size > MIN_PALM_SIZE and _inside_frame(landmarks)
             observed = classify(smooth) if hand.engaged else 'unknown'
             events.extend(self._stabilise(hand, observed))
         for side in list(self.hands):
@@ -104,6 +114,38 @@ class GestureTracker:
             self.exited = True
             events.append({'type': 'idle'})
         return events
+
+    def _assign_sides(self, detections, now):
+        """Yield (side, landmarks, world) with at most one hand per side.
+
+        Detections are (label, landmarks, score[, world]) with landmarks in the
+        mirrored picture (x grows to the user's right).
+        """
+        hands = []
+        for detection in detections or ():
+            if len(detection) < 3:
+                continue
+            label, landmarks, _score = detection[:3]
+            world = detection[3] if len(detection) > 3 else None
+            try:
+                centre = features(landmarks).palm_center
+            except ValueError:
+                continue
+            hands.append([label, landmarks, world, centre])
+        hands = hands[:2]
+        if len(hands) == 2:
+            a, b = hands
+            if a[0] == b[0] or a[0] not in ('Right', 'Left') or b[0] not in ('Right', 'Left'):
+                # Same (or unknown) label for both: the one further right is the right hand.
+                a[0], b[0] = ('Right', 'Left') if a[3][0] > b[3][0] else ('Left', 'Right')
+        elif len(hands) == 1:
+            hand = hands[0]
+            recent = [h for h in self.hands.values() if now - h.last_seen <= LOST_AFTER_SEC]
+            if len(recent) == 1 and math.dist(recent[0].centre, hand[3]) < SAME_HAND_DISTANCE:
+                hand[0] = recent[0].side  # the same hand moving: keep its side
+        for label, landmarks, world, _centre in hands:
+            if label in ('Right', 'Left'):
+                yield label, landmarks, world
 
     @staticmethod
     def _stabilise(hand, observed):
@@ -133,3 +175,8 @@ class GestureTracker:
             }
             for h in self.hands.values()
         ]
+
+
+def _inside_frame(landmarks):
+    return all(FRAME_MARGIN <= p[0] <= 1 - FRAME_MARGIN and FRAME_MARGIN <= p[1] <= 1 - FRAME_MARGIN
+               for p in landmarks)

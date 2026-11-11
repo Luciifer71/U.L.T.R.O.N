@@ -60,3 +60,17 @@ def synthetic_hand(extended=('thumb', 'index', 'middle', 'ring', 'pinky'), pinch
         points[3] = (t0[0] + 0.22 * s, t0[1] - 0.25 * s, -0.03)
         points[4] = (cx - 0.05 * s, cy - 0.05 * s, -0.03)
     return [list(p) for p in points]
+
+
+def recorded_world(name):
+    """MediaPipe's metric 3D landmarks for the same recorded photo."""
+    return json.loads((FIXTURES / f'{name}.json').read_text())['world']
+
+
+def world_of(points, palm_metres=0.09):
+    """Synthetic image landmarks as metric 3D landmarks (palm 9 cm, centred on the hand)."""
+    palm = math.dist(points[0][:2], points[9][:2])
+    k = palm_metres / palm
+    cx = sum(p[0] for p in points) / 21
+    cy = sum(p[1] for p in points) / 21
+    return [[(p[0] - cx) * k, (p[1] - cy) * k, p[2] * k] for p in points]

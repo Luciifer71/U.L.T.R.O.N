@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from gesture_fixtures import recorded, synthetic_hand
+from gesture_fixtures import recorded, recorded_world, synthetic_hand, world_of
 from ultron.gestures import config as gesture_config
 from ultron.gestures.activation import DoubleClapDetector, gesture_command
 from ultron.gestures.filters import OneEuroFilter
@@ -15,9 +15,33 @@ from ultron.gestures.tracker import EXIT_HOLD_SEC, GestureTracker
 
 # ---- poses -----------------------------------------------------------------
 
-@pytest.mark.parametrize('name', ['point', 'thumbs_up', 'victory'])
-def test_real_recorded_hands_are_recognised(name):
-    assert pose_of(recorded(name)) == name
+@pytest.mark.parametrize('name', ['point', 'thumbs_up', 'victory', 'fist', 'open_palm'])
+def test_real_recorded_hands_are_recognised_from_3d_joint_angles(name):
+    assert pose_of(recorded(name), recorded_world(name)) == name
+
+
+def test_3d_angles_read_a_hand_seen_from_the_back_which_2d_could_not():
+    # open_palm.json is the back of an open hand: the flat 2D method misses it.
+    assert pose_of(recorded('open_palm')) == 'unknown'
+    assert pose_of(recorded('open_palm'), recorded_world('open_palm')) == 'open_palm'
+
+
+def test_a_half_bent_finger_gives_no_pose_instead_of_a_guess():
+    hand = synthetic_hand(extended=('index',))
+    world = world_of(hand)
+    # Bend the middle finger halfway: 40 degrees at its middle joint and 45 more at
+    # its end joint (85 in all), neither clearly straight nor clearly curled.
+    base = world[9]
+    pip = [base[0], base[1] - 0.04, base[2]]
+
+    def step(point, degrees, length):
+        a = math.radians(degrees)
+        return [point[0], point[1] - length * math.cos(a), point[2] - length * math.sin(a)]
+    world[10] = pip
+    world[11] = step(pip, 40, 0.025)
+    world[12] = step(world[11], 85, 0.02)
+    assert features(hand, world).extended['middle'] is None
+    assert pose_of(hand, world) == 'unknown'
 
 
 @pytest.mark.parametrize('kwargs,expected', [
@@ -33,7 +57,9 @@ def test_real_recorded_hands_are_recognised(name):
     ({'extended': ('index', 'middle', 'ring', 'pinky'), 'pinch': True}, 'ok'),
 ])
 def test_synthetic_poses(kwargs, expected):
-    assert pose_of(synthetic_hand(**kwargs)) == expected
+    hand = synthetic_hand(**kwargs)
+    assert pose_of(hand) == expected, '2D fallback'
+    assert pose_of(hand, world_of(hand)) == expected, '3D joint angles'
 
 
 def test_poses_do_not_depend_on_hand_size_or_position():
@@ -86,13 +112,54 @@ def test_a_pose_needs_several_frames_and_one_bad_frame_changes_nothing():
     assert events == [] and events2 == [], 'a one-frame glitch is ignored'
 
 
-def test_hands_outside_the_engagement_zone_do_nothing():
+def test_hands_cut_off_by_the_frame_or_far_away_do_nothing():
     tracker = GestureTracker()
-    resting = [('Right', synthetic_hand(extended=('index',), centre=(0.5, 0.95)), 0.9)]
+    cut_off = [('Right', synthetic_hand(extended=('index',), centre=(0.5, 0.95)), 0.9)]
     tiny = [('Right', synthetic_hand(extended=('index',), size=0.02), 0.9)]
-    for hands in (resting, tiny):
+    for hands in (cut_off, tiny):
         events, _ = frames(tracker, hands, 0, 10)
         assert not [e for e in events if e['pose'] != 'unknown']
+
+
+@pytest.mark.parametrize('y', [0.2, 0.5, 0.8])
+def test_height_in_the_frame_does_not_matter(y):
+    """Regression: hands held low (normal with a laptop webcam) were ignored."""
+    tracker = GestureTracker()
+    events, _ = frames(tracker, [('Right', synthetic_hand(extended=('index',), centre=(0.5, y), size=0.1), 0.9)], 0, 5)
+    assert [e['pose'] for e in events] == ['point']
+
+
+def test_two_hands_with_the_same_label_are_told_apart_by_position():
+    """Regression: MediaPipe often calls both palms 'Right'; one hand was dropped."""
+    tracker = GestureTracker()
+    both_right = [('Right', synthetic_hand(centre=(0.3, 0.5)), 0.9), ('Right', synthetic_hand(centre=(0.7, 0.5)), 0.9)]
+    frames(tracker, both_right, 0, 5)
+    sides = {h['side']: h['points'][0][0] for h in tracker.snapshot()}
+    assert set(sides) == {'Left', 'Right'}
+    assert sides['Right'] > sides['Left'], 'the right hand is on the right of the mirrored picture'
+
+
+def test_both_palms_exit_even_when_both_are_labelled_the_same():
+    tracker = GestureTracker()
+    palms = [('Right', synthetic_hand(centre=(0.35, 0.5)), 0.9), ('Right', synthetic_hand(centre=(0.65, 0.5)), 0.9)]
+    events, _ = frames(tracker, palms, 0, int(30 * (EXIT_HOLD_SEC + 0.5)))
+    assert [e['type'] for e in events].count('exit') == 1
+
+
+def test_a_single_hand_keeps_its_side_when_the_label_flickers():
+    tracker = GestureTracker()
+    hand = synthetic_hand(extended=('index',), centre=(0.6, 0.5))
+    _, now = frames(tracker, [('Right', hand, 0.9)], 0, 10)
+    events, now = frames(tracker, [('Left', hand, 0.6)], now, 3)  # one-off wrong label
+    assert [h['side'] for h in tracker.snapshot()] == ['Right']
+    assert not [e for e in events if e['type'] == 'pose']
+
+
+def test_tracker_uses_3d_landmarks_when_given():
+    tracker = GestureTracker()
+    back_of_open_hand = [('Right', recorded('open_palm'), 0.95, recorded_world('open_palm'))]
+    events, _ = frames(tracker, back_of_open_hand, 0, 5)
+    assert [e['pose'] for e in events] == ['open_palm']
 
 
 def test_both_palms_held_exits_once():
@@ -133,6 +200,27 @@ def test_replayed_recording_drives_the_same_events():
     for i, hands in enumerate(recording):
         events += tracker.update(hands, i / 30)
     assert [e['pose'] for e in events if e['type'] == 'pose'] == ['victory', 'point']
+
+
+# ---- real MediaPipe (skipped where MediaPipe is not installed) --------------
+
+@pytest.mark.parametrize('image,side', [('right_hands.jpg', 'Right'), ('left_hands.jpg', 'Left')])
+def test_real_hand_model_reports_the_users_real_hand(image, side):
+    """Regression: frames were mirrored before detection, so left and right were swapped."""
+    cv2 = pytest.importorskip('cv2')
+    pytest.importorskip('mediapipe')
+    from pathlib import Path
+    from ultron.agents.vision_service import MediaPipeHands
+    frame = cv2.imread(str(Path(__file__).parent / 'fixtures' / 'images' / image))
+    hands = MediaPipeHands()
+    try:
+        found = hands.detect(frame, 1.0)
+    finally:
+        hands.close()
+    assert len(found) == 2
+    assert {label for label, *_ in found} == {side}
+    for _label, landmarks, _score, world in found:
+        assert len(landmarks) == 21 and len(world) == 21
 
 
 # ---- config ----------------------------------------------------------------

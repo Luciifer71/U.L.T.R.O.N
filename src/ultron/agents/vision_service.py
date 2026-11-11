@@ -66,17 +66,29 @@ class MediaPipeHands:
         self._last_ms = 0
 
     def detect(self, frame_bgr, now):
-        """Hands in a frame that is already mirrored: [(side, 21 landmarks, score)]."""
+        """Hands in a camera frame, as the user sees them in a mirror.
+
+        Returns [(side, 21 image landmarks, score, 21 world landmarks)].
+
+        The frame is passed un-mirrored on purpose: this hand model labels hands
+        correctly on a normal camera picture (verified on MediaPipe's own
+        left_hands/right_hands test images; its docs say otherwise) and mirroring
+        first swaps left and right. Coordinates are mirrored afterwards (x -> 1-x)
+        so the picture still behaves like a mirror.
+        """
         import cv2
         rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
         timestamp = max(self._last_ms + 1, int(now * 1000))  # must strictly increase
         self._last_ms = timestamp
         result = self._landmarker.detect_for_video(self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb), timestamp)
+        del rgb
+        worlds = result.hand_world_landmarks or []
         hands = []
-        for landmarks, handedness in zip(result.hand_landmarks or [], result.handedness or []):
+        for index, (landmarks, handedness) in enumerate(zip(result.hand_landmarks or [], result.handedness or [])):
             label = handedness[0].category_name if handedness else 'Unknown'
             score = handedness[0].score if handedness else 0.0
-            hands.append((label, [(p.x, p.y, p.z) for p in landmarks], score))
+            world = [(-p.x, p.y, p.z) for p in worlds[index]] if index < len(worlds) else None
+            hands.append((label, [(1.0 - p.x, p.y, p.z) for p in landmarks], score, world))
         return hands
 
     def close(self):
@@ -191,11 +203,9 @@ class VisionService:
         ok, frame = await asyncio.to_thread(self.camera.read)
         detections = []
         if ok and frame is not None:
-            import cv2
-            mirrored = cv2.flip(frame, 1)  # behave like a mirror; handedness follows
+            # detect() mirrors the coordinates, not the picture (see MediaPipeHands).
+            detections = await asyncio.to_thread(self.hands.detect, frame, self.clock())
             del frame
-            detections = await asyncio.to_thread(self.hands.detect, mirrored, self.clock())
-            del mirrored
         now = self.clock()
         events = self.tracker.update(detections, now)
         self.publisher.emit('hands', {'hands': self.tracker.snapshot()})
