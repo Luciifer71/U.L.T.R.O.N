@@ -224,10 +224,8 @@ def warm_ollama(host, model):
     try:
         config = OllamaRuntimeConfig.from_env(host=host, model=model)
         options = {'num_predict': 8, 'temperature': 0}
-        for key, value in (('num_ctx', config.num_ctx), ('temperature', config.temperature),
-                           ('seed', config.seed)):
-            if value is not None:
-                options[key] = value
+        for key, value in config.load_options():
+            options[key] = value
         payload = {'model': model, 'messages': [{'role': 'user', 'content': 'Count from one to eight.'}],
                    'stream': False, 'keep_alive': model_keep_alive(), 'options': options}
         if config.think is not None:

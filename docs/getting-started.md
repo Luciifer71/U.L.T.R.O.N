@@ -88,8 +88,11 @@ on an SSD (and out of real-time antivirus scanning) shortens it. Ultron keeps th
 model loaded for 10 minutes after its last use; set `ULTRON_MODEL_KEEP_ALIVE`
 in `.env` (for example `2h` or `forever`) to pay the load only once per session.
 
-A long load with the disk at 100% but little data read usually means Windows
-Defender is scanning the 5 GB model file as Ollama reads it. Check Task Manager's
+A load that takes minutes with `llama-server` reading only tens of MB/s while the
+disk shows 100% busy is Ollama memory-mapping the model on Windows. Set
+`LLM_USE_MMAP=off` in `.env` so it reads the file in large chunks instead (the
+model goes to the GPU either way). Otherwise, if Defender is the busy process,
+Windows Defender may be scanning the 5 GB model file as Ollama reads it. Check Task Manager's
 Processes tab (sort by Disk) during the load: if "Antimalware Service Executable"
 is near the top, exclude the models folder (admin PowerShell):
 `Add-MpPreference -ExclusionPath "$env:USERPROFILE\.ollama\models"`.
