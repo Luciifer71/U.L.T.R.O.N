@@ -70,15 +70,24 @@ def install(root: Path, opener=urlopen) -> Path:
 
 
 def start(root: Path, exe: Path) -> subprocess.Popen:
-    """Start NATS in the background. It keeps running after the launcher exits."""
-    flags = 0
-    if sys.platform == 'win32':
-        flags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    """Start NATS in its own minimised window, like Ollama.
+
+    A hidden background child (DETACHED_PROCESS) was stopped together with the
+    launcher on a real Windows setup, taking the bus down a few seconds after
+    startup. Its own console window survives the launcher, and closing that
+    window is the obvious way to stop it.
+    """
     logs = root / 'runtime' / 'logs'
     logs.mkdir(parents=True, exist_ok=True)
-    return subprocess.Popen([str(exe), '-c', str(root / CONFIG), '-l', str(logs / 'nats-server.log')],
-                            cwd=root, creationflags=flags, stdin=subprocess.DEVNULL,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    command = [str(exe), '-c', str(root / CONFIG), '-l', str(logs / 'nats-server.log')]
+    if sys.platform != 'win32':
+        return subprocess.Popen(command, cwd=root, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    startup = subprocess.STARTUPINFO()
+    startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startup.wShowWindow = 7  # SW_SHOWMINNOACTIVE: minimised, does not steal focus
+    return subprocess.Popen(command, cwd=root, startupinfo=startup,
+                            creationflags=subprocess.CREATE_NEW_CONSOLE)
 
 
 def main() -> int:

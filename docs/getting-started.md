@@ -80,7 +80,10 @@ the Docker image), refuses it unless its SHA-256 matches, and puts it in
 which listens on `127.0.0.1` only. Without it, the launcher falls back to Docker.
 
 If the timing report shows a long **Model warmup**, the time is Ollama loading the
-model from disk; the Ollama window shows the load. Keeping the Ollama models folder
+model; the Ollama window shows the load. The launcher then prints
+`[MODEL PLACEMENT]`: if it warns that part of the model is on the CPU, loading and
+every reply are many times slower. Run `ollama ps` (the PROCESSOR column should say
+`100% GPU`), close other GPU-heavy apps, and make sure the NVIDIA driver is current. Keeping the Ollama models folder
 on an SSD (and out of real-time antivirus scanning) shortens it. Ultron keeps the
 model loaded for 10 minutes after its last use.
 

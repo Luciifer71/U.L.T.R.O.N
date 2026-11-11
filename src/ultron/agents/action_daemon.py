@@ -185,7 +185,9 @@ class ActionDaemon:
             logger.error(f"[DAEMON ERROR] Failed to process message: {e}")
 
     async def start(self):
-        await self.nc.connect(self.nats_url)
+        # Retry forever: a restarted bus must never stop the daemon (the library
+        # default gives up after about two minutes).
+        await self.nc.connect(self.nats_url, max_reconnect_attempts=-1, reconnect_time_wait=2)
 
         # Capture running asyncio loop and bind Ultron Voice Engine
         loop = asyncio.get_running_loop()

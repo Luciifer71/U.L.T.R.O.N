@@ -48,7 +48,7 @@ def test_daemon_registers_snapshot_before_startup_speech(daemon_module):
         handlers, replies = {}, []
         class Nats:
             is_connected = True
-            async def connect(self, *a): pass
+            async def connect(self, *a, **kw): pass
             async def subscribe(self, subject, cb): handlers[subject] = cb
             async def flush(self): pass
             async def close(self): pass

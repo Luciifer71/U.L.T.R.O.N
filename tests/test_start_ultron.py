@@ -169,6 +169,7 @@ def test_nats_and_ollama_start_together_and_timing_is_reported(monkeypatch, caps
     monkeypatch.setattr(launcher, 'ensure_nats', nats)
     monkeypatch.setattr(launcher, 'ensure_ollama', ollama)
     monkeypatch.setattr(launcher, 'warm_ollama', lambda *a: None)
+    monkeypatch.setattr(launcher, 'model_placement', lambda *a: None)
     monkeypatch.setattr(launcher, 'running_components', lambda *a: set())
     launched = []
     launcher.launch_all(launcher.COMPONENTS, 'python', SimpleNamespace(process_iter=lambda attrs: []),
@@ -220,3 +221,19 @@ def test_warmup_reports_separate_loading_and_generation(capsys):
     output = capsys.readouterr().out
     assert '"load_seconds": 190.0' in output and '"eval_seconds": 2.0' in output
     assert '"eval_count": 8' in output
+
+
+@pytest.mark.parametrize('vram,expected', [(5_000_000_000, '100% on the GPU'), (2_000_000_000, 'only 40%')])
+def test_model_placement_reports_cpu_offload(vram, expected):
+    opener = MagicMock()
+    opener.open.return_value = io.StringIO(json.dumps({'models': [
+        {'name': 'qwen3:8b', 'size': 5_000_000_000, 'size_vram': vram}]}))
+    share, message = launcher.model_placement('http://127.0.0.1:11434', 'qwen3:8b', opener)
+    assert expected in message
+    assert share == vram / 5_000_000_000
+
+
+def test_model_placement_is_silent_when_ollama_does_not_say():
+    opener = MagicMock()
+    opener.open.side_effect = OSError('down')
+    assert launcher.model_placement('http://127.0.0.1:11434', 'qwen3:8b', opener) is None

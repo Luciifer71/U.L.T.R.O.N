@@ -75,3 +75,24 @@ def test_native_and_docker_configs_allow_the_same_ui_origins_and_ports():
     origins = lambda text: re.findall(r'"(http://[^"]+)"', text)
     assert origins(native) == origins(docker)
     assert 'port: 9222' in native and 'port: 9222' in docker
+
+
+def test_nats_is_started_in_its_own_window_not_as_a_hidden_child(monkeypatch, tmp_path):
+    """Regression: a DETACHED_PROCESS child died with the launcher on Windows."""
+    import subprocess
+    calls = []
+    monkeypatch.setattr(native_nats.sys, 'platform', 'win32')
+    monkeypatch.setattr(subprocess, 'CREATE_NEW_CONSOLE', 0x10, raising=False)
+    monkeypatch.setattr(subprocess, 'STARTF_USESHOWWINDOW', 1, raising=False)
+    monkeypatch.setattr(subprocess, 'STARTUPINFO', lambda: type('S', (), {'dwFlags': 0, 'wShowWindow': 0})(), raising=False)
+    monkeypatch.setattr(subprocess, 'Popen', lambda command, **kw: calls.append((command, kw)))
+    native_nats.start(tmp_path, tmp_path / 'nats-server.exe')
+    command, kw = calls[0]
+    assert kw['creationflags'] == 0x10, 'own console window, no DETACHED_PROCESS'
+    assert kw['startupinfo'].wShowWindow == 7, 'minimised'
+    assert '-c' in command and str(native_nats.CONFIG.name) in command[command.index('-c') + 1]
+
+
+def test_action_daemon_retries_the_bus_forever():
+    source = (ROOT / 'src' / 'ultron' / 'agents' / 'action_daemon.py').read_text()
+    assert 'max_reconnect_attempts=-1' in source

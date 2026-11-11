@@ -278,9 +278,38 @@ def launch_all(selected, python, psutil, timings=None, launch=None):
         print('Existing components detected; warmup skipped. Stop all components for a fresh model trial.', flush=True)
     else:
         timings.run('Model warmup', warm_ollama, host, model)
+        placement = model_placement(host, model)
+        if placement:
+            print(placement[1], flush=True)
     open_components([c for c in selected if c in AFTER_WARMUP], existing)
     print(timings.report(), flush=True)
     return timings
+
+
+def model_placement(host, model, opener=None):
+    """How much of the loaded model sits in GPU memory, from Ollama's /api/ps.
+
+    Returns (fraction_on_gpu, message) or None if Ollama does not say.
+    """
+    opener = opener or build_opener(ProxyHandler({}))
+    try:
+        with opener.open(host.rstrip('/') + '/api/ps', timeout=5) as response:
+            data = json.load(response)
+    except (OSError, ValueError):
+        return None
+    for entry in data.get('models') or []:
+        if entry.get('name') != model and entry.get('model') != model:
+            continue
+        size, vram = entry.get('size'), entry.get('size_vram')
+        if not isinstance(size, (int, float)) or not isinstance(vram, (int, float)) or size <= 0:
+            return None
+        share = max(0.0, min(1.0, vram / size))
+        if share >= 0.99:
+            return share, f'[MODEL PLACEMENT] {model}: 100% on the GPU.'
+        return share, (f'[MODEL PLACEMENT] WARNING: only {share:.0%} of {model} is on the GPU; '
+                       f'the rest runs on the CPU, which makes loading and every reply much slower. '
+                       f'Close GPU-heavy apps, check "ollama ps", and see docs/getting-started.md.')
+    return None
 
 
 @contextmanager
