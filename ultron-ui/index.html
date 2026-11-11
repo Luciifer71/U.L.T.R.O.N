@@ -5,9 +5,46 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ultron-ui</title>
+    <style>
+      /* Black from the first frame, before any script or stylesheet loads. */
+      html, body { margin: 0; background: #000003; }
+      #boot-error {
+        display: none;
+        position: fixed;
+        inset: 0;
+        padding: 32px;
+        color: #e8e6ef;
+        font: 14px/1.5 system-ui, sans-serif;
+      }
+      #boot-error code { color: #ff8a8a; white-space: pre-wrap; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <div id="boot-error" role="alert">
+      <strong>ULTRON UI did not start.</strong>
+      Open the browser console (F12) for details, and include it in a support report.
+      <p><code id="boot-error-text"></code></p>
+    </div>
+    <script>
+      // If the app never mounts (for example a module fails to load), show why
+      // instead of a blank page. Display only; it never retries or acts.
+      ;(function () {
+        var firstError = ''
+        window.addEventListener('error', function (event) {
+          if (!firstError) firstError = String(event.message || event.error || '')
+        })
+        window.addEventListener('unhandledrejection', function (event) {
+          if (!firstError) firstError = String(event.reason || '')
+        })
+        setTimeout(function () {
+          var root = document.getElementById('root')
+          if (root && root.childElementCount > 0) return
+          document.getElementById('boot-error-text').textContent = firstError.slice(0, 500)
+          document.getElementById('boot-error').style.display = 'block'
+        }, 6000)
+      })()
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

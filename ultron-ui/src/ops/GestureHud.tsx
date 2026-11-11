@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { liveSignals } from '../entity/liveSignals'
-import { hudView, sameView, type HudView } from './gestureHud'
+import { hudView, sameView, type HudView } from './gestureHudView'
 
 /* =========================================================
    GESTURE HUD

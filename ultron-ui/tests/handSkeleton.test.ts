@@ -2,7 +2,7 @@ import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   createHandBuffers, HAND_CONNECTIONS, JOINTS, LINE_VERTICES, pinchGlow, slotOf, toScene, writeHand,
-} from '../src/entity/holoHands.ts'
+} from '../src/entity/handSkeleton.ts'
 import type { TrackedHand } from '../src/entity/liveSignals.ts'
 
 const hand = (overrides: Partial<TrackedHand> = {}): TrackedHand => ({

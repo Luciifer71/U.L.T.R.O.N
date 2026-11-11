@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { hudView, sameView } from '../src/ops/gestureHud.ts'
+import { hudView, sameView } from '../src/ops/gestureHudView.ts'
 
 const base = { gestureMode: true, gestureError: null, gestureErrorAt: -Infinity, lastGesture: null, handsVisible: 1, now: 10 }
 

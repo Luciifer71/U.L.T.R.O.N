@@ -5,7 +5,7 @@ import { LineBasicNodeMaterial, SpriteNodeMaterial } from 'three/webgpu'
 import { attribute, float, instancedBufferAttribute, sin } from 'three/tsl'
 import { BLUE, entityUniforms, softDisc, WHITE_HOT } from './entityUniforms'
 import { liveSignals, type TrackedHand } from './liveSignals'
-import { createHandBuffers, JOINTS, MAX_HANDS, slotOf, writeHand } from './holoHands'
+import { createHandBuffers, JOINTS, MAX_HANDS, slotOf, writeHand } from './handSkeleton'
 
 /* =========================================================
    HOLO HANDS
