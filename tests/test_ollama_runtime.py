@@ -167,3 +167,12 @@ def test_chat_reports_model_activity_even_when_the_request_fails():
     except RuntimeError:
         pass
     assert events == ['start', 'end', 'start', 'end']
+
+
+@pytest.mark.parametrize('value,expected', [
+    ('', '10m'), ('2h', '2h'), ('30m', '30m'), ('forever', -1), ('-1', -1), ('0', 0), ('soon', '10m'), ('5 days', '10m'),
+])
+def test_model_keep_alive_is_configurable_and_validated(monkeypatch, value, expected):
+    from ultron.core.ollama_runtime import model_keep_alive
+    monkeypatch.setenv('ULTRON_MODEL_KEEP_ALIVE', value)
+    assert model_keep_alive() == expected

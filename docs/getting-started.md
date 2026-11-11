@@ -85,7 +85,14 @@ model; the Ollama window shows the load. The launcher then prints
 every reply are many times slower. Run `ollama ps` (the PROCESSOR column should say
 `100% GPU`), close other GPU-heavy apps, and make sure the NVIDIA driver is current. Keeping the Ollama models folder
 on an SSD (and out of real-time antivirus scanning) shortens it. Ultron keeps the
-model loaded for 10 minutes after its last use.
+model loaded for 10 minutes after its last use; set `ULTRON_MODEL_KEEP_ALIVE`
+in `.env` (for example `2h` or `forever`) to pay the load only once per session.
+
+A long load with the disk at 100% but little data read usually means Windows
+Defender is scanning the 5 GB model file as Ollama reads it. Check Task Manager's
+Processes tab (sort by Disk) during the load: if "Antimalware Service Executable"
+is near the top, exclude the models folder (admin PowerShell):
+`Add-MpPreference -ExclusionPath "$env:USERPROFILE\.ollama\models"`.
 
 Try “Open Calculator and File Explorer”, “What is my uptime?” or “What can you do?”
 See [local file workflows](local-file-workflow.md) for file requests and

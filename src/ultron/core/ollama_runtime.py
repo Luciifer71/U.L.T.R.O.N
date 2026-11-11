@@ -5,6 +5,7 @@ import logging
 import json
 import time
 import os
+import re
 from dataclasses import dataclass
 
 from ollama import AsyncClient
@@ -46,6 +47,28 @@ class OllamaRuntimeConfig:
                    num_ctx=int(context) if context else None,
                    temperature=float(temperature) if temperature else None,
                    seed=int(seed) if seed else None)
+
+
+DEFAULT_KEEP_ALIVE = '10m'
+_DURATION = re.compile(r'\d+(\.\d+)?(ms|s|m|h)')
+
+
+def model_keep_alive():
+    """How long Ollama keeps the model loaded after a request.
+
+    ULTRON_MODEL_KEEP_ALIVE: a duration such as 30m or 2h, "forever" (or -1)
+    to keep it loaded while Ollama runs, or 0 to unload at once. Loading can
+    take minutes on some machines, so a longer value avoids paying that again;
+    the cost is GPU memory held while idle. Invalid values fall back to 10m.
+    """
+    value = os.getenv('ULTRON_MODEL_KEEP_ALIVE', '').strip().lower()
+    if value in {'forever', '-1'}:
+        return -1  # Ollama expects a negative number, not a string, for "forever"
+    if value == '0':
+        return 0
+    if _DURATION.fullmatch(value):
+        return value
+    return DEFAULT_KEEP_ALIVE
 
 
 class OllamaRuntime:
@@ -149,7 +172,7 @@ class OllamaRuntime:
         # retries and follow-up summaries. Never mutate a caller's options.
         kwargs = dict(kwargs)
         if self.config.model == 'qwen3:8b':
-            kwargs.setdefault('keep_alive', '10m')
+            kwargs.setdefault('keep_alive', model_keep_alive())
         options = dict(kwargs.get('options') or {})
         for key, value in (('num_ctx', self.config.num_ctx),
                            ('temperature', self.config.temperature),

@@ -220,7 +220,7 @@ def running_components(root, processes):
 
 def warm_ollama(host, model):
     """Exercise selected inference before starting a fresh microphone session."""
-    from ultron.core.ollama_runtime import OllamaRuntimeConfig
+    from ultron.core.ollama_runtime import OllamaRuntimeConfig, model_keep_alive
     try:
         config = OllamaRuntimeConfig.from_env(host=host, model=model)
         options = {'num_predict': 8, 'temperature': 0}
@@ -229,7 +229,7 @@ def warm_ollama(host, model):
             if value is not None:
                 options[key] = value
         payload = {'model': model, 'messages': [{'role': 'user', 'content': 'Count from one to eight.'}],
-                   'stream': False, 'keep_alive': '10m', 'options': options}
+                   'stream': False, 'keep_alive': model_keep_alive(), 'options': options}
         if config.think is not None:
             payload['think'] = config.think
         request = Request(host.rstrip('/') + '/api/chat', data=json.dumps(payload).encode(),
