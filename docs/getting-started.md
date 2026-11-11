@@ -89,9 +89,12 @@ model loaded for 10 minutes after its last use; set `ULTRON_MODEL_KEEP_ALIVE`
 in `.env` (for example `2h` or `forever`) to pay the load only once per session.
 
 A load that takes minutes with `llama-server` reading only tens of MB/s while the
-disk shows 100% busy is Ollama memory-mapping the model on Windows. Set
-`LLM_USE_MMAP=off` in `.env` so it reads the file in large chunks instead (the
-model goes to the GPU either way). Otherwise, if Defender is the busy process,
+disk shows 100% busy means the disk is delivering far less than it should. On some
+Windows PCs `LLM_USE_MMAP=off` in `.env` helps (Ollama then reads the file in large
+chunks); on others it is slower, so time a load both ways before keeping it. If both
+are slow, measure the drive itself and check its health and temperature, and set
+`ULTRON_MODEL_KEEP_ALIVE=forever` so the load happens only once per boot.
+Otherwise, if Defender is the busy process,
 Windows Defender may be scanning the 5 GB model file as Ollama reads it. Check Task Manager's
 Processes tab (sort by Disk) during the load: if "Antimalware Service Executable"
 is near the top, exclude the models folder (admin PowerShell):
