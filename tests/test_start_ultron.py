@@ -120,7 +120,7 @@ class LauncherTests(unittest.TestCase):
 
 
 @pytest.mark.parametrize('warmup_fails', [False, True])
-def test_main_warms_before_any_component_and_stops_on_failure(monkeypatch, tmp_path, warmup_fails):
+def test_main_opens_components_early_and_the_listener_after_warmup(monkeypatch, tmp_path, warmup_fails):
     from contextlib import nullcontext
     import sys
     import dotenv
@@ -150,7 +150,61 @@ def test_main_warms_before_any_component_and_stops_on_failure(monkeypatch, tmp_p
     monkeypatch.setattr(launcher, 'warm_ollama', warm)
     monkeypatch.setattr(launcher, 'start_console', lambda command: events.append(command[-1]))
     assert launcher.main() == (1 if warmup_fails else 0)
-    assert events == (['warm'] if warmup_fails else ['warm', *launcher.COMPONENTS])
+    early = [c for c in launcher.COMPONENTS if c not in launcher.AFTER_WARMUP]
+    # Daemon, brain and vision open while the model warms; the microphone only
+    # after a successful warmup (so the model gets GPU memory first).
+    assert events == early + ['warm'] + ([] if warmup_fails else list(launcher.AFTER_WARMUP))
+    assert 'voice_listener' in launcher.AFTER_WARMUP
+
+
+def test_nats_and_ollama_start_together_and_timing_is_reported(monkeypatch, capsys):
+    import threading
+    nats_started, ollama_started = threading.Event(), threading.Event()
+    def nats(url):
+        nats_started.set()
+        assert ollama_started.wait(2), 'Ollama must not wait for NATS'
+    def ollama(host, model):
+        ollama_started.set()
+        assert nats_started.wait(2), 'NATS must not wait for Ollama'
+    monkeypatch.setattr(launcher, 'ensure_nats', nats)
+    monkeypatch.setattr(launcher, 'ensure_ollama', ollama)
+    monkeypatch.setattr(launcher, 'warm_ollama', lambda *a: None)
+    monkeypatch.setattr(launcher, 'running_components', lambda *a: set())
+    launched = []
+    launcher.launch_all(launcher.COMPONENTS, 'python', SimpleNamespace(process_iter=lambda attrs: []),
+                        launch=launched.append)
+    assert sorted(launched) == sorted(launcher.COMPONENTS)
+    report = capsys.readouterr().out
+    assert '[STARTUP TIMING]' in report
+    for step in ('NATS ready', 'Ollama ready', 'Model warmup', 'total'):
+        assert step in report
+
+
+def test_native_nats_is_preferred_over_docker(monkeypatch, tmp_path):
+    exe = tmp_path / 'tools' / 'nats' / 'nats-server.exe'
+    exe.parent.mkdir(parents=True)
+    exe.touch()
+    ready = iter([False, True])
+    started = []
+    monkeypatch.setattr(launcher, 'ROOT', tmp_path)
+    monkeypatch.setattr(launcher, 'nats_ready', lambda url: next(ready))
+    monkeypatch.setattr(launcher.native_nats, 'start', lambda root, path: started.append(path))
+    monkeypatch.setattr(launcher, 'start_docker_nats', lambda: pytest.fail('Docker must not be used'))
+    monkeypatch.setattr(launcher.time, 'sleep', lambda s: None)
+    assert launcher.ensure_nats('nats://127.0.0.1:4222') == 'native'
+    assert started == [exe]
+
+
+def test_docker_is_the_fallback_without_native_nats(monkeypatch, tmp_path, capsys):
+    ready = iter([False, True])
+    docker = []
+    monkeypatch.setattr(launcher, 'ROOT', tmp_path)
+    monkeypatch.setattr(launcher, 'nats_ready', lambda url: next(ready))
+    monkeypatch.setattr(launcher, 'start_docker_nats', lambda: docker.append(True))
+    monkeypatch.setattr(launcher.time, 'sleep', lambda s: None)
+    assert launcher.ensure_nats('nats://127.0.0.1:4222') == 'docker'
+    assert docker == [True]
+    assert 'setup-nats' in capsys.readouterr().out
 
 
 if __name__ == '__main__':

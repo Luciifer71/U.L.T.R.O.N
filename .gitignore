@@ -87,3 +87,6 @@ Thumbs.db
 *.egg-info/
 /build/
 /dist/
+
+# Native NATS binary (run_ultron.py setup-nats)
+tools/nats/

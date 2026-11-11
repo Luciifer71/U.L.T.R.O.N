@@ -1,7 +1,20 @@
-"""Windows startup: check/start dependencies, then open ULTRON terminals."""
+"""Windows startup: check/start dependencies, then open ULTRON terminals.
+
+Fast path (everything that can overlap does):
+
+1. NATS and Ollama are started at the same time. NATS runs natively
+   (tools/nats/nats-server.exe, see ``setup-nats``) and starts in under a
+   second; Docker is only a fallback.
+2. As soon as the bus is up, the action daemon, brain and vision service open.
+   The brain waits for the model on its own.
+3. The model is warmed while those start; the voice listener opens after the
+   warmup so the model claims GPU memory first.
+4. A timing report shows where the time went.
+"""
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import hashlib
 import importlib.util
@@ -18,6 +31,7 @@ import traceback
 from urllib.parse import urlparse
 from urllib.request import ProxyHandler, Request, build_opener
 
+from ultron.cli import native_nats
 from ultron.paths import project_root
 
 ROOT = project_root()
@@ -25,11 +39,34 @@ ROOT = project_root()
 # presence, --presence / ULTRON_PRESENCE=1) asks for it.
 COMPONENTS = ('action_daemon', 'brain_agent', 'voice_listener', 'vision_service')
 OPTIONAL_COMPONENTS = ()
+# Opened only after the model warmup, so the LLM gets GPU memory before Whisper.
+AFTER_WARMUP = ('voice_listener',)
 LOCAL_HOSTS = {'localhost', '127.0.0.1', '::1'}
 
 
 class StartupError(RuntimeError):
     pass
+
+
+class Timings:
+    """Wall-clock time of each startup step, printed at the end."""
+
+    def __init__(self, clock=time.monotonic):
+        self.clock = clock
+        self.started = clock()
+        self.steps = []
+
+    def run(self, name, function, *args):
+        began = self.clock()
+        try:
+            return function(*args)
+        finally:
+            self.steps.append((name, self.clock() - began))
+
+    def report(self):
+        lines = [f'  {name:<22}{seconds:6.1f}s' for name, seconds in self.steps]
+        lines.append(f'  {"total":<22}{self.clock() - self.started:6.1f}s')
+        return '[STARTUP TIMING]\n' + '\n'.join(lines)
 
 
 def wait_for(check, description, timeout=120):
@@ -94,10 +131,23 @@ def start_console(command):
 def ensure_nats(url):
     if nats_ready(url):
         print('NATS is already reachable.', flush=True)
-        return
+        return 'running'
     parsed = urlparse(url)
     if parsed.hostname not in LOCAL_HOSTS or (parsed.port or 4222) != 4222:
         raise StartupError('Configured NATS server is unavailable; this launcher only starts local NATS on port 4222.')
+    exe = native_nats.find(ROOT)
+    if exe:
+        print('Starting NATS (native, no Docker)...', flush=True)
+        native_nats.start(ROOT, exe)
+        wait_for(lambda: nats_ready(url), 'NATS server', timeout=15)
+        return 'native'
+    print('Tip: run "run_ultron.py setup-nats" once so NATS starts in under a second without Docker.', flush=True)
+    start_docker_nats()
+    wait_for(lambda: nats_ready(url), 'NATS server', timeout=30)
+    return 'docker'
+
+
+def start_docker_nats():
     docker = find_executable('docker.exe')
     def docker_ready():
         try:
@@ -120,7 +170,6 @@ def ensure_nats(url):
                             cwd=ROOT, timeout=90)
     if result.returncode:
         raise StartupError('Docker Compose could not start NATS. Review the output above; the NATS image must already be installed.')
-    wait_for(lambda: nats_ready(url), 'NATS server', timeout=30)
 
 
 def ensure_ollama(host, model):
@@ -200,6 +249,38 @@ def warm_ollama(host, model):
         print(f'Model warmup complete in {time.monotonic() - started:.1f}s. Starting components.', flush=True)
     except (OSError, ValueError) as exc:
         raise StartupError(f'Model warmup failed; microphone not started: {exc}') from exc
+
+
+def launch_all(selected, python, psutil, timings=None, launch=None):
+    """Start dependencies in parallel, open components as early as is safe."""
+    timings = timings or Timings()
+    nats_url = os.getenv('NATS_URL', 'nats://127.0.0.1:4222')
+    host = os.getenv('OLLAMA_HOST', 'http://127.0.0.1:11434')
+    model = os.getenv('LLM_MODEL', 'qwen3:8b')
+    launch = launch or (lambda component: start_console(
+        [str(python), str(ROOT / "run_ultron.py"), "start", '--component', component]))
+
+    def open_components(names, existing):
+        for component in names:
+            if component in existing:
+                print(f'{component} is already running; skipped.', flush=True)
+                continue
+            launch(component)
+            print(f'Launched {component}.', flush=True)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        ollama = pool.submit(timings.run, 'Ollama ready', ensure_ollama, host, model)
+        timings.run('NATS ready', ensure_nats, nats_url)
+        existing = running_components(ROOT, psutil.process_iter(['cmdline', 'cwd']))
+        open_components([c for c in selected if c not in AFTER_WARMUP], existing)
+        ollama.result()  # re-raises a missing model or unreachable Ollama
+    if existing:
+        print('Existing components detected; warmup skipped. Stop all components for a fresh model trial.', flush=True)
+    else:
+        timings.run('Model warmup', warm_ollama, host, model)
+    open_components([c for c in selected if c in AFTER_WARMUP], existing)
+    print(timings.report(), flush=True)
+    return timings
 
 
 @contextmanager
@@ -285,21 +366,7 @@ def main():
             if not (ROOT / 'src' / 'ultron' / 'agents' / (component + '.py')).is_file():
                 raise StartupError(f'Missing source file: {component}.py')
         with startup_lock():
-            ensure_nats(os.getenv('NATS_URL', 'nats://127.0.0.1:4222'))
-            ensure_ollama(os.getenv('OLLAMA_HOST', 'http://127.0.0.1:11434'),
-                          os.getenv('LLM_MODEL', 'qwen3:8b'))
-            existing = running_components(ROOT, psutil.process_iter(['cmdline', 'cwd']))
-            if not existing:
-                warm_ollama(os.getenv('OLLAMA_HOST', 'http://127.0.0.1:11434'),
-                            os.getenv('LLM_MODEL', 'qwen3:8b'))
-            else:
-                print('Existing components detected; warmup skipped. Stop all components for a fresh model trial.', flush=True)
-            for component in selected:
-                if component in existing:
-                    print(f'{component} is already running; skipped.', flush=True)
-                    continue
-                start_console([str(python), str(ROOT / "run_ultron.py"), "start", '--component', component])
-                print(f'Launched {component}. Check its terminal for readiness.', flush=True)
+            launch_all(selected, python, psutil)
         print('Wait for the voice listener to finish calibration and show STANDBY MODE.')
         print('Stop each component with Ctrl+C in its window. Docker and Ollama remain running.')
         return 0

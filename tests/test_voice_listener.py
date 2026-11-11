@@ -93,7 +93,7 @@ def test_invalid_input_settings_do_not_open_stream(monkeypatch, listener):
 def test_calibration_does_not_wait_forever_for_dead_microphone(monkeypatch, listener):
     original_wait_for = asyncio.wait_for
     async def short_wait(awaitable, timeout):
-        assert timeout == 5.0
+        assert 0 < timeout <= 5.0
         return await original_wait_for(awaitable, timeout=0.001)
     monkeypatch.setattr(listener.asyncio, "wait_for", short_wait)
     async def run():

@@ -7,7 +7,7 @@ unless a different directory is specified. For authorized use under the
 ## Setup · Windows
 
 
-Use Python 3.12 or 3.13, Git, Docker Desktop and Ollama. The optional visual UI also
+Use Python 3.12 or 3.13, Git and Ollama. Docker Desktop is optional (see fast startup below). The optional visual UI also
 requires Node.js/npm compatible with its Vite dependency. Full speech/vision
 installation depends on your platform and native dependencies.
 
@@ -59,10 +59,30 @@ From the repository root, after setup:
 .\start-ultron.cmd
 ```
 
-The launcher prepares Docker/NATS and Ollama, warms the model and opens the action
-daemon, brain and listener in separate terminals. Wait for `STANDBY MODE` before
+The launcher starts NATS and Ollama at the same time, opens the action daemon,
+brain and vision service as soon as the bus is up, warms the model, then opens the
+listener. It ends with a `[STARTUP TIMING]` report of each step. Wait for `STANDBY MODE` before
 saying “Hey Ultron”. The launcher defaults to Qwen3:8b. Use `.\start-ultron.cmd --menu` to select a model or `.\start-ultron.cmd --qwen25` for Qwen2.5:7b. The legacy Qwen3 launcher remains available as a compatibility wrapper.
 The Qwen3 profile uses thinking off, context 4096, temperature 0 and seed 42 without rewriting `.env`.
+
+### Fast startup (once)
+
+Docker Desktop can take minutes to boot. Install the native message bus once and
+the launcher no longer needs Docker for it (it starts in under a second):
+
+```powershell
+.\.venv\Scripts\python.exe .\run_ultron.py setup-nats
+```
+
+This downloads the official `nats-server` 2.10.29 for Windows (the same version as
+the Docker image), refuses it unless its SHA-256 matches, and puts it in
+`tools\nats\` (not committed). It runs with `config/nats-server.native.conf`,
+which listens on `127.0.0.1` only. Without it, the launcher falls back to Docker.
+
+If the timing report shows a long **Model warmup**, the time is Ollama loading the
+model from disk; the Ollama window shows the load. Keeping the Ollama models folder
+on an SSD (and out of real-time antivirus scanning) shortens it. Ultron keeps the
+model loaded for 10 minutes after its last use.
 
 Try “Open Calculator and File Explorer”, “What is my uptime?” or “What can you do?”
 See [local file workflows](local-file-workflow.md) for file requests and
@@ -78,12 +98,13 @@ npm run dev --prefix .\ultron-ui
 The frontend package supplies the NATS browser client. Open the URL printed by Vite
 (usually `http://localhost:5173`). See the [UI guide](../ultron-ui/README.md).
 
-To run components manually, start `docker compose up -d`, ensure Ollama is running,
+To run components manually, start NATS (`tools\nats\nats-server.exe -c config\nats-server.native.conf`
+or `docker compose up -d`), ensure Ollama is running,
 then run each in a separate terminal using `.\.venv\Scripts\python.exe`:
 `run_ultron.py action_daemon`, `run_ultron.py brain_agent`, `run_ultron.py voice_listener`.
 
 **Stop before restarting:** press Ctrl+C in each component terminal and wait for
-shutdown. Stop the UI separately. Docker and Ollama remain running.
+shutdown. Stop the UI separately. NATS (native or Docker) and Ollama remain running.
 `scripts/windows/stop-ultron-speech.cmd` stops spoken playback, not the whole assistant.
 
 ## Checks & diagnostics
