@@ -34,3 +34,10 @@ describe('gesture HUD', () => {
     assert.ok(!sameView(hudView(base), hudView({ ...base, handsVisible: 0 })))
   })
 })
+
+describe('gesture HUD air mouse', () => {
+  test('air-mouse actions read naturally', () => {
+    const view = hudView({ ...base, lastGesture: { hand: 'Air mouse', pose: 'double_click', at: 9.9 } })
+    assert.equal(view.pose, 'Air mouse · double click')
+  })
+})

@@ -30,6 +30,8 @@ from ultron.agents.presence_watcher import FRAME_HEIGHT, FRAME_WIDTH, PresenceTr
 from ultron.control.operations import heartbeat_loop
 from ultron.control.signals import SignalPublisher
 from ultron.gestures.activation import CONTROL_SUBJECT, STATE_SUBJECT
+from ultron.gestures import config as gesture_config
+from ultron.gestures.pointer import POINTER_SUBJECT, AirMouse, enabled_actions
 from ultron.gestures.tracker import GestureTracker
 
 # Most laptop webcams have a 16:9 sensor. Asking for 4:3 (640x480) makes the
@@ -104,7 +106,7 @@ class MediaPipeHands:
 
 class VisionService:
     def __init__(self, publisher, *, open_camera, make_hands, make_faces, presence_enabled=False,
-                 clock=time.monotonic, speak=None):
+                 clock=time.monotonic, speak=None, config=None, air_mouse=True):
         self.publisher = publisher
         self._open_camera = open_camera
         self._make_hands = make_hands
@@ -121,6 +123,10 @@ class VisionService:
         self.presence = PresenceTracker(rate_hz=PRESENCE_RATE_HZ)
         self.error = None
         self.aspect = None  # of the current camera picture, once a frame arrives
+        # Air mouse (G2): the dominant hand drives the pointer through the action daemon.
+        self.dominant = config.dominant_hand if config else 'Right'
+        actions = enabled_actions(config, gesture_config.LIVE_STAGES) if config else frozenset()
+        self.air_mouse = AirMouse(enabled=actions) if air_mouse and actions else None
         self.wake = asyncio.Event()
 
     # ---- control --------------------------------------------------------
@@ -137,12 +143,24 @@ class VisionService:
         if wanted != self.gesture:
             self.gesture = wanted
             self.error = None
+            if not wanted:
+                self._pointer_reset()
             if wanted:
                 self.tracker.reset(self.clock())
             logger.info('[VISION] Gesture mode %s (%s).', 'ON' if wanted else 'OFF', source)
             self._announce(source)
             self.wake.set()
         return self.state()
+
+    def _send_pointer(self, commands):
+        for command in commands:
+            self.publisher.emit_raw(POINTER_SUBJECT, command)
+
+    def _pointer_reset(self):
+        """Gesture mode ended: release any held button."""
+        if self.air_mouse is not None:
+            commands, _ = self.air_mouse.reset(self.clock())
+            self._send_pointer(commands)
 
     def _announce(self, source):
         self.publisher.emit_raw(STATE_SUBJECT, {**self.state(), 'source': source})
@@ -220,6 +238,10 @@ class VisionService:
         events = self.tracker.update(detections, now)
         # aspect (width / height) lets the UI keep hands in proportion.
         self.publisher.emit('hands', {'hands': self.tracker.snapshot(), 'aspect': self.aspect or 16 / 9})
+        if self.air_mouse is not None and self.gesture:
+            commands, pointer_events = self.air_mouse.update(self.tracker.hands.get(self.dominant), now)
+            self._send_pointer(commands)
+            events = events + pointer_events
         for event in events:
             if event['type'] in ('exit', 'idle'):
                 self.control('gesture_off', 'gesture' if event['type'] == 'exit' else 'idle')
@@ -268,6 +290,15 @@ class BusPublisher(SignalPublisher):
         return True
 
 
+def load_gesture_config():
+    """The gesture mappings, or None (air mouse off) if the file is broken."""
+    try:
+        return gesture_config.load()
+    except (OSError, ValueError) as error:
+        logger.error('[VISION] config/gestures.json is invalid, gesture actions are off: %s', error)
+        return None
+
+
 def gesture_resolution():
     """Requested camera size for hand tracking: ULTRON_GESTURE_RESOLUTION=WxH or 1280x720."""
     value = os.getenv('ULTRON_GESTURE_RESOLUTION', '').strip().lower()
@@ -311,6 +342,8 @@ async def main():
         make_faces=face_detector,
         presence_enabled=os.getenv('ULTRON_PRESENCE', '').strip() == '1',
         speak=speak,
+        config=load_gesture_config(),
+        air_mouse=os.getenv('ULTRON_AIR_MOUSE', '1').strip() != '0',
     )
 
     async def on_control(msg):

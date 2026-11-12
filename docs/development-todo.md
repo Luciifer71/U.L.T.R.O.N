@@ -35,7 +35,7 @@ not endless inference, unlimited retries or an assistant that cannot be stopped.
 - [x] G1: vision service (sole camera owner), hand tracking and pose recognition,
       gesture mode on by double clap / voice / Ops button, off by both palms / voice /
       button / 3 min idle; holographic hands and GESTURE MODE heading in the UI.
-- [ ] G2: air mouse: pointer, click, double-click, drag, scroll.
+- [x] G2: air mouse: pointer, click, double-click, drag, scroll (action daemon, gesture mode only, audited).
 - [ ] G3: windows: grab and move, throw to the monitor in any direction (real monitor
       layout), two-hand resize.
 - [ ] G4: clipboard grab/release, swipes, twist volume, palm pause, frame screenshot,

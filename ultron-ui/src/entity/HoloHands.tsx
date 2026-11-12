@@ -100,13 +100,15 @@ export default function HoloHands() {
     // Targeting reticle on the right index fingertip.
     const lock = uniform(0)
     const reticleFade = uniform(0)
+    const flash = uniform(0) // brief burst on each air-mouse click
     const c = uv().sub(0.5)
     const d = c.length().mul(2.0)
     const angle = atan(c.y, c.x).add(now.mul(float(0.6).add(lock.mul(2.4))))
     const ring = smoothstep(0.05, 0.0, abs(d.sub(0.72)))
     const ticks = step(0.94, abs(cos(angle.mul(2.0)))).mul(smoothstep(0.09, 0.0, abs(d.sub(0.9))))
     const dot = smoothstep(0.1, 0.0, d).mul(lock.mul(0.8).add(0.2))
-    const shape = ring.add(ticks.mul(0.9)).add(dot)
+    const burst = smoothstep(0.12, 0.0, abs(d.sub(float(0.72).add(flash.oneMinus().mul(0.25))))).mul(flash)
+    const shape = ring.add(ticks.mul(0.9)).add(dot).add(burst.mul(1.5))
     const reticleMaterial = new SpriteNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending })
     reticleMaterial.toneMapped = false
     reticleMaterial.colorNode = mix(stateColor(), WHITE_HOT, lock.mul(0.5).add(0.25)).mul(shape).mul(reticleFade).mul(1.8)
@@ -114,7 +116,7 @@ export default function HoloHands() {
     const reticle = new THREE.Sprite(reticleMaterial)
     reticle.visible = false
 
-    return { particles, reticle, jointValues, handValues, lock, reticleFade }
+    return { particles, reticle, jointValues, handValues, lock, reticleFade, flash }
   }, [])
 
   useEffect(() => () => {
@@ -173,6 +175,12 @@ export default function HoloHands() {
       scene.reticle.position.set(x, y, z + 0.02)
       scene.reticle.scale.setScalar(RETICLE_SIZE * (1 - lock * 0.35))
     }
+    // Clicks send a ring outward from the reticle; a drag keeps it locked tight.
+    const pointer = liveSignals.state.pointerAction
+    const age = pointer ? liveSignals.state.now - pointer.at : Infinity
+    const clicked = pointer && (pointer.action === 'click' || pointer.action === 'double_click')
+    scene.flash.value = clicked ? Math.exp(-age * 7) : 0
+    if (pointer?.action === 'drag_start') scene.lock.value = 1
     scene.reticle.visible = (scene.reticleFade.value as number) > 0.01
   })
 

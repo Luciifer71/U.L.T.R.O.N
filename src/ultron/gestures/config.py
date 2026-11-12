@@ -25,6 +25,8 @@ ACTIONS = frozenset({
 # Actions that change something important must always ask first.
 MUST_CONFIRM = frozenset({'system.lock'})
 STAGES = ('G1', 'G2', 'G3', 'G4', 'G5', 'G6')
+# Stages whose actions are built and switched on; later rows are recognised only.
+LIVE_STAGES = ('G1', 'G2')
 HANDS = ('dominant', 'other', 'both')
 
 
