@@ -112,10 +112,13 @@ Camera presence (Phase D, optional, off by default; see
 shockwave.
 
 Gesture mode (see [hand gestures](../docs/gestures.md)): your tracked hands appear in
-front of the entity as glowing holographic skeletons (`src/entity/HoloHands.tsx`), with
-a GESTURE MODE heading showing the latest pose (`src/ops/GestureHud.tsx`). The Ops
-panel has a Gesture mode button and shows the vision service's health. Hands cost 42
-points written per frame and nothing at all while gesture mode is off.
+front of the entity made of fine flowing particles in the entity's colour
+(`src/entity/HoloHands.tsx`, layout in `src/entity/handParticles.ts`): energy streams
+along each bone to the fingertips, and a targeting reticle on the right index
+fingertip tightens as you pinch. A GESTURE MODE heading shows the latest pose
+(`src/ops/GestureHud.tsx`). The Ops panel has a Gesture mode button and the vision
+service's health. Each frame sends only 42 joint positions to the GPU (5,200
+particles are placed there); nothing is drawn while gesture mode is off.
 
 The earlier dot-field layers (`src/scene/TSL*.tsx`, `EnergyEvents.tsx`) are unchanged.
 Open the UI with `?legacy=1` (for example `http://localhost:5173/?legacy=1`) to show

@@ -12,7 +12,7 @@ publish small, content-free display hints on NATS under `ultron.signal.<kind>`
 | `ultron.signal.model` | brain, around each model request | `phase` start/end, `seconds` | rapid neural cascades that build up while the model thinks |
 | `ultron.signal.vitals` | brain, every 2 s | `cpu`, `memory` 0..1 | core pressure: hotter core and shivering rings, only under real strain |
 | `ultron.signal.gaze` | vision service, presence mode (camera, off by default) | `present`, `x`, `y`, `near` | the entity notices you arrive with a shockwave ([camera presence](camera-presence.md)) |
-| `ultron.signal.hands` | vision service, gesture mode (~30/s) | `hands`: up to two of `side`, `pose`, `engaged`, `pinch`, `points` (21 landmarks) | glowing holographic hand skeletons in front of the entity ([hand gestures](gestures.md)) |
+| `ultron.signal.hands` | vision service, gesture mode (~30/s) | `hands`: up to two of `side`, `pose`, `engaged`, `pinch`, `points` (21 landmarks) | your hands as flowing particles in front of the entity, with a reticle on the right index fingertip ([hand gestures](gestures.md)) |
 | `ultron.signal.gesture` | vision service, gesture mode, when a pose changes | `type` pose, `hand`, `pose`, `previous` | the pose name in the GESTURE MODE heading |
 
 The UI also reads existing subjects: `ultron.status.speaking` (the core swells in a

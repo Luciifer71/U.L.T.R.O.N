@@ -229,3 +229,16 @@ describe('gesture mode', () => {
     assert.equal(parseHands([hand('Right'), hand('Left'), hand('Right')]).length, 2, 'at most two hands')
   })
 })
+
+describe('camera aspect', () => {
+  test('hands carry the camera aspect; junk is ignored and extremes clamped', () => {
+    const live = createLiveSignals(seeded())
+    assert.equal(live.state.handsAspect, 16 / 9)
+    live.handle('ultron.signal.hands', { hands: [], aspect: 4 / 3 }, 0)
+    assert.equal(live.state.handsAspect, 4 / 3)
+    live.handle('ultron.signal.hands', { hands: [], aspect: 'wide' }, 0.1)
+    assert.equal(live.state.handsAspect, 4 / 3)
+    live.handle('ultron.signal.hands', { hands: [], aspect: 99 }, 0.2)
+    assert.equal(live.state.handsAspect, 3)
+  })
+})

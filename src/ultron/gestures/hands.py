@@ -33,6 +33,7 @@ POSES = (
     'thumbs_up', 'thumbs_down', 'ok', 'rock', 'unknown',
 )
 
+# --- 2D fallback (image landmarks only) ---------------------------------
 # A finger counts as extended when its tip is this much farther from the wrist
 # than its middle joint (ratio), i.e. the finger is straightened out.
 EXTENDED_RATIO = 1.12
@@ -41,61 +42,136 @@ THUMB_EXTENDED = 0.62
 # Thumb tip to index tip, in palm sizes, for a pinch.
 PINCH_CLOSE = 0.33
 
+# --- 3D (MediaPipe world landmarks, metres) -------------------------------
+# Bend of a finger = angle at its middle joint + angle at its end joint, in
+# degrees (0 = dead straight). Measured on real recordings: straight fingers
+# 21-42, curled fingers 119-195. Between the two limits a finger is "unclear"
+# and any pose that depends on it is reported as unknown rather than guessed.
+FINGER_STRAIGHT_BELOW = 70.0
+FINGER_CURLED_ABOVE = 100.0
+# Thumb bend (MCP + IP joints): extended thumbs 32-43, tucked thumbs 86-111.
+THUMB_STRAIGHT_BELOW = 60.0
+THUMB_CURLED_ABOVE = 75.0
+# Thumb tip to index tip, in metres, for the tips to count as touching.
+PINCH_TOUCH_M = 0.025
+
 
 def distance(a, b):
     return math.dist(a[:3] if len(a) > 2 else (*a, 0.0), b[:3] if len(b) > 2 else (*b, 0.0))
 
 
+def _angle(u, v):
+    nu, nv = math.hypot(*u), math.hypot(*v)
+    if nu < 1e-9 or nv < 1e-9:
+        return 0.0
+    cos = sum(a * b for a, b in zip(u, v)) / (nu * nv)
+    return math.degrees(math.acos(max(-1.0, min(1.0, cos))))
+
+
+def _bend(points, joints):
+    """Sum of the angles at the last two joints of a finger (base, mid, end, tip)."""
+    a, b, c, d = (points[i] for i in joints)
+    seg = [tuple(q[k] - p[k] for k in range(3)) for p, q in ((a, b), (b, c), (c, d))]
+    return _angle(seg[0], seg[1]) + _angle(seg[1], seg[2])
+
+
+def _state(bend, straight_below, curled_above):
+    if bend < straight_below:
+        return True
+    if bend > curled_above:
+        return False
+    return None  # unclear: do not guess
+
+
 @dataclass(frozen=True)
 class HandFeatures:
-    palm_size: float
-    extended: dict  # finger name -> bool, including 'thumb'
-    pinch: float  # thumb-index tip distance in palm sizes
+    palm_size: float  # wrist to middle-finger base, in image units
+    extended: dict  # finger name -> True / False / None (unclear), including 'thumb'
+    pinch: float  # thumb-index tip distance in palm sizes (0 = touching)
     palm_center: tuple  # (x, y) in image units
     thumb_direction: float  # thumb tip above (+) / below (-) its base, in palm sizes
+    touching: bool = False  # thumb and index tips touching
+    three_d: bool = False  # measured from world landmarks
 
 
-def features(landmarks):
-    """Scale-independent description of one hand. Raises ValueError on bad input."""
+def _points(landmarks):
     if landmarks is None or len(landmarks) != 21:
         raise ValueError('a hand needs exactly 21 landmarks')
-    pts = [tuple(float(v) for v in p) for p in landmarks]
+    pts = []
+    for p in landmarks:
+        values = tuple(float(v) for v in p)
+        if len(values) == 2:
+            values = (*values, 0.0)
+        if len(values) < 3 or not all(math.isfinite(v) for v in values[:3]):
+            raise ValueError('landmarks must be finite numbers')
+        pts.append(values[:3])
+    return pts
+
+
+def features(landmarks, world=None):
+    """Scale-independent description of one hand. Raises ValueError on bad input.
+
+    ``landmarks`` are image landmarks (for position and thumb direction). When
+    ``world`` (MediaPipe's metric 3D landmarks) is given, fingers are judged by
+    real joint angles, which do not change with distance or hand rotation.
+    """
+    pts = _points(landmarks)
     palm = distance(pts[WRIST], pts[MIDDLE[0]])
     if not math.isfinite(palm) or palm < 1e-4:
         raise ValueError('degenerate hand (palm size zero)')
-    wrist = pts[WRIST]
-    extended = {}
-    for name, (base, middle, _, tip) in FINGERS.items():
-        extended[name] = distance(pts[tip], wrist) > distance(pts[middle], wrist) * EXTENDED_RATIO
-    extended['thumb'] = distance(pts[THUMB[3]], pts[INDEX[0]]) / palm > THUMB_EXTENDED
     centre_ids = (WRIST, INDEX[0], MIDDLE[0], RING[0], PINKY[0])
     cx = sum(pts[i][0] for i in centre_ids) / len(centre_ids)
     cy = sum(pts[i][1] for i in centre_ids) / len(centre_ids)
-    return HandFeatures(
-        palm_size=palm,
-        extended=extended,
-        pinch=distance(pts[THUMB[3]], pts[INDEX[3]]) / palm,
-        palm_center=(cx, cy),
-        thumb_direction=(pts[THUMB[0]][1] - pts[THUMB[3]][1]) / palm,
-    )
+    thumb_direction = (pts[THUMB[0]][1] - pts[THUMB[3]][1]) / palm
+
+    if world is not None:
+        w = _points(world)
+        palm_m = distance(w[WRIST], w[MIDDLE[0]])
+        if palm_m < 1e-4:
+            raise ValueError('degenerate hand (palm size zero)')
+        extended = {name: _state(_bend(w, joints), FINGER_STRAIGHT_BELOW, FINGER_CURLED_ABOVE)
+                    for name, joints in FINGERS.items()}
+        extended['thumb'] = _state(_bend(w, THUMB), THUMB_STRAIGHT_BELOW, THUMB_CURLED_ABOVE)
+        tips = distance(w[THUMB[3]], w[INDEX[3]])
+        return HandFeatures(palm_size=palm, extended=extended, pinch=tips / palm_m,
+                            palm_center=(cx, cy), thumb_direction=thumb_direction,
+                            touching=tips < PINCH_TOUCH_M, three_d=True)
+
+    wrist = pts[WRIST]
+    extended = {}
+    for name, (_base, middle, _, tip) in FINGERS.items():
+        extended[name] = distance(pts[tip], wrist) > distance(pts[middle], wrist) * EXTENDED_RATIO
+    extended['thumb'] = distance(pts[THUMB[3]], pts[INDEX[0]]) / palm > THUMB_EXTENDED
+    pinch = distance(pts[THUMB[3]], pts[INDEX[3]]) / palm
+    return HandFeatures(palm_size=palm, extended=extended, pinch=pinch, palm_center=(cx, cy),
+                        thumb_direction=thumb_direction, touching=pinch < PINCH_CLOSE)
 
 
 def classify(f):
-    """Name the static pose of a hand from its features (see ``POSES``)."""
+    """Name the static pose of a hand from its features (see ``POSES``).
+
+    Strict by design: a pose is named only when every finger it depends on is
+    clearly straight or clearly curled. Otherwise the answer is 'unknown'.
+    """
     e = f.extended
     fingers = (e['index'], e['middle'], e['ring'], e['pinky'])
+    others = (e['middle'], e['ring'], e['pinky'])
+    if f.touching and e['index'] is not None and not all(v is False for v in fingers):
+        # Thumb and index tips touching (and not just a fist): OK sign or pinch.
+        if all(v is True for v in others):
+            return 'ok'
+        return 'pinch'
+    if None in fingers:
+        return 'unknown'
     count = sum(fingers)
-    if f.pinch < PINCH_CLOSE:
-        # Thumb and index touching: OK sign if the other three are up, else a pinch.
-        return 'ok' if e['middle'] and e['ring'] and e['pinky'] else 'pinch'
-    if count == 4 and e['thumb']:
-        return 'open_palm'
+    if count == 4:
+        return 'open_palm' if e['thumb'] is True else 'unknown'
     if count == 0:
-        if e['thumb'] and f.thumb_direction > 0.45:
+        if e['thumb'] is True and f.thumb_direction > 0.45:
             return 'thumbs_up'
-        if e['thumb'] and f.thumb_direction < -0.45:
+        if e['thumb'] is True and f.thumb_direction < -0.45:
             return 'thumbs_down'
-        return 'fist'
+        return 'fist' if e['thumb'] is False else 'unknown'
     if fingers == (True, False, False, False):
         return 'point'
     if fingers == (True, True, False, False):
@@ -107,5 +183,5 @@ def classify(f):
     return 'unknown'
 
 
-def pose_of(landmarks):
-    return classify(features(landmarks))
+def pose_of(landmarks, world=None):
+    return classify(features(landmarks, world))

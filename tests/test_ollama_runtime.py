@@ -167,3 +167,34 @@ def test_chat_reports_model_activity_even_when_the_request_fails():
     except RuntimeError:
         pass
     assert events == ['start', 'end', 'start', 'end']
+
+
+@pytest.mark.parametrize('value,expected', [
+    ('', '10m'), ('2h', '2h'), ('30m', '30m'), ('forever', -1), ('-1', -1), ('0', 0), ('soon', '10m'), ('5 days', '10m'),
+])
+def test_model_keep_alive_is_configurable_and_validated(monkeypatch, value, expected):
+    from ultron.core.ollama_runtime import model_keep_alive
+    monkeypatch.setenv('ULTRON_MODEL_KEEP_ALIVE', value)
+    assert model_keep_alive() == expected
+
+
+@pytest.mark.parametrize('value,expected', [(None, None), ('off', False), ('on', True), ('default', None)])
+def test_mmap_setting_is_sent_identically_by_runtime_and_warmup(monkeypatch, value, expected):
+    from ultron.core.ollama_runtime import OllamaRuntimeConfig
+    if value is None:
+        monkeypatch.delenv('LLM_USE_MMAP', raising=False)
+    else:
+        monkeypatch.setenv('LLM_USE_MMAP', value)
+    config = OllamaRuntimeConfig.from_env()
+    assert config.use_mmap is expected
+    options = dict(config.load_options())
+    assert ('use_mmap' in options) == (expected is not None)
+    if expected is not None:
+        assert options['use_mmap'] is expected
+
+
+def test_invalid_mmap_setting_is_refused(monkeypatch):
+    from ultron.core.ollama_runtime import OllamaRuntimeConfig
+    monkeypatch.setenv('LLM_USE_MMAP', 'maybe')
+    with pytest.raises(ValueError, match='LLM_USE_MMAP'):
+        OllamaRuntimeConfig.from_env()

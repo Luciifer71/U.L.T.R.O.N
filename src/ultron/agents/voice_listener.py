@@ -61,7 +61,7 @@ POST_TTS_BUFFER_PADDING = 0.6
 MAX_AUDIO_BACKLOG_SEC = 2.0
 # Calibration needs this much unmuted time; muted frames (Ultron speaking)
 # restart the window, but the whole calibration never exceeds the maximum.
-CALIBRATION_CLEAN_SEC = 10.0
+CALIBRATION_CLEAN_SEC = 4.0
 CALIBRATION_MAX_SEC = 45.0
 AUDIO_MAILBOX_BLOCKS = max(1, int(MAX_AUDIO_BACKLOG_SEC * SAMPLE_RATE / AUDIO_BLOCK_SIZE))
 

@@ -131,6 +131,8 @@ export function createLiveSignals(random: () => number = Math.random) {
     gestureError: null as string | null,
     gestureErrorAt: -Infinity,
     hands: [] as TrackedHand[],
+    /** Camera picture width / height, so hands keep their shape on any screen. */
+    handsAspect: 16 / 9,
     handsAt: -Infinity,
     lastGesture: null as { hand: string; pose: string; at: number } | null,
     rings: Array.from({ length: RING_COUNT }, (): RingState => ({ status: 'idle', since: -Infinity })),
@@ -219,6 +221,9 @@ export function createLiveSignals(random: () => number = Math.random) {
       case 'ultron.signal.hands':
         state.hands = parseHands(data.hands)
         state.handsAt = now
+        if (typeof data.aspect === 'number' && Number.isFinite(data.aspect)) {
+          state.handsAspect = Math.min(3, Math.max(0.5, data.aspect))
+        }
         break
       case 'ultron.signal.gesture':
         if (data.type === 'pose' && typeof data.pose === 'string' && typeof data.hand === 'string') {
