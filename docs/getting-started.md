@@ -89,16 +89,12 @@ model loaded for 10 minutes after its last use; set `ULTRON_MODEL_KEEP_ALIVE`
 in `.env` (for example `2h` or `forever`) to pay the load only once per session.
 
 A load that takes minutes with `llama-server` reading only tens of MB/s while the
-disk shows 100% busy means the disk is delivering far less than it should. On some
-Windows PCs `LLM_USE_MMAP=off` in `.env` helps (Ollama then reads the file in large
-chunks); on others it is slower, so time a load both ways before keeping it. If both
-are slow, measure the drive itself and check its health and temperature, and set
-`ULTRON_MODEL_KEEP_ALIVE=forever` so the load happens only once per boot.
-Otherwise, if Defender is the busy process,
-Windows Defender may be scanning the 5 GB model file as Ollama reads it. Check Task Manager's
-Processes tab (sort by Disk) during the load: if "Antimalware Service Executable"
-is near the top, exclude the models folder (admin PowerShell):
-`Add-MpPreference -ExclusionPath "$env:USERPROFILE\.ollama\models"`.
+disk shows 100% busy usually means **too little free RAM**: Windows pages memory
+to disk while the model is staged. On a 16 GB laptop with ~75% of RAM in use the
+load took 3+ minutes; with memory freed it took 9 seconds. The launcher prints a
+`[MEMORY] WARNING` with the biggest programs when free RAM is below the model size
+plus 1.5 GB. Close browsers, chat apps and Docker Desktop (use `setup-nats`), and
+set `ULTRON_MODEL_KEEP_ALIVE=forever` so the load happens once per boot.
 
 Try “Open Calculator and File Explorer”, “What is my uptime?” or “What can you do?”
 See [local file workflows](local-file-workflow.md) for file requests and

@@ -237,3 +237,29 @@ def test_model_placement_is_silent_when_ollama_does_not_say():
     opener = MagicMock()
     opener.open.side_effect = OSError('down')
     assert launcher.model_placement('http://127.0.0.1:11434', 'qwen3:8b', opener) is None
+
+
+def _fake_psutil(available_gb, processes=()):
+    GB = 1024 ** 3
+    return SimpleNamespace(
+        virtual_memory=lambda: SimpleNamespace(available=available_gb * GB),
+        process_iter=lambda attrs: [SimpleNamespace(info={'name': n, 'memory_info': SimpleNamespace(rss=g * GB)})
+                                    for n, g in processes])
+
+
+def test_low_free_memory_warns_and_names_the_biggest_programs():
+    """Real case: 3+ minute loads with RAM ~75% full, 9 s once memory was freed."""
+    psutil = _fake_psutil(3.0, [('chrome.exe', 0.7), ('chrome.exe', 0.6), ('Claude.exe', 1.4), ('tiny.exe', 0.01)])
+    warning = launcher.memory_warning(5.2 * 1024 ** 3, psutil)
+    assert warning and '3.0 GB of RAM is free' in warning
+    assert 'Claude.exe 1.4 GB' in warning and 'chrome.exe 1.3 GB' in warning
+    assert warning.index('Claude.exe') < warning.index('chrome.exe'), 'largest first, same app summed'
+
+
+def test_enough_free_memory_stays_quiet():
+    assert launcher.memory_warning(5.2 * 1024 ** 3, _fake_psutil(9.0)) is None
+
+
+def test_memory_check_never_breaks_startup():
+    broken = SimpleNamespace(virtual_memory=lambda: 1 / 0)
+    assert launcher.memory_warning(None, broken) is None

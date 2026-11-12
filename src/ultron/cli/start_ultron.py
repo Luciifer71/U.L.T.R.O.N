@@ -190,6 +190,10 @@ def ensure_ollama(host, model):
     if model not in available:
         raise StartupError(f'Required model {model!r} is missing. Install it once with: ollama pull {model}')
     print(f'Ollama is reachable; model {model} is installed.', flush=True)
+    for entry in data['models']:
+        if entry.get('name', entry.get('model', '')) == model and isinstance(entry.get('size'), (int, float)):
+            return entry['size']
+    return None
 
 
 def running_components(root, processes):
@@ -271,10 +275,13 @@ def launch_all(selected, python, psutil, timings=None, launch=None):
         timings.run('NATS ready', ensure_nats, nats_url)
         existing = running_components(ROOT, psutil.process_iter(['cmdline', 'cwd']))
         open_components([c for c in selected if c not in AFTER_WARMUP], existing)
-        ollama.result()  # re-raises a missing model or unreachable Ollama
+        model_bytes = ollama.result()  # re-raises a missing model or unreachable Ollama
     if existing:
         print('Existing components detected; warmup skipped. Stop all components for a fresh model trial.', flush=True)
     else:
+        warning = memory_warning(model_bytes, psutil)
+        if warning:
+            print(warning, flush=True)
         timings.run('Model warmup', warm_ollama, host, model)
         placement = model_placement(host, model)
         if placement:
@@ -308,6 +315,39 @@ def model_placement(host, model, opener=None):
                        f'the rest runs on the CPU, which makes loading and every reply much slower. '
                        f'Close GPU-heavy apps, check "ollama ps", and see docs/getting-started.md.')
     return None
+
+
+GB = 1024 ** 3
+# Loading needs roughly the model's size in free RAM as a staging area before it
+# reaches the GPU, plus headroom. Below that, Windows pages to disk and a load
+# that takes ~10 s took 3+ minutes on a real 16 GB laptop.
+MEMORY_HEADROOM = 1.5 * GB
+
+
+def memory_warning(model_bytes, psutil, top=5):
+    """A warning (or None) when free RAM is too low to load the model quickly."""
+    needed = (model_bytes or 5.5 * GB) + MEMORY_HEADROOM
+    try:
+        available = psutil.virtual_memory().available
+    except Exception:
+        return None
+    if available >= needed:
+        return None
+    users = []
+    for process in psutil.process_iter(['name', 'memory_info']):
+        try:
+            info = process.info
+            users.append((info['memory_info'].rss, info['name'] or '?'))
+        except Exception:
+            continue
+    totals = {}
+    for rss, name in users:
+        totals[name] = totals.get(name, 0) + rss
+    biggest = sorted(totals.items(), key=lambda item: item[1], reverse=True)[:top]
+    listing = ', '.join(f'{name} {size / GB:.1f} GB' for name, size in biggest)
+    return (f'[MEMORY] WARNING: only {available / GB:.1f} GB of RAM is free; loading the model needs about '
+            f'{needed / GB:.1f} GB. Windows will page to disk and the load can take minutes instead of seconds. '
+            f'Close some programs first. Biggest users: {listing}.')
 
 
 @contextmanager
