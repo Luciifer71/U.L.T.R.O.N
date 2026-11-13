@@ -64,8 +64,11 @@ class MediaPipeHands:
             base_options=BaseOptions(model_asset_path=str(path)),
             running_mode=vision.RunningMode.VIDEO,
             num_hands=2,
-            min_hand_detection_confidence=0.6,
-            min_hand_presence_confidence=0.6,
+            # Slightly permissive so a hand that is briefly unclear (turned, half
+            # occluded by its own thumb) keeps being tracked instead of dropping
+            # out mid-pinch; the tracker's confirmation frames reject noise.
+            min_hand_detection_confidence=0.55,
+            min_hand_presence_confidence=0.5,
             min_tracking_confidence=0.5,
         )
         self._landmarker = vision.HandLandmarker.create_from_options(options)
@@ -106,7 +109,7 @@ class MediaPipeHands:
 
 class VisionService:
     def __init__(self, publisher, *, open_camera, make_hands, make_faces, presence_enabled=False,
-                 clock=time.monotonic, speak=None, config=None, air_mouse=True):
+                 clock=time.monotonic, speak=None, config=None, air_mouse=True, recorder=None):
         self.publisher = publisher
         self._open_camera = open_camera
         self._make_hands = make_hands
@@ -127,6 +130,7 @@ class VisionService:
         self.dominant = config.dominant_hand if config else 'Right'
         actions = enabled_actions(config, gesture_config.LIVE_STAGES) if config else frozenset()
         self.air_mouse = AirMouse(enabled=actions) if air_mouse and actions else None
+        self.recorder = recorder  # opt-in landmark recording (ULTRON_GESTURE_RECORD=1)
         self.wake = asyncio.Event()
 
     # ---- control --------------------------------------------------------
@@ -242,6 +246,9 @@ class VisionService:
             commands, pointer_events = self.air_mouse.update(self.tracker.hands.get(self.dominant), now)
             self._send_pointer(commands)
             events = events + pointer_events
+        if self.recorder is not None:
+            self.recorder.write(now, list(self.tracker.hands.values()),
+                                [e for e in events if e.get('type') in ('pose', 'pointer')])
         for event in events:
             if event['type'] in ('exit', 'idle'):
                 self.control('gesture_off', 'gesture' if event['type'] == 'exit' else 'idle')
@@ -288,6 +295,17 @@ class BusPublisher(SignalPublisher):
         self._pending.add(task)
         task.add_done_callback(self._pending.discard)
         return True
+
+
+def gesture_recorder():
+    """Opt-in landmark recorder (ULTRON_GESTURE_RECORD=1); never records images."""
+    if os.getenv('ULTRON_GESTURE_RECORD', '').strip() != '1':
+        return None
+    from ultron.gestures.recording import GestureRecorder
+    from ultron.paths import project_root
+    recorder = GestureRecorder(project_root() / 'runtime' / 'gesture-recordings')
+    logger.info('[VISION] Recording hand landmarks (no images) to %s', recorder.path)
+    return recorder
 
 
 def load_gesture_config():
@@ -343,6 +361,7 @@ async def main():
         presence_enabled=os.getenv('ULTRON_PRESENCE', '').strip() == '1',
         speak=speak,
         config=load_gesture_config(),
+        recorder=gesture_recorder(),
         air_mouse=os.getenv('ULTRON_AIR_MOUSE', '1').strip() != '0',
     )
 
@@ -367,6 +386,8 @@ async def main():
     finally:
         heartbeat.cancel()
         service.close()
+        if service.recorder is not None:
+            service.recorder.close()
         await nc.drain()
 
 

@@ -30,24 +30,49 @@ recognised and shown but **do nothing yet** (windows in G3, the rest in G4).
 
 ## Air mouse (G2)
 
-Use your **right** hand (the `dominant_hand`):
+Use your **right** hand (the `dominant_hand`). It works like a real mouse:
 
 | Do this | And |
 | --- | --- |
-| Point (index up) and move your hand | The pointer follows your index knuckle across the whole desktop, all monitors |
-| Touch thumb to index and let go quickly | Click. The pointer freezes for a moment so the click lands where you aimed |
-| Two quick taps | Double-click |
-| Pinch and hold, move, open | Drag and drop |
+| Move your hand (any relaxed hand) | The pointer follows your index knuckle across the whole desktop, all monitors |
+| Pinch (thumb tip to index tip) | Presses the button; open to release. A quick pinch is a click |
+| Two quick pinches | Double-click (the second lands on exactly the same spot) |
+| Pinch, move, open | Drag and drop |
+| Make a **fist** | Clutch: the pointer stays put while you reposition your hand |
 | Victory sign (index + middle) moved up / down | Scroll up / down |
 
-- The comfortable middle of the camera view covers the whole desktop, so you never
-  have to reach the edges of the picture.
-- Opening your hand, losing it from view or leaving gesture mode always releases
-  the mouse button; it can never stay pressed.
+How it stays accurate:
+
+- **Any hand pose:** the pinch is read from the thumb and index tips alone, so the
+  other fingers can be relaxed and the hand turned.
+- **Pinpoint presses:** the press lands where the pointer was just before the pinch
+  closed (closing a pinch nudges the hand), and the pointer stays locked until the
+  hand clearly moves; only then does it become a drag.
+- **Learns your hand:** the pinch thresholds follow how close your tips read when
+  touching, but never so loose that a fist (thumb over the index) can click.
+- **Ignores bad frames:** releasing needs three open readings in a row (two if the
+  hand is wide open) and a hand lost for under a quarter of a second keeps the
+  button down, so a camera glitch never splits a click into two or breaks a drag.
+- **Tested hard:** 18,000 simulated taps with jitter, dropped frames and corrupted
+  readings give one extra and three missed clicks (two had no readable frame at
+  all). The previous version registered 72.5% of the same taps.
+
+Safety:
+
+- Opening your hand, a fist, losing it from view or leaving gesture mode always
+  releases the mouse button; it can never stay pressed.
 - The action daemon moves the real mouse **only while gesture mode is on**, checks
   every command, and writes clicks, drags and scrolls to the audit log
   (`runtime/audit/control.jsonl`, source `air_mouse`).
 - Set `ULTRON_AIR_MOUSE=0` in `.env` to keep the hand display without the air mouse.
+
+### Recording a problem
+
+If a gesture is missed, set `ULTRON_GESTURE_RECORD=1` in `.env`, restart, repeat
+the gesture a few times, then send the file from `runtime/gesture-recordings/`.
+It holds only hand landmark coordinates and pose names, never an image, and stops
+by itself after ten minutes. `run_ultron.py gesture-replay <file>` replays it
+through the same air-mouse logic and prints every click and the pinch readings.
 
 ## Mapping table
 

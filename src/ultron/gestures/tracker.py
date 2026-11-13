@@ -41,7 +41,9 @@ class HandState:
     candidate: str = 'unknown'
     candidate_frames: int = 0
     engaged: bool = False
-    pinch: float = 1.0
+    near: bool = False  # close enough to the camera (pointer may use a hand cut by the frame edge)
+    pinch: float = 1.0  # thumb-index tips in palm sizes, from 3D landmarks when available
+    pinch_2d: float = 1.0  # the same in the camera picture (raw), an assist for the pinch detector
     last_seen: float = 0.0
     filter: LandmarkFilter = field(default_factory=LandmarkFilter)
 
@@ -90,7 +92,9 @@ class GestureTracker:
             except ValueError:
                 smooth = features(hand.landmarks)
             hand.pinch = smooth.pinch
-            hand.engaged = raw.palm_size > MIN_PALM_SIZE and _inside_frame(landmarks)
+            hand.near = raw.palm_size > MIN_PALM_SIZE
+            hand.pinch_2d = raw.pinch
+            hand.engaged = hand.near and _inside_frame(landmarks)
             observed = classify(smooth) if hand.engaged else 'unknown'
             events.extend(self._stabilise(hand, observed))
         for side in list(self.hands):
