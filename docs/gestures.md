@@ -24,10 +24,30 @@ index fingertip that tightens as you pinch.
 
 ## What works today
 
-Gesture mode, the hand display, pose recognition and **both palms to exit** work
-now. Every other row in the table below is recognised and shown but **does nothing
-yet**: its action goes live in the stage listed (air mouse in G2, windows in G3,
-the rest in G4).
+Gesture mode, the hand display, pose recognition, **both palms to exit** and the
+**air mouse** (stage G2) work now. Rows of a later stage in the table below are
+recognised and shown but **do nothing yet** (windows in G3, the rest in G4).
+
+## Air mouse (G2)
+
+Use your **right** hand (the `dominant_hand`):
+
+| Do this | And |
+| --- | --- |
+| Point (index up) and move your hand | The pointer follows your index knuckle across the whole desktop, all monitors |
+| Touch thumb to index and let go quickly | Click. The pointer freezes for a moment so the click lands where you aimed |
+| Two quick taps | Double-click |
+| Pinch and hold, move, open | Drag and drop |
+| Victory sign (index + middle) moved up / down | Scroll up / down |
+
+- The comfortable middle of the camera view covers the whole desktop, so you never
+  have to reach the edges of the picture.
+- Opening your hand, losing it from view or leaving gesture mode always releases
+  the mouse button; it can never stay pressed.
+- The action daemon moves the real mouse **only while gesture mode is on**, checks
+  every command, and writes clicks, drags and scrolls to the audit log
+  (`runtime/audit/control.jsonl`, source `air_mouse`).
+- Set `ULTRON_AIR_MOUSE=0` in `.env` to keep the hand display without the air mouse.
 
 ## Mapping table
 

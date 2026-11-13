@@ -54,6 +54,7 @@ const NOTICE_AFTER_ABSENCE = 4 // seconds away before arriving counts as "notice
 /** Inner rings first, alternating, so a three-step task lights three spread-out rings. */
 export const STEP_RING_ORDER = [0, 2, 4, 6, 1, 3, 5, 7].filter((ring) => ring < RING_COUNT)
 
+const POINTER_ACTIONS = new Set(['click', 'double_click', 'drag_start', 'drag_end', 'scroll'])
 const DONE_STATES = new Set(['verified', 'completed', 'dispatched'])
 const SKIPPED_STATES = new Set(['cancelled', 'not_started'])
 
@@ -135,6 +136,8 @@ export function createLiveSignals(random: () => number = Math.random) {
     handsAspect: 16 / 9,
     handsAt: -Infinity,
     lastGesture: null as { hand: string; pose: string; at: number } | null,
+    /** Last air-mouse action (click, double_click, drag_start, drag_end, scroll). */
+    pointerAction: null as { action: string; at: number } | null,
     rings: Array.from({ length: RING_COUNT }, (): RingState => ({ status: 'idle', since: -Infinity })),
     now: 0,
   }
@@ -228,6 +231,9 @@ export function createLiveSignals(random: () => number = Math.random) {
       case 'ultron.signal.gesture':
         if (data.type === 'pose' && typeof data.pose === 'string' && typeof data.hand === 'string') {
           state.lastGesture = { hand: data.hand, pose: data.pose, at: now }
+        } else if (data.type === 'pointer' && typeof data.action === 'string' && POINTER_ACTIONS.has(data.action)) {
+          state.pointerAction = { action: data.action, at: now }
+          state.lastGesture = { hand: 'Air mouse', pose: data.action, at: now }
         }
         break
       case 'ultron.vision.state': {

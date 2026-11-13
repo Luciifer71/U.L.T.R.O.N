@@ -242,3 +242,14 @@ describe('camera aspect', () => {
     assert.equal(live.state.handsAspect, 3)
   })
 })
+
+describe('air mouse', () => {
+  test('pointer actions are tracked and shown; unknown ones are ignored', () => {
+    const live = createLiveSignals(seeded())
+    live.handle('ultron.signal.gesture', { type: 'pointer', action: 'click' }, 1)
+    assert.deepEqual(live.state.pointerAction, { action: 'click', at: 1 })
+    assert.deepEqual(live.state.lastGesture, { hand: 'Air mouse', pose: 'click', at: 1 })
+    live.handle('ultron.signal.gesture', { type: 'pointer', action: 'format_disk' }, 2)
+    assert.equal(live.state.pointerAction?.action, 'click')
+  })
+})

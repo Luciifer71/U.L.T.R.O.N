@@ -15,6 +15,7 @@ import pygame
 from nats.aio.client import Client as NATS
 from ultron.control.reply_delivery import SpeechQueue
 from ultron.control.operations import OPS_PREFIX, heartbeat_loop
+from ultron.control.pointer_input import POINTER_SUBJECT, VISION_STATE_SUBJECT, PointerController
 
 NATS_URL = os.getenv("NATS_URL", "nats://127.0.0.1:4222")
 # The daemon speaks replies and handles the experimental gesture/clap events.
@@ -118,6 +119,8 @@ class ActionDaemon:
         self.voice: UltronVoiceEngine = None
         self.cooldowns: Dict[str, float] = {}
         self._shutdown_event = asyncio.Event()
+        # Air mouse (gesture stage G2): acts only while gesture mode is on.
+        self.pointer = PointerController.for_this_platform()
 
         # Each experimental event is accepted only on the subject its tool uses.
         self.event_handlers = {
@@ -206,6 +209,28 @@ class ActionDaemon:
                     "version": self.voice.state_version,
                 }).encode())
 
+        async def pointer_command(msg):
+            try:
+                self.pointer.handle(json.loads(msg.data.decode()))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass
+            except Exception as e:
+                self.pointer.release()  # never leave the button pressed
+                logger.error(f"[POINTER] {e}")
+
+        async def vision_state(msg):
+            try:
+                self.pointer.vision_state(json.loads(msg.data.decode()))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass
+
+        await self.nc.subscribe(POINTER_SUBJECT, cb=pointer_command)
+        await self.nc.subscribe(VISION_STATE_SUBJECT, cb=vision_state)
+        try:  # learn the current gesture state; off until the vision service says otherwise
+            reply = await self.nc.request("ultron.vision.control", b'{"command": "status", "source": "daemon"}', timeout=1.5)
+            self.pointer.vision_state(json.loads(reply.data.decode()))
+        except Exception:
+            pass
         await self.nc.subscribe("ultron.voice.cancel", cb=cancel_speech)
         await self.nc.subscribe("ultron.voice.state", cb=voice_state)
         for subject in SUBJECTS:
@@ -218,6 +243,7 @@ class ActionDaemon:
             await self._shutdown_event.wait()
         finally:
             heartbeat.cancel()
+            self.pointer.release()
             speech_worker.cancel()
             try:
                 await speech_worker
