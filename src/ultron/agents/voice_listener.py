@@ -2,6 +2,7 @@ import os
 import random
 
 import asyncio
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
@@ -310,6 +311,27 @@ class ResilientAudioStream:
 
 
 # =========================================================
+# SPEECH HOLD FOR CLAP DETECTION
+class SpeechHold:
+    """True while the user is talking (and briefly after), so sharp consonants
+    inside a sentence can never be taken for a double clap and interrupt the
+    command. Speech keeps the level above the silence threshold for most of
+    any second, even with short gaps between words; a double clap is only a
+    few loud blocks with quiet around them, so real claps are unaffected."""
+
+    def __init__(self, window_blocks=16, voiced_blocks=7, hold_seconds=1.0):
+        self.window = deque(maxlen=window_blocks)  # about one second of 64 ms blocks
+        self.voiced_blocks = voiced_blocks
+        self.hold_seconds = hold_seconds
+        self.last_speech = float("-inf")
+
+    def update(self, rms_energy, silence_threshold, now):
+        self.window.append(rms_energy > silence_threshold)
+        if sum(self.window) >= self.voiced_blocks:
+            self.last_speech = now
+        return now - self.last_speech < self.hold_seconds
+
+
 # AMBIENT NOISE CALIBRATION
 # =========================================================
 
@@ -515,6 +537,7 @@ async def main():
     voice_meter = VoiceLevelMeter()
     # A double clap toggles gesture mode (ULTRON_CLAP=0 turns this off).
     clap_detector = DoubleClapDetector() if os.getenv("ULTRON_CLAP", "1").strip() != "0" else None
+    speech_hold = SpeechHold()  # no clap detection while the user is talking
 
     async def refresh_speaking():
         try:
@@ -951,8 +974,9 @@ async def main():
                 status_str = "SESSION ACTIVE" if is_active_session else "STANDBY - AWAITING WAKE WORD"
                 print(f"\n[MIC ACTIVATED ({status_str}) - RMS: {rms_energy:.4f}]: Listening to sentence...")
             user_speaking = segmenter.recording and not acoustic_gate.is_speaking and not frame.muted
+            talking = speech_hold.update(rms_energy, silence_threshold, now)
             if clap_detector is not None and clap_detector.update(
-                    block, now, muted=acoustic_gate.is_speaking or frame.muted):
+                    block, now, muted=acoustic_gate.is_speaking or frame.muted or talking):
                 logging.info("[CLAP]: double clap; toggling gesture mode")
                 try:
                     await nc.publish(VISION_CONTROL, json.dumps({"command": "gesture_toggle", "source": "clap"}).encode())
