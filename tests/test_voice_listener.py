@@ -422,3 +422,62 @@ def test_pinned_input_mode_requires_explicit_opt_in(monkeypatch):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert module.MIC_DEVICE == 3
+
+
+def _speech_hold_run(listener, frames):
+    """frames: (rms, block) pairs at 64 ms per block. Returns the times a double clap triggered."""
+    from ultron.gestures.activation import DoubleClapDetector
+    hold, claps, triggers = listener.SpeechHold(), DoubleClapDetector(), []
+    for i, (rms, block) in enumerate(frames):
+        now = i * 0.064
+        talking = hold.update(rms, 0.02, now)
+        if claps.update(block, now, muted=talking):
+            triggers.append(now)
+    return triggers
+
+
+def _block(peak, rms):
+    """A 1024-sample block with the given peak and roughly the given RMS."""
+    block = [rms] * 1024
+    block[512] = peak
+    return block
+
+
+QUIET = (0.005, _block(0.01, 0.005))
+CLAP = (0.06, _block(0.9, 0.06))
+
+
+def _spoken_command():
+    """Words with short gaps between them; two sharp consonants after a gap ("Notion, Calculator")."""
+    voice = (0.08, _block(0.2, 0.08))
+    spike = (0.07, _block(0.95, 0.07))
+    gap = [QUIET] * 2
+    word = [voice] * 4
+    return [QUIET] * 20 + word + gap + word + gap + [spike] + gap + word + gap + [spike] + gap + word + [QUIET] * 20
+
+
+def test_sharp_consonants_in_a_command_never_count_as_a_double_clap(listener):
+    """Regression: plosives mid-command could toggle gesture mode and mute the mic."""
+    assert _speech_hold_run(listener, _spoken_command()) == []
+
+
+def test_without_the_speech_hold_those_consonants_would_have_toggled_gesture_mode():
+    from ultron.gestures.activation import DoubleClapDetector
+    detector = DoubleClapDetector()
+    assert sum(detector.update(block, i * 0.064) for i, (_, block) in enumerate(_spoken_command())) == 1
+
+
+def test_real_double_claps_still_work_with_speech_hold(listener):
+    frames = [QUIET] * 40 + [CLAP] + [QUIET] * 5 + [CLAP] + [QUIET] * 20
+    assert len(_speech_hold_run(listener, frames)) == 1
+
+
+def test_claps_right_after_talking_wait_a_moment(listener):
+    voice = (0.08, _block(0.2, 0.08))
+    hold = listener.SpeechHold()
+    for i in range(8):
+        assert hold.update(voice[0], 0.02, i * 0.064) is (i >= 6)
+    quiet = [hold.update(0.005, 0.02, 0.512 + i * 0.064) for i in range(40)]  # audio keeps arriving
+    assert quiet[0] is True, 'held briefly after speech'
+    assert quiet[-1] is False, 'claps work again about a second after you stop talking'
+    assert quiet.index(False) * 0.064 < 1.6
