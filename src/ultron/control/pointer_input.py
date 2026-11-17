@@ -24,7 +24,8 @@ VISION_STATE_SUBJECT = 'ultron.vision.state'
 OPS = frozenset({'move', 'click', 'down', 'up', 'scroll'})
 MAX_SCROLL = 1200  # ten notches per message at most
 MAX_COMMANDS_PER_SEC = 120  # well above the 30-60 the vision service sends
-AUDITED = {'click': 'pointer.click', 'down': 'pointer.drag', 'up': 'pointer.drag', 'scroll': 'pointer.scroll'}
+# down/up are the pinch pressing and releasing the button (click, double-click or drag).
+AUDITED = {'click': 'pointer.click', 'down': 'pointer.button', 'up': 'pointer.button', 'scroll': 'pointer.scroll'}
 
 
 def parse_command(payload):
